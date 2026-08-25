@@ -24,8 +24,43 @@ h1 {
   color: #38bdf8;
 }
 
+h2 {
+  margin-top: 32px;
+  margin-bottom: 12px;
+  color: #e2e8f0;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid #334155;
+  margin-bottom: 16px;
+}
+
 p {
   font-size: 1.25rem;
+}
+
+.muted {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  text-align: left;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.card .hostname {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #38bdf8;
+  margin-bottom: 6px;
 }
 
 .online {

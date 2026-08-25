@@ -6,3 +6,16 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model Computador {
+  id            Int      @id @default(autoincrement())
+  deviceId      String   @unique
+  hostname      String
+  usuario       String?
+  ip            String?
+  sistema       String?
+  status        String   @default("offline")
+  ultimaConexao DateTime?
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+}

@@ -1,5 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require("../prisma");
 
 async function check() {
   // Valida a conexao com o PostgreSQL via Prisma (lanca erro se falhar)

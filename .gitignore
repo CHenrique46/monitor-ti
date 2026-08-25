@@ -12,6 +12,9 @@ build/
 # Logs
 *.log
 
+# Configuração local do agente (cada máquina tem seu próprio deviceId)
+agent/data/
+
 # SO / editores
 .DS_Store
 Thumbs.db
