@@ -13,7 +13,14 @@ async function list() {
     ip: c.ip,
     sistema: c.sistema,
     status: c.status,
-    ultimaConexao: c.ultimaConexao
+    ultimaConexao: c.ultimaConexao,
+    cpuUso: c.cpuUso,
+    ramTotal: c.ramTotal,
+    ramUsada: c.ramUsada,
+    discoTotal: c.discoTotal,
+    discoLivre: c.discoLivre,
+    uptime: c.uptime,
+    ultimaMetrica: c.ultimaMetrica
   }));
 }
 

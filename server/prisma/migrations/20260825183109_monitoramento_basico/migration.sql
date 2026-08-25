@@ -1,0 +1,8 @@
+-- AlterTable
+ALTER TABLE "Computador" ADD COLUMN     "cpuUso" DOUBLE PRECISION,
+ADD COLUMN     "discoLivre" DOUBLE PRECISION,
+ADD COLUMN     "discoTotal" DOUBLE PRECISION,
+ADD COLUMN     "ramTotal" DOUBLE PRECISION,
+ADD COLUMN     "ramUsada" DOUBLE PRECISION,
+ADD COLUMN     "ultimaMetrica" TIMESTAMP(3),
+ADD COLUMN     "uptime" DOUBLE PRECISION;

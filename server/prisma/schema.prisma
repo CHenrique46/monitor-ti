@@ -18,4 +18,13 @@ model Computador {
   ultimaConexao DateTime?
   criadoEm      DateTime @default(now())
   atualizadoEm  DateTime @updatedAt
+
+  // Estado atual de monitoramento (unidades: bytes para RAM/disco, segundos para uptime)
+  cpuUso        Float?
+  ramTotal      Float?
+  ramUsada      Float?
+  discoTotal    Float?
+  discoLivre    Float?
+  uptime        Float?
+  ultimaMetrica DateTime?
 }

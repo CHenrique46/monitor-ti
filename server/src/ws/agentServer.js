@@ -15,6 +15,60 @@ function markOffline(deviceId) {
     });
 }
 
+function handleMetrics(d) {
+  return new Promise((resolve) => {
+    (async () => {
+      const existente = await prisma.computador.findUnique({
+        where: { deviceId: d.deviceId }
+      });
+      // Nao cria computador via metrics; apenas atualiza registro existente
+      if (!existente) return resolve(false);
+
+      const cpu = Number(d.cpu);
+      const ramTotal = Number(d.ramTotal);
+      const ramUsada = Number(d.ramUsada);
+      const uptime = Number(d.uptime);
+
+      if (![cpu, ramTotal, ramUsada, uptime].every(Number.isFinite)) {
+        return resolve(false);
+      }
+
+      const discoTotal =
+        d.discoTotal === null || d.discoTotal === undefined
+          ? null
+          : Number(d.discoTotal);
+      const discoLivre =
+        d.discoLivre === null || d.discoLivre === undefined
+          ? null
+          : Number(d.discoLivre);
+
+      if (
+        (discoTotal !== null && !Number.isFinite(discoTotal)) ||
+        (discoLivre !== null && !Number.isFinite(discoLivre))
+      ) {
+        return resolve(false);
+      }
+
+      await prisma.computador.update({
+        where: { deviceId: d.deviceId },
+        data: {
+          cpuUso: cpu,
+          ramTotal,
+          ramUsada,
+          discoTotal,
+          discoLivre,
+          uptime,
+          ultimaMetrica: new Date()
+        }
+      });
+      resolve(true);
+    })().catch((err) => {
+      console.error("[Monitor TI] erro no metrics:", err.message);
+      resolve(false);
+    });
+  });
+}
+
 function setupWebSocket(server) {
   const wss = new WebSocketServer({ server });
 
@@ -73,6 +127,8 @@ function setupWebSocket(server) {
         } catch (err) {
           console.error("[Monitor TI] erro no register:", err.message);
         }
+      } else if (msg && msg.type === "metrics" && msg.data && msg.data.deviceId) {
+        await handleMetrics(msg.data);
       }
     });
 
