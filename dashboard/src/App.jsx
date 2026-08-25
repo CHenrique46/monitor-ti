@@ -1,56 +1,66 @@
-import { useState, useEffect } from 'react'
-import { bytesToGB, formatUptime, formatPercent } from './format'
+import { useState, useEffect, useMemo } from 'react'
+import SummaryCards from './components/SummaryCards'
+import SearchBar from './components/SearchBar'
+import ComputerCard from './components/ComputerCard'
+import { computeAlerts, sortComputadores } from './utils/alerts'
 
 const API = 'http://127.0.0.1:4000'
 
-function sistemaLabel(s) {
-  if (s === 'win32' || s === 'Windows_NT') return 'Windows'
-  if (s === 'darwin') return 'macOS'
-  if (s === 'linux') return 'Linux'
-  return s || '-'
-}
-
-function fmtDate(d) {
-  if (!d) return '-'
-  return new Date(d).toLocaleString('pt-BR')
-}
-
-function MetricBar({ value }) {
-  const pct = Math.max(0, Math.min(100, value || 0))
-  return (
-    <div className="bar">
-      <div className="bar-fill" style={{ width: pct + '%' }}></div>
-    </div>
-  )
-}
-
-function App() {
-  const [serverOk, setServerOk] = useState(false)
+export default function App() {
+  const [serverOk, setServerOk] = useState(true)
   const [computadores, setComputadores] = useState([])
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
+    let active = true
+
     const load = async () => {
       try {
         const h = await fetch(`${API}/health`)
+        if (!active) return
         setServerOk(h.ok)
       } catch (e) {
-        setServerOk(false)
+        if (active) setServerOk(false)
       }
 
       try {
         const r = await fetch(`${API}/api/computadores`)
+        if (!active) return
         if (r.ok) {
           setComputadores(await r.json())
         }
-      } catch (e) {
-        // mantem lista anterior em caso de falha transitória
-      }
+        // se falhar (server offline), mantem os ultimos dados em tela
+      } catch (e) {}
     }
 
     load()
     const id = setInterval(load, 5000)
-    return () => clearInterval(id)
+    return () => {
+      active = false
+      clearInterval(id)
+    }
   }, [])
+
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    const list = term
+      ? computadores.filter(
+          (c) =>
+            (c.hostname || '').toLowerCase().includes(term) ||
+            (c.usuario || '').toLowerCase().includes(term) ||
+            (c.ip || '').toLowerCase().includes(term)
+        )
+      : computadores
+    return sortComputadores(list)
+  }, [computadores, search])
+
+  const summary = useMemo(() => {
+    const total = computadores.length
+    const online = computadores.filter((c) => c.status === 'online').length
+    const offline = computadores.filter((c) => c.status === 'offline').length
+    const alerts = computadores.filter((c) => computeAlerts(c).hasAlert).length
+    return { total, online, offline, alerts }
+  }, [computadores])
 
   return (
     <div className="container">
@@ -61,78 +71,33 @@ function App() {
           {serverOk ? 'Online' : 'Offline'}
         </span>
       </p>
+      {!serverOk && (
+        <p className="server-warn">Não foi possível atualizar os dados.</p>
+      )}
+
+      <SummaryCards summary={summary} />
+
+      <SearchBar value={search} onChange={setSearch} />
 
       <h2>Computadores</h2>
       <hr />
 
-      {computadores.length === 0 && (
-        <p className="muted">Nenhum computador conectado.</p>
+      {computadores.length === 0 ? (
+        <p className="empty">
+          Nenhum computador cadastrado.
+          <br />
+          Instale ou execute o Monitor TI Agent em uma máquina para ela aparecer
+          aqui.
+        </p>
+      ) : filtered.length === 0 ? (
+        <p className="muted">Nenhum computador corresponde à busca.</p>
+      ) : (
+        <div className="grid">
+          {filtered.map((c) => (
+            <ComputerCard key={c.id} c={c} />
+          ))}
+        </div>
       )}
-
-      {computadores.map((c) => {
-        const online = c.status === 'online'
-        const ramPct =
-          c.ramTotal && c.ramUsada
-            ? Math.round((c.ramUsada / c.ramTotal) * 100)
-            : null
-        const discoPct =
-          c.discoTotal && c.discoLivre != null
-            ? Math.round(((c.discoTotal - c.discoLivre) / c.discoTotal) * 100)
-            : null
-
-        return (
-          <div className="card" key={c.id}>
-            <div className="hostname">{c.hostname || '(sem nome)'}</div>
-            <div className="sub">
-              Usuário: {c.usuario || '-'} | IP: {c.ip || '-'} | Sistema:{' '}
-              {sistemaLabel(c.sistema)}
-            </div>
-            <div>
-              Status:{' '}
-              <span className={online ? 'online' : 'offline'}>
-                {online ? 'Online' : 'Offline'}
-              </span>
-            </div>
-
-            <div className="metric">
-              <div className="metric-label">CPU</div>
-              <div className="metric-value">{formatPercent(c.cpuUso)}</div>
-              <MetricBar value={c.cpuUso || 0} />
-            </div>
-
-            <div className="metric">
-              <div className="metric-label">RAM</div>
-              <div className="metric-value">
-                {bytesToGB(c.ramUsada)} / {bytesToGB(c.ramTotal)} (
-                {formatPercent(ramPct)})
-              </div>
-              <MetricBar value={ramPct || 0} />
-            </div>
-
-            <div className="metric">
-              <div className="metric-label">Disco C:</div>
-              <div className="metric-value">
-                {bytesToGB(c.discoLivre)} livres de {bytesToGB(c.discoTotal)} (
-                {formatPercent(discoPct)} usado)
-              </div>
-              <MetricBar value={discoPct || 0} />
-            </div>
-
-            <div className="metric">
-              <div className="metric-label">Ligado há</div>
-              <div className="metric-value">{formatUptime(c.uptime)}</div>
-            </div>
-
-            {!online && (
-              <div className="offline-info">
-                Últimos dados conhecidos. Última conexão: {fmtDate(c.ultimaConexao)}
-              </div>
-            )}
-          </div>
-        )
-      })}
     </div>
   )
 }
-
-export default App

@@ -12,20 +12,20 @@ body {
 }
 
 .container {
-  max-width: 600px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 80px 20px;
-  text-align: center;
+  padding: 40px 20px 80px;
+  text-align: left;
 }
 
 h1 {
-  font-size: 2.5rem;
-  margin-bottom: 24px;
+  font-size: 2.2rem;
+  margin-bottom: 8px;
   color: #38bdf8;
 }
 
 h2 {
-  margin-top: 32px;
+  margin-top: 28px;
   margin-bottom: 12px;
   color: #e2e8f0;
 }
@@ -37,7 +37,18 @@ hr {
 }
 
 p {
-  font-size: 1.25rem;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.online {
+  color: #22c55e;
+  font-weight: 700;
+}
+
+.offline {
+  color: #ef4444;
+  font-weight: 700;
 }
 
 .muted {
@@ -45,28 +56,154 @@ p {
   font-style: italic;
 }
 
-.card {
+.server-warn {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 0 4px;
+  display: inline-block;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 16px 0 8px;
+}
+
+.summary-item {
   background: #1e293b;
   border: 1px solid #334155;
   border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 12px;
-  text-align: left;
+  padding: 14px;
+  text-align: center;
+}
+
+.summary-num {
+  display: block;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.summary-num.online {
+  color: #22c55e;
+}
+
+.summary-num.offline {
+  color: #ef4444;
+}
+
+.summary-num.critical {
+  color: #f59e0b;
+}
+
+.summary-label {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.search {
+  margin: 16px 0;
+}
+
+.search input {
+  width: 100%;
+  max-width: 420px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #e2e8f0;
   font-size: 0.95rem;
+}
+
+.search input::placeholder {
+  color: #64748b;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-left: 4px solid #334155;
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 0.92rem;
   line-height: 1.5;
+}
+
+.card.online-card {
+  border-left-color: #22c55e;
+}
+
+.card.warn-card {
+  border-left-color: #f59e0b;
+}
+
+.card.critical-card {
+  border-left-color: #ef4444;
+}
+
+.card.offline-card {
+  border-left-color: #64748b;
+  opacity: 0.85;
 }
 
 .card .hostname {
   font-size: 1.2rem;
   font-weight: 700;
   color: #38bdf8;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .card .sub {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   color: #94a3b8;
   margin-bottom: 4px;
+}
+
+.alerts {
+  margin: 8px 0;
+}
+
+.alert {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+
+.alert.warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid #f59e0b;
+}
+
+.alert.critical {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid #ef4444;
+}
+
+.offline-info {
+  margin: 8px 0;
+  padding: 6px 8px;
+  background: rgba(100, 116, 139, 0.15);
+  border: 1px solid #475569;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: #cbd5e1;
 }
 
 .metric {
@@ -74,14 +211,14 @@ p {
 }
 
 .metric-label {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #94a3b8;
 }
 
 .metric-value {
-  font-size: 0.98rem;
+  font-size: 0.92rem;
   margin: 2px 0 4px;
 }
 
@@ -99,27 +236,26 @@ p {
   background: #38bdf8;
 }
 
-.offline-info {
-  margin-top: 12px;
-  padding: 8px 10px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid #ef4444;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  color: #fca5a5;
+.bar-fill.warn {
+  background: #f59e0b;
 }
 
-.online {
-  color: #22c55e;
-  font-weight: 700;
+.bar-fill.crit {
+  background: #ef4444;
 }
 
-.offline {
-  color: #ef4444;
-  font-weight: 700;
+.empty {
+  background: #1e293b;
+  border: 1px dashed #334155;
+  border-radius: 8px;
+  padding: 24px;
+  color: #94a3b8;
+  text-align: center;
+  line-height: 1.6;
 }
 
-.checking {
-  color: #facc15;
-  font-weight: 700;
+@media (max-width: 600px) {
+  .summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
