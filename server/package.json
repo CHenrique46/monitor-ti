@@ -1,0 +1,22 @@
+{
+  "name": "monitor-ti-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend central do Monitor TI (Node.js + Express + Prisma + PostgreSQL)",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "prisma": "^6.2.1"
+  }
+}

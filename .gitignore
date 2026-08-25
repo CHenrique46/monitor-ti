@@ -1,0 +1,19 @@
+# Dependências
+node_modules/
+
+# Arquivos de ambiente (NUNCA versionar .env com senhas)
+.env
+.env.local
+
+# Builds
+dist/
+build/
+
+# Logs
+*.log
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
