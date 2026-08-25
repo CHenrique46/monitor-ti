@@ -102,7 +102,7 @@ function setupWebSocket(server) {
       if (msg && msg.type === "register" && msg.data && msg.data.deviceId) {
         const d = msg.data;
         try {
-          await prisma.computador.upsert({
+          const computador = await prisma.computador.upsert({
             where: { deviceId: d.deviceId },
             create: {
               deviceId: d.deviceId,
@@ -114,6 +114,13 @@ function setupWebSocket(server) {
               processador: d.processador || null,
               cpusLogicas: d.cpusLogicas != null ? Number(d.cpusLogicas) : null,
               sistemaRelease: d.sistemaRelease || null,
+              fabricante: d.fabricante || null,
+              modeloEquipamento: d.modeloEquipamento || null,
+              placaMaeFabricante: d.placaMaeFabricante || null,
+              placaMaeModelo: d.placaMaeModelo || null,
+              biosFabricante: d.biosFabricante || null,
+              biosVersao: d.biosVersao || null,
+              numeroSerie: d.numeroSerie || null,
               status: "online",
               ultimaConexao: new Date()
             },
@@ -126,12 +133,43 @@ function setupWebSocket(server) {
               processador: d.processador || null,
               cpusLogicas: d.cpusLogicas != null ? Number(d.cpusLogicas) : null,
               sistemaRelease: d.sistemaRelease || null,
+              fabricante: d.fabricante || null,
+              modeloEquipamento: d.modeloEquipamento || null,
+              placaMaeFabricante: d.placaMaeFabricante || null,
+              placaMaeModelo: d.placaMaeModelo || null,
+              biosFabricante: d.biosFabricante || null,
+              biosVersao: d.biosVersao || null,
+              numeroSerie: d.numeroSerie || null,
               status: "online",
               ultimaConexao: new Date()
             }
           });
           ws.deviceId = d.deviceId;
           console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
+
+          // Sincroniza os discos fisicos (delete + insert) em transacao
+          try {
+            const discoData = Array.isArray(d.discosFisicos)
+              ? d.discosFisicos.filter(Boolean)
+              : [];
+            await prisma.$transaction(async (tx) => {
+              await tx.discoFisico.deleteMany({
+                where: { computadorId: computador.id }
+              });
+              if (discoData.length) {
+                await tx.discoFisico.createMany({
+                  data: discoData.map((x) => ({
+                    computadorId: computador.id,
+                    modelo: x.modelo || null,
+                    tamanho: x.tamanho != null ? Number(x.tamanho) : null,
+                    interface: x.interface || null
+                  }))
+                });
+              }
+            });
+          } catch (err) {
+            console.error("[Monitor TI] erro ao sincronizar discos:", err.message);
+          }
         } catch (err) {
           console.error("[Monitor TI] erro no register:", err.message);
         }

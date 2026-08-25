@@ -18,6 +18,13 @@ model Computador {
   processador    String?
   cpusLogicas    Int?
   sistemaRelease String?
+  fabricante          String?
+  modeloEquipamento   String?
+  placaMaeFabricante  String?
+  placaMaeModelo      String?
+  biosFabricante      String?
+  biosVersao          String?
+  numeroSerie         String?
   status        String   @default("offline")
   ultimaConexao DateTime?
   criadoEm      DateTime @default(now())
@@ -31,4 +38,19 @@ model Computador {
   discoLivre    Float?
   uptime        Float?
   ultimaMetrica DateTime?
+
+  discosFisicos DiscoFisico[]
+}
+
+model DiscoFisico {
+  id           Int       @id @default(autoincrement())
+  computadorId Int
+  modelo       String?
+  tamanho      Float?
+  interface    String?
+
+  computador   Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+
+  criadoEm     DateTime  @default(now())
+  atualizadoEm DateTime  @updatedAt
 }

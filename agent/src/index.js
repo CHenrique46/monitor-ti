@@ -4,11 +4,47 @@ const path = require("path");
 const crypto = require("crypto");
 const WebSocket = require("ws");
 const checkDiskSpace = require("check-disk-space").default;
+const { execFile } = require("child_process");
 
 const RECONNECT_DELAY = 5000;
 const METRICS_INTERVAL = 10000;
 const DISK_PATH = "C:";
 const DEFAULT_SERVER_URL = "ws://192.168.40.70:4000";
+const PS_TIMEOUT = 10000;
+
+function runPsJson(script) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script
+      ],
+      { timeout: PS_TIMEOUT, maxBuffer: 2 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) return reject(err);
+        try {
+          resolve(JSON.parse(stdout.trim()));
+        } catch (e) {
+          reject(new Error("resposta invalida do PowerShell"));
+        }
+      }
+    );
+  });
+}
+
+const GENERIC_SERIAL = ["to be filled by o.e.m.", "default string", "", " "];
+function normalizeSerial(raw) {
+  if (raw == null) return null;
+  const v = String(raw).trim();
+  if (!v) return null;
+  if (GENERIC_SERIAL.includes(v.toLowerCase())) return null;
+  return v;
+}
 
 // Diretório do executável/agente (funciona tanto em dev quanto empacotado)
 function isPackaged() {
@@ -119,6 +155,62 @@ function getMachineInfo(deviceId) {
   };
 }
 
+async function collectAdvancedInventory() {
+  logEvent("Coletando inventario de hardware...");
+  const start = Date.now();
+  const result = {};
+
+  try {
+    const cs = await runPsJson(
+      "Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model | ConvertTo-Json -Compress"
+    );
+    result.fabricante = cs.Manufacturer || null;
+    result.modeloEquipamento = cs.Model || null;
+  } catch (e) {
+    logEvent("Falha ao coletar ComputerSystem: " + e.message);
+  }
+
+  try {
+    const bb = await runPsJson(
+      "Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer,Product | ConvertTo-Json -Compress"
+    );
+    result.placaMaeFabricante = bb.Manufacturer || null;
+    result.placaMaeModelo = bb.Product || null;
+  } catch (e) {
+    logEvent("Falha ao coletar BaseBoard: " + e.message);
+  }
+
+  try {
+    const bios = await runPsJson(
+      "Get-CimInstance Win32_BIOS | Select-Object Manufacturer,SMBIOSBIOSVersion,SerialNumber | ConvertTo-Json -Compress"
+    );
+    result.biosFabricante = bios.Manufacturer || null;
+    result.biosVersao = bios.SMBIOSBIOSVersion || null;
+    result.numeroSerie = normalizeSerial(bios.SerialNumber);
+  } catch (e) {
+    logEvent("Falha ao coletar BIOS: " + e.message);
+  }
+
+  try {
+    let disks = await runPsJson(
+      "Get-CimInstance Win32_DiskDrive | Select-Object Model,Size,InterfaceType | ConvertTo-Json -Compress"
+    );
+    if (disks && !Array.isArray(disks)) disks = [disks];
+    result.discosFisicos = (disks || []).map((d) => ({
+      modelo: d.Model || null,
+      tamanho: d.Size != null ? Number(d.Size) : null,
+      interface: d.InterfaceType || null
+    }));
+  } catch (e) {
+    logEvent("Falha ao coletar DiskDrive: " + e.message);
+    result.discosFisicos = [];
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  logEvent("Inventario coletado em " + elapsed + "s.");
+  return result;
+}
+
 // CPU: delta dos tempos de os.cpus() entre duas amostras (nao usa loadavg)
 let cpuPrev = null;
 
@@ -227,4 +319,14 @@ const deviceId = getDeviceId();
 logEvent("deviceId: " + deviceId);
 const machine = getMachineInfo(deviceId);
 cpuUsagePercent(); // baseline da CPU
-connect(machine);
+
+// Inventario avancado: coletado uma unica vez na inicializacao (antes do register)
+collectAdvancedInventory()
+  .catch((err) => {
+    logEvent("Falha geral ao coletar inventario: " + err.message);
+    return {};
+  })
+  .then((adv) => {
+    Object.assign(machine, adv || {});
+    connect(machine);
+  });

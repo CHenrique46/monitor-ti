@@ -12,6 +12,13 @@ function mapComputador(c) {
     processador: c.processador,
     cpusLogicas: c.cpusLogicas,
     sistemaRelease: c.sistemaRelease,
+    fabricante: c.fabricante,
+    modeloEquipamento: c.modeloEquipamento,
+    placaMaeFabricante: c.placaMaeFabricante,
+    placaMaeModelo: c.placaMaeModelo,
+    biosFabricante: c.biosFabricante,
+    biosVersao: c.biosVersao,
+    numeroSerie: c.numeroSerie,
     status: c.status,
     ultimaConexao: c.ultimaConexao,
     cpuUso: c.cpuUso,
@@ -20,7 +27,13 @@ function mapComputador(c) {
     discoTotal: c.discoTotal,
     discoLivre: c.discoLivre,
     uptime: c.uptime,
-    ultimaMetrica: c.ultimaMetrica
+    ultimaMetrica: c.ultimaMetrica,
+    discosFisicos: (c.discosFisicos || []).map((d) => ({
+      id: d.id,
+      modelo: d.modelo,
+      tamanho: d.tamanho,
+      interface: d.interface
+    }))
   };
 }
 
@@ -34,7 +47,8 @@ async function list() {
 
 async function getById(id) {
   const c = await prisma.computador.findUnique({
-    where: { id: Number(id) }
+    where: { id: Number(id) },
+    include: { discosFisicos: true }
   });
   return c ? mapComputador(c) : null;
 }

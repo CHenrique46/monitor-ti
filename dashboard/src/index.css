@@ -326,6 +326,19 @@ p {
   margin-top: 6px;
 }
 
+.disco-item {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.disco-titulo {
+  font-weight: 700;
+  color: #38bdf8;
+  margin-bottom: 6px;
+}
+
 @media (max-width: 600px) {
   .summary {
     grid-template-columns: repeat(2, 1fr);

@@ -85,6 +85,7 @@ export default function ComputerDetails() {
   }
 
   const online = c && c.status === 'online'
+  const val = (x) => (x != null && x !== '' ? x : 'Não informado')
   const { alerts } = c ? computeAlerts(c) : { alerts: [] }
   const ramPct =
     c && c.ramTotal && c.ramUsada != null
@@ -195,6 +196,69 @@ export default function ComputerDetails() {
                 {c.cpusLogicas != null ? c.cpusLogicas : '-'}
               </span>
             </div>
+          </Section>
+
+          <Section title="Equipamento">
+            <div>
+              <span className="detail-key">Fabricante</span>
+              <span className="detail-val">{val(c.fabricante)}</span>
+            </div>
+            <div>
+              <span className="detail-key">Modelo</span>
+              <span className="detail-val">{val(c.modeloEquipamento)}</span>
+            </div>
+            <div>
+              <span className="detail-key">Número de série</span>
+              <span className="detail-val">{val(c.numeroSerie)}</span>
+            </div>
+          </Section>
+
+          <Section title="Placa-mãe">
+            <div>
+              <span className="detail-key">Fabricante</span>
+              <span className="detail-val">{val(c.placaMaeFabricante)}</span>
+            </div>
+            <div>
+              <span className="detail-key">Modelo</span>
+              <span className="detail-val">{val(c.placaMaeModelo)}</span>
+            </div>
+          </Section>
+
+          <Section title="BIOS">
+            <div>
+              <span className="detail-key">Fabricante</span>
+              <span className="detail-val">{val(c.biosFabricante)}</span>
+            </div>
+            <div>
+              <span className="detail-key">Versão</span>
+              <span className="detail-val">{val(c.biosVersao)}</span>
+            </div>
+          </Section>
+
+          <Section title="Armazenamento físico">
+            {c.discosFisicos && c.discosFisicos.length > 0 ? (
+              c.discosFisicos.map((d, i) => (
+                <div key={d.id || i} className="disco-item">
+                  <div className="disco-titulo">Disco {i + 1}</div>
+                  <div>
+                    <span className="detail-key">Modelo</span>
+                    <span className="detail-val">{val(d.modelo)}</span>
+                  </div>
+                  <div>
+                    <span className="detail-key">Capacidade</span>
+                    <span className="detail-val">
+                      {d.tamanho != null ? bytesToGB(d.tamanho) : "Não informado"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="detail-key">Interface</span>
+                    <span className="detail-val">{val(d.interface)}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="muted">Nenhum disco físico informado.</div>
+            )}
           </Section>
 
           <Section title="Memória">
