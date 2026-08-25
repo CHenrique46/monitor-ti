@@ -41,12 +41,18 @@ function getMachineInfo(deviceId) {
     if (ip) break;
   }
 
+  const cpus = os.cpus();
+
   return {
     deviceId,
     hostname: os.hostname(),
     usuario: os.userInfo().username,
     ip,
-    sistema: os.platform()
+    sistema: os.platform(),
+    arquitetura: os.arch(),
+    processador: cpus[0] ? cpus[0].model : null,
+    cpusLogicas: cpus.length,
+    sistemaRelease: os.release()
   };
 }
 

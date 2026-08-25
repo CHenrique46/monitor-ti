@@ -11,6 +11,7 @@ build/
 
 # Logs
 *.log
+**/logs/
 
 # Configuração local do agente (cada máquina tem seu próprio deviceId)
 agent/data/

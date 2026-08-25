@@ -13,7 +13,11 @@ model Computador {
   hostname      String
   usuario       String?
   ip            String?
-  sistema       String?
+  sistema        String?
+  arquitetura    String?
+  processador    String?
+  cpusLogicas    Int?
+  sistemaRelease String?
   status        String   @default("offline")
   ultimaConexao DateTime?
   criadoEm      DateTime @default(now())

@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { computeAlerts } from "../utils/alerts";
 import {
   bytesToGB,
@@ -97,6 +98,12 @@ export default function ComputerCard({ c }) {
       <div className="metric">
         <div className="metric-label">Ligado há</div>
         <div className="metric-value">{formatUptime(c.uptime)}</div>
+      </div>
+
+      <div className="card-actions">
+        <Link className="details-link" to={`/computadores/${c.id}`}>
+          Ver detalhes
+        </Link>
       </div>
     </div>
   );

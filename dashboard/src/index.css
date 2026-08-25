@@ -254,6 +254,78 @@ p {
   line-height: 1.6;
 }
 
+.card-actions {
+  margin-top: 12px;
+}
+
+.details-link {
+  display: inline-block;
+  color: #38bdf8;
+  text-decoration: none;
+  font-weight: 600;
+  padding: 8px 12px;
+  border: 1px solid #38bdf8;
+  border-radius: 6px;
+}
+
+.details-link:hover {
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.back-link {
+  display: inline-block;
+  color: #38bdf8;
+  text-decoration: none;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+.detail-section {
+  margin-top: 24px;
+}
+
+.detail-section h3 {
+  font-size: 1.1rem;
+  color: #38bdf8;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 6px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 24px;
+}
+
+.detail-key {
+  display: block;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detail-val {
+  display: block;
+  font-size: 0.98rem;
+  color: #e2e8f0;
+  word-break: break-word;
+}
+
+.metric-value-full {
+  margin-top: 8px;
+  font-size: 0.95rem;
+}
+
+.metric-value-full .bar {
+  margin-top: 6px;
+}
+
 @media (max-width: 600px) {
   .summary {
     grid-template-columns: repeat(2, 1fr);

@@ -110,6 +110,10 @@ function setupWebSocket(server) {
               usuario: d.usuario || null,
               ip: d.ip || null,
               sistema: d.sistema || null,
+              arquitetura: d.arquitetura || null,
+              processador: d.processador || null,
+              cpusLogicas: d.cpusLogicas != null ? Number(d.cpusLogicas) : null,
+              sistemaRelease: d.sistemaRelease || null,
               status: "online",
               ultimaConexao: new Date()
             },
@@ -118,6 +122,10 @@ function setupWebSocket(server) {
               usuario: d.usuario || null,
               ip: d.ip || null,
               sistema: d.sistema || null,
+              arquitetura: d.arquitetura || null,
+              processador: d.processador || null,
+              cpusLogicas: d.cpusLogicas != null ? Number(d.cpusLogicas) : null,
+              sistemaRelease: d.sistemaRelease || null,
               status: "online",
               ultimaConexao: new Date()
             }
