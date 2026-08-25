@@ -13,6 +13,12 @@ build/
 *.log
 **/logs/
 
+# Pacote de distribuicao gerado pelo build do agent (nao versionar)
+release/
+
+# Build do agent (bundle SEA)
+agent/dist/
+
 # Configuração local do agente (cada máquina tem seu próprio deviceId)
 agent/data/
 

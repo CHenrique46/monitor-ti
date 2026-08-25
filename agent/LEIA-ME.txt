@@ -1,0 +1,22 @@
+Monitor TI Agent (versão de teste / portátil)
+============================================
+
+NÃO é preciso instalar Node.js, npm, Git, banco de dados ou qualquer
+ambiente de desenvolvimento na máquina cliente. O arquivo
+MonitorTI-Agent.exe já contém tudo (Node 24 + Agent).
+
+COMO TESTAR NA SEGUNDA MÁQUINA:
+1. Copie esta pasta inteira para a segunda máquina (área de trabalho, C:\Temp, etc).
+2. (Opcional) Edite config.json se o endereço do servidor mudar:
+      "serverUrl": "ws://192.168.40.70:4000"
+3. Dê duplo clique em MonitorTI-Agent.exe.
+4. Aguarde alguns segundos (ele conecta sozinho e aparece no Dashboard).
+5. No Dashboard do TI, confirme que a nova máquina apareceu.
+
+OBSERVAÇÕES:
+- Cada máquina gera seu próprio identificador (deviceId) em:
+      C:\ProgramData\MonitorTI\agent-config.json
+- O log local fica em:
+      C:\ProgramData\MonitorTI\logs\agent.log
+- Para parar o Agent, feche a janela do MonitorTI-Agent.exe (ou encerre o processo).
+- Nada é instalado na segunda máquina.

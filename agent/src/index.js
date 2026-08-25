@@ -5,12 +5,71 @@ const crypto = require("crypto");
 const WebSocket = require("ws");
 const checkDiskSpace = require("check-disk-space").default;
 
-const CONFIG_DIR = path.join(__dirname, "..", "data");
-const CONFIG_FILE = path.join(CONFIG_DIR, "agent-config.json");
-const SERVER_URL = "ws://127.0.0.1:4000";
 const RECONNECT_DELAY = 5000;
 const METRICS_INTERVAL = 10000;
 const DISK_PATH = "C:";
+const DEFAULT_SERVER_URL = "ws://192.168.40.70:4000";
+
+// Diretório do executável/agente (funciona tanto em dev quanto empacotado)
+function isPackaged() {
+  if (process.pkg) return true;
+  if (process.sea) return true;
+  // SEA: o proprio executavel roda o script (nao e node.exe chamando arquivo)
+  const exe = path.basename(process.execPath).toLowerCase();
+  if (exe !== "node.exe") return true;
+  return false;
+}
+
+function getAppDir() {
+  if (isPackaged()) return path.dirname(process.execPath);
+  return path.join(__dirname, "..");
+}
+
+// Local do deviceId e logs:
+//  - versão empacotada (portátil): %ProgramData%\MonitorTI (fora da pasta do exe)
+//  - dev: agent/data (compatível com o que já existe)
+function getConfigDir() {
+  if (isPackaged()) {
+    const base = process.env.ProgramData || "C:\\ProgramData";
+    return path.join(base, "MonitorTI");
+  }
+  return path.join(__dirname, "..", "data");
+}
+
+const CONFIG_DIR = getConfigDir();
+const CONFIG_FILE = path.join(CONFIG_DIR, "agent-config.json");
+const LOG_FILE = isPackaged()
+  ? path.join(CONFIG_DIR, "logs", "agent.log")
+  : null;
+
+function logEvent(message) {
+  const line = `[${new Date().toISOString()}] ${message}`;
+  console.log(line);
+  if (LOG_FILE) {
+    try {
+      if (!fs.existsSync(path.dirname(LOG_FILE)))
+        fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+      fs.appendFileSync(LOG_FILE, line + "\n");
+    } catch (e) {
+      // falha de log não deve interromper o agente
+    }
+  }
+}
+
+function getServerUrl() {
+  const cfgPath = path.join(getAppDir(), "config.json");
+  try {
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    if (cfg && typeof cfg.serverUrl === "string" && cfg.serverUrl.trim()) {
+      return cfg.serverUrl.trim();
+    }
+  } catch (e) {
+    // arquivo ausente/corrompido: usa o default
+  }
+  return DEFAULT_SERVER_URL;
+}
+
+const SERVER_URL = getServerUrl();
 
 function getDeviceId() {
   try {
@@ -23,8 +82,12 @@ function getDeviceId() {
   }
 
   const deviceId = crypto.randomUUID();
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ deviceId }, null, 2));
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify({ deviceId }, null, 2));
+  } catch (e) {
+    logEvent("ERRO ao salvar deviceId: " + e.message);
+  }
   return deviceId;
 }
 
@@ -93,7 +156,7 @@ async function collectMetrics(deviceId) {
     discoTotal = disk.size;
     discoLivre = disk.free;
   } catch (e) {
-    // mantem null se falhar
+    logEvent("ERRO ao coletar disco: " + e.message);
   }
 
   return {
@@ -130,10 +193,11 @@ function startMetrics(ws, machine) {
 }
 
 function connect(machine) {
+  logEvent(`Tentando conectar em ${SERVER_URL}`);
   const ws = new WebSocket(SERVER_URL);
 
   ws.on("open", () => {
-    console.log("Conectado ao Monitor TI Server.");
+    logEvent("Conectado ao Monitor TI Server.");
     ws.send(JSON.stringify({ type: "register", data: machine }));
     startMetrics(ws, machine);
   });
@@ -144,14 +208,23 @@ function connect(machine) {
 
   ws.on("close", () => {
     stopMetrics();
-    console.log("Servidor indisponível. Tentando reconectar...");
+    logEvent("Desconectado do servidor.");
+    logEvent(`Tentando reconectar em ${RECONNECT_DELAY / 1000}s...`);
     setTimeout(() => connect(machine), RECONNECT_DELAY);
   });
 }
 
-console.log("Monitor TI Agent iniciado.");
+function shutdown() {
+  logEvent("Agent encerrado.");
+  process.exit(0);
+}
 
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+logEvent("Monitor TI Agent iniciado.");
 const deviceId = getDeviceId();
+logEvent("deviceId: " + deviceId);
 const machine = getMachineInfo(deviceId);
 cpuUsagePercent(); // baseline da CPU
 connect(machine);
