@@ -544,8 +544,9 @@ function connect(machine) {
     }
   });
 
-  ws.on("error", () => {
-    // erros de conexao sao tratados no 'close'
+  ws.on("error", (err) => {
+    // erros de conexao sao tratados no 'close'; log curto para diagnostico
+    logEvent("Erro WebSocket: " + ((err && (err.code || err.message)) || "desconhecido"));
   });
 
   ws.on("close", () => {

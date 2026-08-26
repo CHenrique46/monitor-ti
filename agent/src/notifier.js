@@ -27,6 +27,105 @@ function createNotifier(opts) {
   const inProgress = new Map();
   const queue = [];
   const queueSet = new Set();
+  const NOTIFIER_RETRY_INITIAL_MS = 15000;
+  const NOTIFIER_RETRY_MAX_MS = 5 * 60 * 1000;
+
+  let expectedReleaseMeta = null;
+  let expectedReleaseMetaPromise = null;
+  let ensureRunning = false;
+  let retryTimer = null;
+  let retryDelayMs = NOTIFIER_RETRY_INITIAL_MS;
+
+  function sha256File(p) {
+    const h = crypto.createHash("sha256");
+    h.update(fs.readFileSync(p));
+    return h.digest("hex");
+  }
+
+  function baseHttpUrl() {
+    const httpBase = (getServerHttpBase && getServerHttpBase()) || "";
+    return httpBase.replace(/^ws/i, "http").replace(/^wss/i, "https");
+  }
+
+  function expectedNotifierSha() {
+    return expectedReleaseMeta && expectedReleaseMeta.notifierSha256
+      ? String(expectedReleaseMeta.notifierSha256)
+      : null;
+  }
+
+  function resetRetryBackoff() {
+    retryDelayMs = NOTIFIER_RETRY_INITIAL_MS;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  }
+
+  function scheduleRetry(reason) {
+    if (retryTimer) return;
+    const delay = retryDelayMs;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      ensureNotifierPresent();
+    }, delay);
+    if (typeof retryTimer.unref === "function") retryTimer.unref();
+    retryDelayMs = Math.min(retryDelayMs * 2, NOTIFIER_RETRY_MAX_MS);
+    logEvent("aviso: rechecando Notifier em " + Math.round(delay / 1000) + "s: " + reason);
+  }
+
+  async function loadExpectedReleaseMeta() {
+    if (expectedReleaseMeta) return expectedReleaseMeta;
+    if (expectedReleaseMetaPromise) return expectedReleaseMetaPromise;
+
+    expectedReleaseMetaPromise = (async () => {
+      const base = baseHttpUrl();
+      if (!base) throw new Error("URL do servidor indisponivel");
+      const res = await fetch(base + "/api/agent/releases/" + version);
+      if (!res.ok) throw new Error("metadata HTTP " + res.status);
+      const meta = await res.json();
+      if (!meta || meta.version !== version) {
+        throw new Error(
+          "versao do pacote (" + (meta && meta.version) + ") diverge da do Agent (" + version + ")"
+        );
+      }
+      const files = Array.isArray(meta.manifest && meta.manifest.files) ? meta.manifest.files : [];
+      const notifierFile = files.find((x) => x.name === "MonitorTI-Notifier.exe");
+      if (!notifierFile) throw new Error("Notifier ausente no manifest");
+      const agentFile = files.find((x) => x.name === "MonitorTI-Agent.exe");
+      if (!meta.packageName) throw new Error("release sem pacote");
+      if (!meta.packageSha256) throw new Error("release sem SHA do pacote");
+      if (meta.packageSize == null) throw new Error("release sem tamanho do pacote");
+      expectedReleaseMeta = {
+        version: meta.version,
+        packageName: meta.packageName,
+        packageSha256: meta.packageSha256,
+        packageSize: meta.packageSize,
+        manifest: meta.manifest,
+        agentSha256: agentFile ? agentFile.sha256 : null,
+        agentSize: agentFile ? agentFile.size : null,
+        notifierSha256: notifierFile.sha256,
+        notifierSize: notifierFile.size,
+      };
+      return expectedReleaseMeta;
+    })();
+
+    try {
+      return await expectedReleaseMetaPromise;
+    } finally {
+      expectedReleaseMetaPromise = null;
+    }
+  }
+
+  function validateInstalledNotifier() {
+    const existing = findNotifierExe();
+    const expected = expectedNotifierSha();
+    if (!existing || !expected) return false;
+    try {
+      return sha256File(existing).toLowerCase() === expected.toLowerCase();
+    } catch (e) {
+      return false;
+    }
+  }
 
   function loadCache() {
     try {
@@ -73,7 +172,7 @@ function createNotifier(opts) {
 
   // Indica se o Notifier está presente e pode exibir avisos.
   function isNotifierReady() {
-    return !!findNotifierExe();
+    return validateInstalledNotifier();
   }
 
   function writePayload(d, tmpFile) {
@@ -138,6 +237,16 @@ function createNotifier(opts) {
     writePayload(d, tmpFile);
 
     const exe = findNotifierExe();
+    if (!isNotifierReady()) {
+      logEvent("MonitorTI-Notifier.exe nao validado; aviso nao exibido: " + id);
+      if (!exe) {
+        try { fs.unlinkSync(tmpFile); } catch (e) {}
+      }
+      queueSet.delete(id);
+      ensureNotifierPresent();
+      return;
+    }
+
     if (!exe) {
       logEvent("MonitorTI-Notifier.exe nao encontrado; aviso nao exibido: " + id);
       try { fs.unlinkSync(tmpFile); } catch (e) {}
@@ -253,38 +362,51 @@ function createNotifier(opts) {
   }
 
   // Após a transição 1.0.1 -> 1.1.0 (via fluxo legado de arquivo único), o
-  // novo Agent pode não ter o Notifier. Ele se obtém do pacote no servidor.
-  function ensureNotifierPresent() {
+  // novo Agent pode encontrar um Notifier stale; ele só é considerado pronto
+  // quando o SHA local confere com a release da própria versão do Agent.
+  async function ensureNotifierPresent() {
+    if (ensureRunning) return;
+    ensureRunning = true;
     try {
+      const meta = await loadExpectedReleaseMeta();
       const existing = findNotifierExe();
       if (existing) {
-        logEvent("Notifier presente: " + existing);
-        return;
+        const localSha = sha256File(existing);
+        if (localSha.toLowerCase() === String(meta.notifierSha256).toLowerCase()) {
+          logEvent("Notifier presente e validado: " + existing);
+          resetRetryBackoff();
+          if (typeof onNotifierReady === "function") onNotifierReady();
+          return;
+        }
+        logEvent("Notifier stale/sha invalido; tentando substituir...");
+      } else {
+        logEvent("Notifier ausente; tentando obter do pacote no servidor...");
       }
-      logEvent("Notifier ausente; tentando obter do pacote no servidor...");
-      fetchNotifier().catch((e) => logEvent("aviso: falha ao obter Notifier: " + e.message));
+      await fetchNotifier(meta);
+      resetRetryBackoff();
+      if (typeof onNotifierReady === "function") onNotifierReady();
     } catch (e) {
-      logEvent("aviso: ensureNotifierPresent: " + e.message);
+      logEvent("aviso: falha ao obter Notifier: " + e.message);
+      scheduleRetry(e.message);
+    } finally {
+      ensureRunning = false;
     }
   }
 
-  async function fetchNotifier() {
-    const httpBase = (getServerHttpBase && getServerHttpBase()) || "";
-    const base = httpBase.replace(/^ws/i, "http").replace(/^wss/i, "https");
+  async function fetchNotifier(meta) {
+    const releaseMeta = meta || (await loadExpectedReleaseMeta());
+    const base = baseHttpUrl();
     if (!base) throw new Error("URL do servidor indisponivel");
-    const metaRes = await fetch(base + "/api/agent/releases/latest");
-    if (!metaRes.ok) throw new Error("metadata HTTP " + metaRes.status);
-    const meta = await metaRes.json();
-    if (!meta || meta.version !== version) {
-      throw new Error("versao do pacote (" + (meta && meta.version) + ") diverge da do Agent (" + version + ")");
-    }
-    if (!meta.packageName) throw new Error("release sem pacote");
     const zipRes = await fetch(base + "/api/agent/releases/" + version + "/package");
     if (!zipRes.ok) throw new Error("pacote HTTP " + zipRes.status);
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mti-nf-"));
     const zipPath = path.join(tmpDir, "pkg.zip");
     const buf = Buffer.from(await zipRes.arrayBuffer());
     fs.writeFileSync(zipPath, buf);
+    const zipSha = crypto.createHash("sha256").update(buf).digest("hex");
+    if (zipSha.toLowerCase() !== String(releaseMeta.packageSha256).toLowerCase()) {
+      throw new Error("SHA-256 do pacote nao confere");
+    }
     const outDir = path.join(tmpDir, "out");
     fs.mkdirSync(outDir, { recursive: true });
     await extractZip(zipPath, outDir);
@@ -301,9 +423,12 @@ function createNotifier(opts) {
     }
     const dest = path.join(getAppDir(), "MonitorTI-Notifier.exe");
     fs.copyFileSync(notifPath, dest);
+    const installedSha = sha256File(dest);
+    if (installedSha.toLowerCase() !== String(f.sha256).toLowerCase()) {
+      throw new Error("SHA do Notifier instalado nao confere");
+    }
     logEvent("Notifier obtido e validado: " + dest);
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
-    if (typeof onNotifierReady === "function") onNotifierReady();
   }
 
   function extractZip(zipPath, destDir) {
