@@ -9,6 +9,7 @@ import {
   fmtDate
 } from '../utils/formatters'
 import { API_URL } from '../config'
+import MetricChart from './MetricChart'
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
@@ -34,6 +35,9 @@ export default function ComputerDetails() {
   const [serverOk, setServerOk] = useState(true)
   const [c, setC] = useState(null)
   const [notFound, setNotFound] = useState(false)
+  const [periodo, setPeriodo] = useState("24h")
+  const [metricas, setMetricas] = useState(null)
+  const [alertas, setAlertas] = useState([])
 
   useEffect(() => {
     let active = true
@@ -64,6 +68,40 @@ export default function ComputerDetails() {
     return () => {
       active = false
       clearInterval(interval)
+    }
+  }, [id])
+
+  useEffect(() => {
+    let active = true
+    const loadM = async () => {
+      try {
+        const r = await fetch(
+          `${API_URL}/api/computadores/${id}/metricas?periodo=${periodo}`
+        )
+        if (active && r.ok) setMetricas(await r.json())
+      } catch (e) {}
+    }
+    loadM()
+    const t = setInterval(loadM, 60000)
+    return () => {
+      active = false
+      clearInterval(t)
+    }
+  }, [id, periodo])
+
+  useEffect(() => {
+    let active = true
+    const loadA = async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/computadores/${id}/alertas`)
+        if (active && r.ok) setAlertas(await r.json())
+      } catch (e) {}
+    }
+    loadA()
+    const t = setInterval(loadA, 10000)
+    return () => {
+      active = false
+      clearInterval(t)
     }
   }, [id])
 
@@ -296,6 +334,64 @@ export default function ComputerDetails() {
               {formatPercent(c.cpuUso)}
               <MetricBar value={c.cpuUso || 0} />
             </div>
+          </Section>
+
+          <Section title="Histórico">
+            <div className="period-selector">
+              {["24h", "7d", "30d"].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={periodo === p ? "period-btn active" : "period-btn"}
+                  onClick={() => setPeriodo(p)}
+                >
+                  {p === "24h" ? "24 horas" : p === "7d" ? "7 dias" : "30 dias"}
+                </button>
+              ))}
+            </div>
+            <MetricChart title="CPU %" data={metricas} dataKey="cpuUso" color="#38bdf8" />
+            <MetricChart title="RAM %" data={metricas} dataKey="ramUsoPct" color="#a78bfa" />
+            <MetricChart title="Disco %" data={metricas} dataKey="discoUsoPct" color="#f59e0b" />
+          </Section>
+
+          <Section title="Histórico de alertas">
+            {alertas.length === 0 ? (
+              <div className="muted">Nenhum alerta registrado para este equipamento.</div>
+            ) : (
+              <div className="alert-history">
+                {alertas.map((a) => {
+                  const fim = a.resolvidoEm ? new Date(a.resolvidoEm) : new Date()
+                  const ms = fim - new Date(a.iniciadoEm)
+                  const min = Math.max(0, Math.floor(ms / 60000))
+                  const dur =
+                    min < 60
+                      ? `${min} min`
+                      : min < 1440
+                      ? `${Math.floor(min / 60)}h ${min % 60}min`
+                      : `${Math.floor(min / 1440)}d ${Math.floor((min % 1440) / 60)}h`
+                  return (
+                    <div
+                      key={a.id}
+                      className={`alert-history-item ${a.ativo ? "ativo" : "resolvido"}`}
+                    >
+                      <div className="ah-top">
+                        <span className={`alert ${a.nivel}`}>{a.mensagem}</span>
+                        {a.ativo ? (
+                          <span className="ah-badge">ATIVO</span>
+                        ) : (
+                          <span className="ah-badge resolvido">RESOLVIDO</span>
+                        )}
+                      </div>
+                      <div className="ah-meta">
+                        Início: {fmtDate(a.iniciadoEm)}
+                        {a.resolvidoEm ? ` · Fim: ${fmtDate(a.resolvidoEm)}` : ""}
+                        {` · Duração: ${dur}`}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </Section>
 
           {!online && (

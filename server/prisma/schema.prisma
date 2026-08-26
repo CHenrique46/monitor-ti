@@ -40,6 +40,8 @@ model Computador {
   ultimaMetrica DateTime?
 
   discosFisicos DiscoFisico[]
+  metricas      MetricaComputador[]
+  alertas      Alerta[]
 }
 
 model DiscoFisico {
@@ -53,4 +55,46 @@ model DiscoFisico {
 
   criadoEm     DateTime  @default(now())
   atualizadoEm DateTime  @updatedAt
+}
+
+model MetricaComputador {
+  id           Int      @id @default(autoincrement())
+  computadorId Int
+
+  cpuUso       Float?
+  ramUsoPct    Float?
+  discoUsoPct  Float?
+
+  ramUsada     Float?
+  ramTotal     Float?
+  discoLivre   Float?
+  discoTotal   Float?
+
+  coletadoEm   DateTime @default(now())
+
+  computador   Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+
+  @@index([computadorId, coletadoEm])
+}
+
+model Alerta {
+  id           Int      @id @default(autoincrement())
+  computadorId Int
+
+  tipo         String
+  nivel        String
+  mensagem     String
+
+  valor        Float?
+  limite       Float?
+
+  ativo        Boolean   @default(true)
+
+  iniciadoEm   DateTime  @default(now())
+  resolvidoEm  DateTime?
+
+  computador   Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+
+  @@index([computadorId, ativo])
+  @@index([iniciadoEm])
 }

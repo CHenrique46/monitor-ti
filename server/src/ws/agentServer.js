@@ -1,5 +1,7 @@
 const { WebSocketServer } = require("ws");
 const prisma = require("../prisma");
+const historicoService = require("../services/historico.service");
+const alertasService = require("../services/alertas.service");
 
 const HEARTBEAT_INTERVAL = 30000;
 
@@ -61,6 +63,18 @@ function handleMetrics(d) {
           ultimaMetrica: new Date()
         }
       });
+
+      const state = {
+        computadorId: existente.id,
+        cpuUso: cpu,
+        ramTotal,
+        ramUsada,
+        discoTotal,
+        discoLivre
+      };
+      historicoService.maybeSaveSample(state).catch(() => {});
+      alertasService.avaliar(state).catch(() => {});
+
       resolve(true);
     })().catch((err) => {
       console.error("[Monitor TI] erro no metrics:", err.message);

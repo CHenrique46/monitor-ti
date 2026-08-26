@@ -5,9 +5,12 @@ const path = require("path");
 
 const healthRoutes = require("./routes/health.routes");
 const computadoresRoutes = require("./routes/computadores.routes");
+const metricasRoutes = require("./routes/metricas.routes");
+const alertasRoutes = require("./routes/alertas.routes");
 const { setupWebSocket } = require("./ws/agentServer");
 const prisma = require("./prisma");
 const { logEvent } = require("./logger");
+const historicoService = require("./services/historico.service");
 
 const app = express();
 
@@ -15,6 +18,9 @@ app.use(express.json());
 
 app.use("/health", healthRoutes);
 app.use("/api/computadores", computadoresRoutes);
+app.use("/api/computadores", metricasRoutes);
+app.use("/api/alertas", alertasRoutes);
+app.use("/api/computadores", alertasRoutes);
 
 const DIST_DIR = path.join(__dirname, "..", "..", "dashboard", "dist");
 
@@ -64,6 +70,7 @@ if (require.main === module) {
   });
 
   waitForDatabase();
+  historicoService.iniciarRetencao();
 }
 
 module.exports = app;

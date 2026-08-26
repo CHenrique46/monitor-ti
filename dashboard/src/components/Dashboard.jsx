@@ -3,12 +3,14 @@ import SummaryCards from './SummaryCards'
 import SearchBar from './SearchBar'
 import ComputerCard from './ComputerCard'
 import { computeAlerts, sortComputadores } from '../utils/alerts'
+import { fmtDate } from '../utils/formatters'
 import { API_URL } from '../config'
 
 export default function Dashboard() {
   const [serverOk, setServerOk] = useState(true)
   const [computadores, setComputadores] = useState([])
   const [search, setSearch] = useState('')
+  const [alertasAtivos, setAlertasAtivos] = useState([])
 
   useEffect(() => {
     let active = true
@@ -33,6 +35,23 @@ export default function Dashboard() {
 
     load()
     const id = setInterval(load, 5000)
+    return () => {
+      active = false
+      clearInterval(id)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const loadAlertas = async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/alertas?ativos=true`)
+        if (!active) return
+        if (r.ok) setAlertasAtivos(await r.json())
+      } catch (e) {}
+    }
+    loadAlertas()
+    const id = setInterval(loadAlertas, 10000)
     return () => {
       active = false
       clearInterval(id)
@@ -74,6 +93,21 @@ export default function Dashboard() {
       )}
 
       <SummaryCards summary={summary} />
+
+      {alertasAtivos.length > 0 && (
+        <div className="alertas-ativos">
+          <h2>Alertas ativos</h2>
+          {alertasAtivos.map((a) => (
+            <div key={a.id} className={`alert ${a.nivel}`}>
+              <strong>
+                {a.computador?.hostname || a.computador?.usuario || "Computador"}
+              </strong>{" "}
+              — {a.mensagem}
+              <span className="alert-since"> desde {fmtDate(a.iniciadoEm)}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <SearchBar value={search} onChange={setSearch} />
 
