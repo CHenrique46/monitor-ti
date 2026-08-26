@@ -1,0 +1,15 @@
+<service>
+  <id>MonitorTIAgent</id>
+  <name>Monitor TI Agent</name>
+  <description>Serviço de monitoramento de estações do Monitor TI</description>
+  <executable>MonitorTI-Agent.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+  <logpath>%BASE%\logs</logpath>
+  <logmode>roll</logmode>
+  <stoptimeout>15 sec</stoptimeout>
+  <stopparentprocessfirst>true</stopparentprocessfirst>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="5 sec"/>
+  <resetfailure>86400 sec</resetfailure>
+</service>

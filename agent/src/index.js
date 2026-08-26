@@ -95,7 +95,8 @@ function logEvent(message) {
 function getServerUrl() {
   const cfgPath = path.join(getAppDir(), "config.json");
   try {
-    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    const raw = fs.readFileSync(cfgPath, "utf8");
+    const cfg = JSON.parse(raw.replace(/^﻿/, ""));
     if (cfg && typeof cfg.serverUrl === "string" && cfg.serverUrl.trim()) {
       return cfg.serverUrl.trim();
     }
@@ -110,11 +111,13 @@ const SERVER_URL = getServerUrl();
 function getDeviceId() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
-      const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+      const raw = fs.readFileSync(CONFIG_FILE, "utf8");
+      const cfg = JSON.parse(raw.replace(/^﻿/, ""));
       if (cfg.deviceId) return cfg.deviceId;
     }
   } catch (e) {
-    // arquivo corrompido: ignora e gera novo
+    // arquivo corrompido (ex.: BOM/UTF-8): ignora e gera novo
+    logEvent("aviso: falha ao ler deviceId existente: " + e.message);
   }
 
   const deviceId = crypto.randomUUID();
@@ -145,7 +148,8 @@ function getMachineInfo(deviceId) {
   return {
     deviceId,
     hostname: os.hostname(),
-    usuario: os.userInfo().username,
+    // usuario e preenchido de forma assincrona (collectInteractiveUser) antes do register
+    usuario: null,
     ip,
     sistema: os.platform(),
     arquitetura: os.arch(),
@@ -211,6 +215,24 @@ async function collectAdvancedInventory() {
   return result;
 }
 
+// Usuario interativo atualmente logado (funciona tambem como servico/LocalSystem).
+// Nunca retorna "SYSTEM": usa Win32_ComputerSystem.UserName (sessao interativa).
+// Se nenhum usuario estiver logado, retorna null.
+async function collectInteractiveUser() {
+  try {
+    const cs = await runPsJson(
+      "Get-CimInstance Win32_ComputerSystem | Select-Object UserName | ConvertTo-Json -Compress"
+    );
+    const raw = cs && cs.UserName ? String(cs.UserName).trim() : "";
+    if (!raw) return { usuario: null };
+    const parts = raw.split("\\");
+    return { usuario: parts[parts.length - 1] || null };
+  } catch (e) {
+    logEvent("Falha ao coletar usuario interativo: " + e.message);
+    return { usuario: null };
+  }
+}
+
 // CPU: delta dos tempos de os.cpus() entre duas amostras (nao usa loadavg)
 let cpuPrev = null;
 
@@ -263,6 +285,7 @@ async function collectMetrics(deviceId) {
 }
 
 let metricsTimer = null;
+let activeWs = null;
 
 function stopMetrics() {
   if (metricsTimer) {
@@ -287,6 +310,7 @@ function startMetrics(ws, machine) {
 function connect(machine) {
   logEvent(`Tentando conectar em ${SERVER_URL}`);
   const ws = new WebSocket(SERVER_URL);
+  activeWs = ws;
 
   ws.on("open", () => {
     logEvent("Conectado ao Monitor TI Server.");
@@ -307,6 +331,15 @@ function connect(machine) {
 }
 
 function shutdown() {
+  stopMetrics();
+  if (activeWs) {
+    try {
+      if (activeWs.readyState === WebSocket.OPEN) activeWs.close();
+    } catch (e) {
+      // ignora erro ao fechar
+    }
+    activeWs = null;
+  }
   logEvent("Agent encerrado.");
   process.exit(0);
 }
@@ -320,13 +353,12 @@ logEvent("deviceId: " + deviceId);
 const machine = getMachineInfo(deviceId);
 cpuUsagePercent(); // baseline da CPU
 
-// Inventario avancado: coletado uma unica vez na inicializacao (antes do register)
-collectAdvancedInventory()
-  .catch((err) => {
-    logEvent("Falha geral ao coletar inventario: " + err.message);
-    return {};
-  })
-  .then((adv) => {
-    Object.assign(machine, adv || {});
+// Inventario avancado + usuario interativo: coletados uma unica vez na
+// inicializacao (antes do register). Falhas nao impedem o registro.
+Promise.allSettled([collectAdvancedInventory(), collectInteractiveUser()])
+  .then(([inv, usr]) => {
+    const adv = inv.status === "fulfilled" ? inv.value : {};
+    const u = usr.status === "fulfilled" ? usr.value : {};
+    Object.assign(machine, adv, u);
     connect(machine);
   });
