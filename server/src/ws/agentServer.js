@@ -8,7 +8,31 @@ const HEARTBEAT_INTERVAL = 30000;
 
 // Estados de atualização por deviceId (em memória)
 const updateStates = new Map();
+
+// Capacidades reportadas pelo Agent (ex.: "notices"). Em memória: é
+// reenviado no register e atualizado quando o Agent informa prontidão
+// (ex.: Notifier instalado). Evita despachar notice_show para agents
+// que não conseguem exibir avisos.
+const agentCaps = new Map();
 let wssRef = null;
+
+function setCapabilities(deviceId, caps) {
+  if (!deviceId) return;
+  agentCaps.set(deviceId, new Set(Array.isArray(caps) ? caps : []));
+}
+
+function getCapabilities(deviceId) {
+  const s = agentCaps.get(deviceId);
+  return s ? Array.from(s) : [];
+}
+
+// Só despacha avisos para Agents que reportaram a capacidade "notices".
+// Isso impede o servidor de considerar o Agent pronto para avisos apenas
+// por agentVersion===1.1.0; o Notifier precisa estar realmente instalado.
+function hasCapability(deviceId, cap) {
+  const s = agentCaps.get(deviceId);
+  return !!s && s.has(cap);
+}
 
 function getUpdateState(deviceId) {
   return updateStates.get(deviceId) || null;
@@ -168,6 +192,13 @@ function setupWebSocket(server) {
         return;
       }
 
+      if (msg && msg.type === "capabilities" && (msg.deviceId || ws.deviceId)) {
+        const dev = msg.deviceId || ws.deviceId;
+        setCapabilities(dev, msg.data && msg.data.capabilities);
+        console.log(`[Monitor TI] capacidades de ${dev}: ${getCapabilities(dev).join(",") || "(vazio)"}`);
+        return;
+      }
+
       if (msg && msg.type === "update_status" && msg.deviceId) {
         const prev = updateStates.get(msg.deviceId) || {};
         const state = {
@@ -233,6 +264,7 @@ function setupWebSocket(server) {
             }
           });
           ws.deviceId = d.deviceId;
+          setCapabilities(d.deviceId, d.capabilities);
           console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
 
           // Entrega avisos pendentes (envio imediato que ocorreu com o Agent
@@ -314,5 +346,8 @@ module.exports = {
   setupWebSocket,
   sendToAgent,
   getUpdateState,
-  setUpdateState
+  setUpdateState,
+  setCapabilities,
+  getCapabilities,
+  hasCapability
 };

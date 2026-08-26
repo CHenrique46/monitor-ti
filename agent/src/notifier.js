@@ -20,7 +20,7 @@ const RECEIVED_TIMEOUT_MS = 60000;
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function createNotifier(opts) {
-  const { configDir, getAppDir, getDeviceId, getWs, logEvent, version, getServerHttpBase } = opts;
+  const { configDir, getAppDir, getDeviceId, getWs, logEvent, version, getServerHttpBase, onNotifierReady } = opts;
 
   const NOTICES_DIR = path.join(configDir, "notices");
   const CACHE_FILE = path.join(configDir, "notice-cache.json");
@@ -69,6 +69,11 @@ function createNotifier(opts) {
       } catch (e) {}
     }
     return null;
+  }
+
+  // Indica se o Notifier está presente e pode exibir avisos.
+  function isNotifierReady() {
+    return !!findNotifierExe();
   }
 
   function writePayload(d, tmpFile) {
@@ -298,6 +303,7 @@ function createNotifier(opts) {
     fs.copyFileSync(notifPath, dest);
     logEvent("Notifier obtido e validado: " + dest);
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+    if (typeof onNotifierReady === "function") onNotifierReady();
   }
 
   function extractZip(zipPath, destDir) {
@@ -308,7 +314,7 @@ function createNotifier(opts) {
     });
   }
 
-  return { handleNoticeShow, start, ensureNotifierPresent };
+  return { handleNoticeShow, start, ensureNotifierPresent, isNotifierReady };
 }
 
 module.exports = { createNotifier };

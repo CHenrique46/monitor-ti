@@ -129,7 +129,21 @@ const notifier = createNotifier({
   getWs: () => activeWs,
   logEvent,
   version: AGENT_VERSION,
-  getServerHttpBase: () => SERVER_URL
+  getServerHttpBase: () => SERVER_URL,
+  // Quando o Notifier termina de ser obtido/instalado, avisa o servidor que
+  // este Agent agora tem a capacidade "notices" (evita receber avisos antes
+  // de conseguir exibi-los).
+  onNotifierReady: () => {
+    try {
+      if (activeWs && activeWs.readyState === 1) {
+        activeWs.send(JSON.stringify({
+          type: "capabilities",
+          deviceId,
+          data: { capabilities: ["notices"] }
+        }));
+      }
+    } catch (e) {}
+  }
 });
 
 function getDeviceId() {
@@ -180,7 +194,10 @@ function getMachineInfo(deviceId) {
     processador: cpus[0] ? cpus[0].model : null,
     cpusLogicas: cpus.length,
     sistemaRelease: os.release(),
-    agentVersion: AGENT_VERSION
+    agentVersion: AGENT_VERSION,
+    // Capacidades reportadas ao servidor. "notices" só entra quando o Notifier
+    // está presente (e, após o bootstrap, quando terminar de ser instalado).
+    capabilities: notifier.isNotifierReady() ? ["notices"] : []
   };
 }
 

@@ -407,6 +407,12 @@ async function processarAgendamentosVencidos() {
 async function enviarParaAgente(deviceId, entrega) {
   // require dinamico evita ciclo de dependencia com agentServer
   const agentServer = require("../ws/agentServer");
+  // Só despacha se o Agent reportou capacidade "notices" (Notifier instalado
+  // e operacional). Caso contrário, a entrega permanece PENDENTE para retry
+  // quando o Agent reportar prontidão (ex.: após instalar o Notifier).
+  if (!agentServer.hasCapability(deviceId, "notices")) {
+    return false;
+  }
   return agentServer.sendToAgent(deviceId, {
     type: "notice_show",
     noticeDeliveryId: entrega.noticeDeliveryId,
@@ -603,6 +609,7 @@ async function criarAviso(body) {
 module.exports = {
   criarAviso,
   criarAvisoImediato,
+  enviarParaAgente,
   enviarAvisoExistente,
   criarAgendamento,
   atualizarAgendamento,
