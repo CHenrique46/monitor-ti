@@ -25,6 +25,7 @@ model Computador {
   biosFabricante      String?
   biosVersao          String?
   numeroSerie         String?
+  agentVersion        String?
   status        String   @default("offline")
   ultimaConexao DateTime?
   criadoEm      DateTime @default(now())
@@ -42,6 +43,7 @@ model Computador {
   discosFisicos DiscoFisico[]
   metricas      MetricaComputador[]
   alertas      Alerta[]
+  entregasAviso EntregaAviso[]
 }
 
 model DiscoFisico {
@@ -97,4 +99,110 @@ model Alerta {
 
   @@index([computadorId, ativo])
   @@index([iniciadoEm])
+}
+
+model AgentRelease {
+  id             Int      @id @default(autoincrement())
+  version        String   @unique
+  fileName       String
+  sha256         String
+  size           Int
+  releaseDate    DateTime @default(now())
+  active         Boolean  @default(false)
+  criadoEm       DateTime @default(now())
+
+  // Campos opcionais para release multi-arquivo (pacote 1.1.0+).
+  // Nulos em releases legadas (1.0.x) -> mantém compatibilidade total.
+  packageName    String?
+  packageSha256  String?
+  packageSize    Int?
+  manifest       Json?
+
+  @@index([active])
+}
+
+model Aviso {
+  id        Int      @id @default(autoincrement())
+  titulo    String
+  mensagem  String
+  nivel     String   @default("info")
+  autor     String?
+  ativo     Boolean  @default(true)
+  criadoEm  DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  agendamentos AgendamentoAviso[]
+  ocorrencias  OcorrenciaAviso[]
+  entregas     EntregaAviso[]
+}
+
+model AgendamentoAviso {
+  id              Int      @id @default(autoincrement())
+  avisoId         Int
+  aviso           Aviso    @relation(fields: [avisoId], references: [id], onDelete: Cascade)
+
+  tipo            String   // once | daily | weekly
+  diaSemana       Int?     // 0-6 (usado em weekly)
+  agendadoPara    DateTime // ancora inicial (nao usado apos a 1a execucao em recorrencias)
+  expiraEmHoras   Int      @default(24)
+
+  alvoTipo        String   // todos | online | selecionados
+  alvoIds         String?  // JSON de ids de computador (quando alvoTipo = selecionados)
+
+  ativo           Boolean  @default(true)
+  proximaExecucao DateTime?
+
+  criadoEm        DateTime @default(now())
+  atualizadoEm    DateTime @updatedAt
+
+  ocorrencias     OcorrenciaAviso[]
+
+  @@index([ativo, proximaExecucao])
+}
+
+model OcorrenciaAviso {
+  id            Int      @id @default(autoincrement())
+  agendamentoId Int?
+  agendamento   AgendamentoAviso? @relation(fields: [agendamentoId], references: [id], onDelete: Cascade)
+  avisoId       Int
+  aviso         Aviso    @relation(fields: [avisoId], references: [id], onDelete: Cascade)
+
+  agendadoPara  DateTime
+  processado    Boolean  @default(false)
+
+  alvoTipo      String
+  alvoIds       String?
+
+  criadoEm      DateTime @default(now())
+
+  entregas      EntregaAviso[]
+
+  @@index([agendadoPara, processado])
+}
+
+model EntregaAviso {
+  id               Int       @id @default(autoincrement())
+  ocorrenciaId     Int?
+  ocorrencia       OcorrenciaAviso? @relation(fields: [ocorrenciaId], references: [id], onDelete: SetNull)
+  avisoId          Int
+  aviso            Aviso     @relation(fields: [avisoId], references: [id], onDelete: Cascade)
+  computadorId     Int
+  computador       Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+
+  noticeDeliveryId String    @unique
+  titulo           String
+  mensagem         String
+  nivel            String
+
+  estado           String    @default("PENDENTE") // PENDENTE|ENVIADO|EXIBIDO|CONFIRMADO|EXPIRADO|FALHOU
+  enviadoEm        DateTime?
+  exibidoEm        DateTime?
+  confirmadoEm     DateTime?
+
+  expiraEm         DateTime
+  criadoEm         DateTime  @default(now())
+  atualizadoEm     DateTime  @updatedAt
+
+  @@index([computadorId, estado])
+  @@index([expiraEm])
 }

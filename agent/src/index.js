@@ -4,7 +4,20 @@ const path = require("path");
 const crypto = require("crypto");
 const WebSocket = require("ws");
 const checkDiskSpace = require("check-disk-space").default;
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
+const { createNotifier } = require("./notifier");
+
+// Atualizador: se iniciado com --apply-update (arquivo unico) ou
+// --apply-update-package (pacote Agent+Notifier), executa apenas a troca e
+// encerra (não inicia o agente normal).
+if (process.argv.includes("--apply-update") || process.argv.includes("--apply-update-package")) {
+  require("./updater").run(process.argv);
+  return;
+}
+
+// Versão única e canônica do Agent (lida do package.json; inlined no build SEA).
+const AGENT_VERSION = require("../package.json").version;
+const AGENT_SERVICE_NAME = "MonitorTIAgent";
 
 const RECONNECT_DELAY = 5000;
 const METRICS_INTERVAL = 10000;
@@ -108,6 +121,17 @@ function getServerUrl() {
 
 const SERVER_URL = getServerUrl();
 
+// Módulo de avisos (Notifier): integra notice_show, fila, cache e IPC.
+const notifier = createNotifier({
+  configDir: CONFIG_DIR,
+  getAppDir,
+  getDeviceId: () => deviceId,
+  getWs: () => activeWs,
+  logEvent,
+  version: AGENT_VERSION,
+  getServerHttpBase: () => SERVER_URL
+});
+
 function getDeviceId() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
@@ -155,7 +179,8 @@ function getMachineInfo(deviceId) {
     arquitetura: os.arch(),
     processador: cpus[0] ? cpus[0].model : null,
     cpusLogicas: cpus.length,
-    sistemaRelease: os.release()
+    sistemaRelease: os.release(),
+    agentVersion: AGENT_VERSION
   };
 }
 
@@ -286,6 +311,165 @@ async function collectMetrics(deviceId) {
 
 let metricsTimer = null;
 let activeWs = null;
+let notifierStarted = false;
+let notifierEnsureStarted = false;
+
+// ===== Atualização centralizada do Agent =====
+
+let updating = false; // guarda para não iniciar atualização em paralelo
+
+function sendUpdateStatus(ws, status, version, message) {
+  try {
+    ws.send(
+      JSON.stringify({
+        type: "update_status",
+        status,
+        version: version || null,
+        message: message || null,
+        deviceId
+      })
+    );
+  } catch (e) {
+    // ignore
+  }
+}
+
+function sha256File(p) {
+  const h = crypto.createHash("sha256");
+  h.update(fs.readFileSync(p));
+  return h.digest("hex");
+}
+
+async function downloadFile(url, dest) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("download falhou (HTTP " + res.status + ")");
+  const buf = Buffer.from(await res.arrayBuffer());
+  fs.writeFileSync(dest, buf);
+  return true;
+}
+
+function extractZip(zipPath, destDir) {
+  return new Promise((resolve, reject) => {
+    const p = spawn("tar", ["-xf", zipPath, "-C", destDir], { windowsHide: true });
+    p.on("error", reject);
+    p.on("close", (code) =>
+      code === 0 ? resolve() : reject(new Error("falha ao extrair pacote (tar " + code + ")"))
+    );
+  });
+}
+
+async function handleUpdateCommand(ws, msg) {
+  if (updating) {
+    logEvent("Atualizacao ja em andamento; comando ignorado.");
+    return;
+  }
+  const version = msg.version;
+  const expectedSha = msg.sha256;
+  const expectedSize = msg.size;
+  const isPackage = !!msg.package;
+  const expectedNotifierSha = msg.notifierSha256;
+  if (!version || !expectedSha) {
+    sendUpdateStatus(ws, "update_failed", version, "comando invalido");
+    return;
+  }
+
+  updating = true;
+  logEvent("Atualizacao solicitada para versao " + version + (isPackage ? " (pacote)" : ""));
+
+  let tmpFile = null;
+  let packageDir = null;
+  try {
+    sendUpdateStatus(ws, "update_downloading", version);
+
+    const tmpDir = path.join(CONFIG_DIR, "agent-update");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    tmpFile = path.join(tmpDir, isPackage ? "package.zip" : "MonitorTI-Agent.new.exe");
+
+    const httpBase = SERVER_URL.replace("ws://", "http://").replace(
+      "wss://",
+      "https://"
+    );
+    const url = isPackage
+      ? `${httpBase}/api/agent/releases/${version}/package`
+      : `${httpBase}/api/agent/releases/${version}/download`;
+    logEvent("Baixando atualizacao de " + url);
+    await downloadFile(url, tmpFile);
+
+    // Modo pacote (v1.1.0+): extrai e valida Agent + Notifier, aplica via updater em pacote.
+    if (isPackage) {
+      packageDir = path.join(tmpDir, "package");
+      fs.mkdirSync(packageDir, { recursive: true });
+      await extractZip(tmpFile, packageDir);
+      const agentInPkg = path.join(packageDir, "MonitorTI-Agent.exe");
+      if (!fs.existsSync(agentInPkg)) throw new Error("pacote sem MonitorTI-Agent.exe");
+      const actualSha = sha256File(agentInPkg);
+      if (actualSha.toLowerCase() !== String(expectedSha).toLowerCase())
+        throw new Error("SHA-256 do Agent no pacote nao confere");
+      if (expectedNotifierSha) {
+        const notifInPkg = path.join(packageDir, "MonitorTI-Notifier.exe");
+        if (!fs.existsSync(notifInPkg)) throw new Error("pacote sem MonitorTI-Notifier.exe");
+        if (sha256File(notifInPkg).toLowerCase() !== String(expectedNotifierSha).toLowerCase())
+          throw new Error("SHA-256 do Notifier no pacote nao confere");
+      }
+      const installExe = process.execPath;
+      sendUpdateStatus(ws, "update_validating", version);
+      sendUpdateStatus(ws, "update_installing", version);
+      logEvent("Iniciando substituicao segura (pacote)...");
+      const child = spawn(
+        agentInPkg,
+        ["--apply-update-package", packageDir, installExe, AGENT_SERVICE_NAME],
+        { detached: true, stdio: "ignore", windowsHide: true }
+      );
+      child.unref();
+      setTimeout(() => process.exit(0), 800);
+      return;
+    }
+
+    // Caminho legado (arquivo unico, v1.0.x).
+    const actualSha = sha256File(tmpFile);
+    logEvent("SHA-256 esperado: " + expectedSha);
+    logEvent("SHA-256 calculado: " + actualSha);
+    if (actualSha.toLowerCase() !== String(expectedSha).toLowerCase()) {
+      fs.unlinkSync(tmpFile);
+      tmpFile = null;
+      sendUpdateStatus(ws, "update_failed", version, "SHA-256 nao confere");
+      updating = false;
+      return;
+    }
+
+    sendUpdateStatus(ws, "update_validating", version);
+    if (expectedSize && fs.statSync(tmpFile).size !== expectedSize) {
+      fs.unlinkSync(tmpFile);
+      tmpFile = null;
+      sendUpdateStatus(ws, "update_failed", version, "tamanho invalido");
+      updating = false;
+      return;
+    }
+
+    sendUpdateStatus(ws, "update_installing", version);
+    logEvent("Iniciando substituicao segura do executavel...");
+
+    const installExe = process.execPath;
+    const child = spawn(
+      tmpFile,
+      ["--apply-update", installExe, AGENT_SERVICE_NAME],
+      { detached: true, stdio: "ignore", windowsHide: true }
+    );
+    child.unref();
+
+    setTimeout(() => process.exit(0), 800);
+  } catch (e) {
+    logEvent("ERRO na atualizacao: " + e.message);
+    sendUpdateStatus(ws, "update_failed", version, e.message);
+    try {
+      if (tmpFile && fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    } catch (e2) {}
+    try {
+      if (packageDir && fs.existsSync(packageDir)) fs.rmSync(packageDir, { recursive: true, force: true });
+    } catch (e2) {}
+    updating = false;
+  }
+}
 
 function stopMetrics() {
   if (metricsTimer) {
@@ -312,10 +496,33 @@ function connect(machine) {
   const ws = new WebSocket(SERVER_URL);
   activeWs = ws;
 
+  if (!notifierEnsureStarted) {
+    notifierEnsureStarted = true;
+    notifier.ensureNotifierPresent();
+  }
+
   ws.on("open", () => {
     logEvent("Conectado ao Monitor TI Server.");
     ws.send(JSON.stringify({ type: "register", data: machine }));
     startMetrics(ws, machine);
+    if (!notifierStarted) {
+      notifierStarted = true;
+      notifier.start(ws);
+    }
+  });
+
+  ws.on("message", (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch (e) {
+      return;
+    }
+    if (msg && msg.type === "update_agent") {
+      handleUpdateCommand(ws, msg).catch(() => {});
+    } else if (msg && msg.type === "notice_show") {
+      notifier.handleNoticeShow(ws, msg);
+    }
   });
 
   ws.on("error", () => {

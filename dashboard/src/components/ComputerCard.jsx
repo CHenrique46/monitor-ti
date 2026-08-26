@@ -18,9 +18,11 @@ function MetricBar({ value }) {
   );
 }
 
-export default function ComputerCard({ c }) {
+export default function ComputerCard({ c, latestVersion }) {
   const online = c.status === "online";
   const { alerts } = computeAlerts(c);
+  const updateAvailable =
+    latestVersion && c.agentVersion && latestVersion !== c.agentVersion;
 
   const ramPct =
     c.ramTotal && c.ramUsada != null
@@ -100,10 +102,26 @@ export default function ComputerCard({ c }) {
         <div className="metric-value">{formatUptime(c.uptime)}</div>
       </div>
 
+      <div className="agent-line">
+        <span className="agent-version">
+          Agent v{c.agentVersion || "?"}
+        </span>
+        {updateAvailable && (
+          <span className="update-available">
+            ⚠ Nova versão: v{latestVersion}
+          </span>
+        )}
+      </div>
+
       <div className="card-actions">
         <Link className="details-link" to={`/computadores/${c.id}`}>
           Ver detalhes
         </Link>
+        {updateAvailable && online && (
+          <Link className="btn-update" to={`/computadores/${c.id}`}>
+            Atualizar
+          </Link>
+        )}
       </div>
     </div>
   );

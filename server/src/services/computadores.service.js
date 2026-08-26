@@ -19,6 +19,7 @@ function mapComputador(c) {
     biosFabricante: c.biosFabricante,
     biosVersao: c.biosVersao,
     numeroSerie: c.numeroSerie,
+    agentVersion: c.agentVersion,
     status: c.status,
     ultimaConexao: c.ultimaConexao,
     cpuUso: c.cpuUso,

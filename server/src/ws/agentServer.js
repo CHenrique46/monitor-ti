@@ -2,11 +2,53 @@ const { WebSocketServer } = require("ws");
 const prisma = require("../prisma");
 const historicoService = require("../services/historico.service");
 const alertasService = require("../services/alertas.service");
+const avisosService = require("../services/avisos.service");
 
 const HEARTBEAT_INTERVAL = 30000;
 
-function markOffline(deviceId) {
+// Estados de atualização por deviceId (em memória)
+const updateStates = new Map();
+let wssRef = null;
+
+function getUpdateState(deviceId) {
+  return updateStates.get(deviceId) || null;
+}
+
+function setUpdateState(deviceId, state) {
+  updateStates.set(deviceId, state);
+}
+
+// Envia uma mensagem para o Agent conectado com o deviceId informado.
+// Retorna true se havia um Agent conectado.
+function sendToAgent(deviceId, obj) {
+  if (!wssRef) return false;
+  let found = false;
+  wssRef.clients.forEach((ws) => {
+    if (ws.deviceId === deviceId && ws.readyState === ws.OPEN) {
+      try {
+        ws.send(JSON.stringify(obj));
+        found = true;
+      } catch (e) {
+        // falha ao enviar para este cliente
+      }
+    }
+  });
+  return found;
+}
+
+function markOffline(deviceId, exceptWs) {
   if (!deviceId) return;
+  // Não marca offline se ainda houver outra conexão WebSocket viva (OPEN)
+  // para o mesmo deviceId. O próprio socket que está fechando (exceptWs) é
+  // ignorado para não ser contado como conexão válida.
+  if (wssRef) {
+    let live = false;
+    wssRef.clients.forEach((ws) => {
+      if (ws === exceptWs) return;
+      if (ws.deviceId === deviceId && ws.readyState === ws.OPEN) live = true;
+    });
+    if (live) return;
+  }
   prisma.computador
     .updateMany({
       where: { deviceId },
@@ -54,6 +96,8 @@ function handleMetrics(d) {
       await prisma.computador.update({
         where: { deviceId: d.deviceId },
         data: {
+          status: "online",
+          ultimaConexao: new Date(),
           cpuUso: cpu,
           ramTotal,
           ramUsada,
@@ -85,11 +129,12 @@ function handleMetrics(d) {
 
 function setupWebSocket(server) {
   const wss = new WebSocketServer({ server });
+  wssRef = wss;
 
   const heartbeat = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        markOffline(ws.deviceId);
+        markOffline(ws.deviceId, ws);
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -110,6 +155,33 @@ function setupWebSocket(server) {
       try {
         msg = JSON.parse(raw.toString());
       } catch (e) {
+        return;
+      }
+
+      // Avisos remotos: confirmacoes vindas do Agent
+      if (msg && msg.type === "notice_received" && msg.deviceId && msg.noticeDeliveryId) {
+        avisosService.marcarExibido(msg.noticeDeliveryId, msg.deviceId).catch(() => {});
+        return;
+      }
+      if (msg && msg.type === "notice_acknowledged" && msg.deviceId && msg.noticeDeliveryId) {
+        avisosService.marcarConfirmado(msg.noticeDeliveryId, msg.deviceId).catch(() => {});
+        return;
+      }
+
+      if (msg && msg.type === "update_status" && msg.deviceId) {
+        const prev = updateStates.get(msg.deviceId) || {};
+        const state = {
+          status: msg.status,
+          version: msg.version || prev.version || null,
+          targetVersion: prev.targetVersion || msg.version || null,
+          message: msg.message || null,
+          updatedAt: new Date()
+        };
+        updateStates.set(msg.deviceId, state);
+        console.log(
+          `[Monitor TI] update_status ${msg.deviceId}: ${msg.status}` +
+            (msg.message ? ` (${msg.message})` : "")
+        );
         return;
       }
 
@@ -135,6 +207,7 @@ function setupWebSocket(server) {
               biosFabricante: d.biosFabricante || null,
               biosVersao: d.biosVersao || null,
               numeroSerie: d.numeroSerie || null,
+              agentVersion: d.agentVersion || null,
               status: "online",
               ultimaConexao: new Date()
             },
@@ -154,12 +227,43 @@ function setupWebSocket(server) {
               biosFabricante: d.biosFabricante || null,
               biosVersao: d.biosVersao || null,
               numeroSerie: d.numeroSerie || null,
+              agentVersion: d.agentVersion || null,
               status: "online",
               ultimaConexao: new Date()
             }
           });
           ws.deviceId = d.deviceId;
           console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
+
+          // Entrega avisos pendentes (envio imediato que ocorreu com o Agent
+          // offline, ou reenvio apos reconexao dentro da validade).
+          avisosService
+            .obterPendentesDoDispositivo(d.deviceId)
+            .catch((err) =>
+              console.error("[Monitor TI] erro ao enviar avisos pendentes:", err.message)
+            );
+
+          // Detecta conclusão bem-sucedida de uma atualização em andamento
+          const pend = updateStates.get(d.deviceId);
+          if (
+            pend &&
+            pend.targetVersion &&
+            pend.status !== "update_success" &&
+            pend.status !== "update_failed" &&
+            d.agentVersion &&
+            d.agentVersion === pend.targetVersion
+          ) {
+            updateStates.set(d.deviceId, {
+              ...pend,
+              status: "update_success",
+              version: d.agentVersion,
+              message: "Atualizacao concluida",
+              updatedAt: new Date()
+            });
+            console.log(
+              `[Monitor TI] atualizacao concluida: ${d.hostname} -> ${d.agentVersion}`
+            );
+          }
 
           // Sincroniza os discos fisicos (delete + insert) em transacao
           try {
@@ -193,7 +297,7 @@ function setupWebSocket(server) {
     });
 
     ws.on("close", () => {
-      markOffline(ws.deviceId);
+      markOffline(ws.deviceId, ws);
     });
 
     ws.on("error", () => {});
@@ -206,4 +310,9 @@ function setupWebSocket(server) {
   return wss;
 }
 
-module.exports = { setupWebSocket };
+module.exports = {
+  setupWebSocket,
+  sendToAgent,
+  getUpdateState,
+  setUpdateState
+};

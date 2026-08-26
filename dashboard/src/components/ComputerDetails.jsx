@@ -38,6 +38,9 @@ export default function ComputerDetails() {
   const [periodo, setPeriodo] = useState("24h")
   const [metricas, setMetricas] = useState(null)
   const [alertas, setAlertas] = useState([])
+  const [release, setRelease] = useState(null)
+  const [updateStatus, setUpdateStatus] = useState(null)
+  const [confirm, setConfirm] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -104,6 +107,87 @@ export default function ComputerDetails() {
       clearInterval(t)
     }
   }, [id])
+
+  useEffect(() => {
+    let active = true
+    const loadRelease = async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/agent/releases/latest`)
+        if (active && r.ok) setRelease(await r.json())
+        else if (active) setRelease(null)
+      } catch (e) {
+        if (active) setRelease(null)
+      }
+    }
+    loadRelease()
+    const t = setInterval(loadRelease, 30000)
+    return () => {
+      active = false
+      clearInterval(t)
+    }
+  }, [id])
+
+  useEffect(() => {
+    if (!release) return
+    let active = true
+    const loadStatus = async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/computadores/${id}/agent-update`)
+        if (active && r.ok) setUpdateStatus(await r.json())
+      } catch (e) {}
+    }
+    loadStatus()
+    const t = setInterval(loadStatus, 3000)
+    return () => {
+      active = false
+      clearInterval(t)
+    }
+  }, [id, release])
+
+  const updateAvailable =
+    release && c && c.agentVersion && release.version !== c.agentVersion
+  const inProgress =
+    updateStatus &&
+    ["update_pending", "update_downloading", "update_validating", "update_installing"].includes(
+      updateStatus.status
+    )
+
+  const statusLabel = (s) => {
+    switch (s) {
+      case "update_pending":
+        return "Preparando..."
+      case "update_downloading":
+        return "Baixando..."
+      case "update_validating":
+        return "Validando..."
+      case "update_installing":
+        return "Instalando..."
+      case "update_success":
+        return "Atualizado ✓"
+      case "update_failed":
+        return "Falha na atualização"
+      default:
+        return s || ""
+    }
+  }
+
+  const triggerUpdate = async () => {
+    setConfirm(false)
+    try {
+      const r = await fetch(`${API_URL}/api/computadores/${id}/agent-update`, {
+        method: "POST"
+      })
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}))
+        setUpdateStatus({
+          status: "update_failed",
+          message: e.erro || "Falha ao iniciar atualização"
+        })
+      }
+    } catch (e) {
+      setUpdateStatus({ status: "update_failed", message: e.message })
+    }
+  }
 
   if (notFound) {
     return (
@@ -202,6 +286,67 @@ export default function ComputerDetails() {
               <span className="detail-key">Última conexão</span>
               <span className="detail-val">{fmtDate(c.ultimaConexao)}</span>
             </div>
+          </Section>
+
+          <Section title="Agent">
+            <div>
+              <span className="detail-key">Versão instalada</span>
+              <span className="detail-val">v{c.agentVersion || 'desconhecida'}</span>
+            </div>
+            {release && updateAvailable && (
+              <div>
+                <span className="detail-key">Versão disponível</span>
+                <span className="detail-val">v{release.version}</span>
+              </div>
+            )}
+            {release && !updateAvailable && (
+              <div className="update-ok">✓ Agent atualizado (v{release.version})</div>
+            )}
+
+            {updateStatus && (
+              <div
+                className={`update-status ${
+                  updateStatus.status === "update_failed"
+                    ? "failed"
+                    : updateStatus.status === "update_success"
+                    ? "ok"
+                    : "running"
+                }`}
+              >
+                {statusLabel(updateStatus.status)}
+                {updateStatus.message ? ` — ${updateStatus.message}` : ""}
+              </div>
+            )}
+
+            {release && updateAvailable && online && !inProgress && (
+              <button type="button" className="btn-update" onClick={() => setConfirm(true)}>
+                Atualizar Agent
+              </button>
+            )}
+            {release && updateAvailable && !online && (
+              <div className="muted">Computador offline: não é possível atualizar agora.</div>
+            )}
+
+            {confirm && (
+              <div className="confirm-box">
+                <p>
+                  Atualizar o Agent da máquina <strong>{c.hostname}</strong> de v
+                  {c.agentVersion} para v{release.version}?
+                </p>
+                <div className="confirm-actions">
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={() => setConfirm(false)}
+                  >
+                    Cancelar
+                  </button>
+                  <button type="button" className="btn-update" onClick={triggerUpdate}>
+                    Atualizar
+                  </button>
+                </div>
+              </div>
+            )}
           </Section>
 
           <Section title="Sistema">

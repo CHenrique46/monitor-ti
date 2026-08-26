@@ -16,8 +16,20 @@ build/
 # Pacote de distribuicao gerado pelo build do agent (nao versionar)
 release/
 
+# Releases de agente (artefatos gerados; metadados ficam no banco, nao no git)
+releases/
+!releases/**/.gitkeep
+
 # Build do agent (bundle SEA)
 agent/dist/
+
+# Arquivos temporarios de teste / scratch
+_tmp_*
+scripts/_tmp_*
+*.tmp
+*.pid
+*.err
+*.previous
 
 # Configuração local do agente (cada máquina tem seu próprio deviceId)
 agent/data/

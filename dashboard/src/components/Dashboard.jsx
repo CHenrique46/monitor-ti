@@ -11,6 +11,7 @@ export default function Dashboard() {
   const [computadores, setComputadores] = useState([])
   const [search, setSearch] = useState('')
   const [alertasAtivos, setAlertasAtivos] = useState([])
+  const [latestVersion, setLatestVersion] = useState(null)
 
   useEffect(() => {
     let active = true
@@ -35,6 +36,26 @@ export default function Dashboard() {
 
     load()
     const id = setInterval(load, 5000)
+    return () => {
+      active = false
+      clearInterval(id)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const loadLatest = async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/agent/releases/latest`)
+        if (!active) return
+        if (r.ok) setLatestVersion((await r.json()).version)
+        else setLatestVersion(null)
+      } catch (e) {
+        if (active) setLatestVersion(null)
+      }
+    }
+    loadLatest()
+    const id = setInterval(loadLatest, 30000)
     return () => {
       active = false
       clearInterval(id)
@@ -126,7 +147,7 @@ export default function Dashboard() {
       ) : (
         <div className="grid">
           {filtered.map((c) => (
-            <ComputerCard key={c.id} c={c} />
+            <ComputerCard key={c.id} c={c} latestVersion={latestVersion} />
           ))}
         </div>
       )}

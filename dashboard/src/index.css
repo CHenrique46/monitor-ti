@@ -456,3 +456,99 @@ p {
   font-size: 0.8rem;
   color: #94a3b8;
 }
+
+/* ===== Agent / Atualização ===== */
+.agent-line {
+  margin-top: 6px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.agent-version {
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.update-available {
+  font-size: 0.8rem;
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.update-ok {
+  color: #22c55e;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.update-status {
+  margin-top: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.update-status.running {
+  color: #38bdf8;
+}
+
+.update-status.ok {
+  color: #22c55e;
+}
+
+.update-status.failed {
+  color: #ef4444;
+}
+
+.btn-update {
+  display: inline-block;
+  margin-top: 10px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn-update:hover {
+  background: #1d4ed8;
+}
+
+.btn-cancel {
+  background: #475569;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.btn-cancel:hover {
+  background: #334155;
+}
+
+.confirm-box {
+  margin-top: 12px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.confirm-box p {
+  margin-bottom: 10px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+}

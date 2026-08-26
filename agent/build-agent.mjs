@@ -44,4 +44,17 @@ if (fs.existsSync(path.join(root, "LEIA-ME.txt"))) {
   fs.copyFileSync(path.join(root, "LEIA-ME.txt"), path.join(rel, "LEIA-ME.txt"));
 }
 
+// 6) Notifier (C# WinForms compilado com o csc embutido do .NET Framework; sem instalacao)
+const csc = "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe";
+const notifierSrc = path.join(root, "..", "notifier", "MonitorTI-Notifier.cs");
+const notifierOut = path.join(rel, "MonitorTI-Notifier.exe");
+if (fs.existsSync(csc) && fs.existsSync(notifierSrc)) {
+  execSync(`"${csc}" /target:winexe /out:"${notifierOut}" "${notifierSrc}"`, {
+    cwd: root,
+    stdio: "inherit"
+  });
+} else {
+  console.warn("csc ou fonte do Notifier ausente; pulando compilacao do Notifier.");
+}
+
 console.log("Build concluido: " + path.join(rel, "MonitorTI-Agent.exe"));
