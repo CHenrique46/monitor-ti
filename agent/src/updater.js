@@ -247,7 +247,7 @@ function run(argv) {
     for (const f of files) {
       let ok = false;
       for (let i = 0; i < 15 && !ok; i++) {
-        if (!isFileUnlocked(f.dst)) {
+        if (fs.existsSync(f.dst) && !isFileUnlocked(f.dst)) {
           log("destino ainda travado; aguardando (tentativa " + i + ")");
           sleep(1000);
           continue;

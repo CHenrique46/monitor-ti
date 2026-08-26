@@ -412,16 +412,18 @@ async function handleUpdateCommand(ws, msg) {
     logEvent("Baixando atualizacao de " + url);
     await downloadFile(url, tmpFile);
 
-    // Modo pacote (v1.1.0+): extrai e valida Agent + Notifier, aplica via updater em pacote.
+    // Modo pacote (v1.1.0+): valida o hash do pacote (zip) e do Notifier,
+    // extrai e aplica via updater em pacote. O expectedSha do pacote corresponde
+    // ao SHA-256 do .zip (packageSha256), não ao do Agent interno.
     if (isPackage) {
+      const zipSha = sha256File(tmpFile);
+      if (zipSha.toLowerCase() !== String(expectedSha).toLowerCase())
+        throw new Error("SHA-256 do pacote nao confere");
       packageDir = path.join(tmpDir, "package");
       fs.mkdirSync(packageDir, { recursive: true });
       await extractZip(tmpFile, packageDir);
       const agentInPkg = path.join(packageDir, "MonitorTI-Agent.exe");
       if (!fs.existsSync(agentInPkg)) throw new Error("pacote sem MonitorTI-Agent.exe");
-      const actualSha = sha256File(agentInPkg);
-      if (actualSha.toLowerCase() !== String(expectedSha).toLowerCase())
-        throw new Error("SHA-256 do Agent no pacote nao confere");
       if (expectedNotifierSha) {
         const notifInPkg = path.join(packageDir, "MonitorTI-Notifier.exe");
         if (!fs.existsSync(notifInPkg)) throw new Error("pacote sem MonitorTI-Notifier.exe");
