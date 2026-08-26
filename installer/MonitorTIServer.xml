@@ -1,0 +1,16 @@
+<service>
+  <id>MonitorTIServer</id>
+  <name>Monitor TI Server</name>
+  <description>Servico do backend (API + WebSocket) e do dashboard do Monitor TI</description>
+  <executable>C:\Program Files\nodejs\node.exe</executable>
+  <arguments>src/app.js</arguments>
+  <workingdirectory>C:\Projetos\monitor-ti\server</workingdirectory>
+  <logpath>C:\ProgramData\MonitorTI\server\logs</logpath>
+  <logmode>roll</logmode>
+  <stoptimeout>15 sec</stoptimeout>
+  <stopparentprocessfirst>true</stopparentprocessfirst>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="5 sec"/>
+  <resetfailure>86400 sec</resetfailure>
+</service>

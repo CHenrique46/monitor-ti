@@ -8,7 +8,8 @@
     "start": "node src/app.js",
     "dev": "node --watch src/app.js",
     "prisma:generate": "prisma generate",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "build:production": "node ../scripts/build-production.js"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
