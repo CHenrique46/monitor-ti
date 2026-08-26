@@ -18,13 +18,12 @@ function compareVersion(a, b) {
 }
 
 // Decide o comando de atualização conforme a versão do Agent.
-// - Agents < 1.1.0 (ex.: 1.0.1) NÃO conhecem pacotes: recebem o fluxo
-//   legado de arquivo único (só o Agent). Após instalarem o 1.1.0, o novo
-//   Agent obtém o Notifier sozinho no primeiro boot.
-// - Agents >= 1.1.0 recebem o pacote (Agent + Notifier) com validação de hashes.
+// - Agents <= 1.1.0 recebem o fluxo legado de arquivo único (só o Agent).
+//   Isso preserva a compatibilidade com o 1.1.0 publicado antes da correção.
+// - Agents >= 1.1.1 recebem o pacote (Agent + Notifier) com validação de hashes.
 function buildUpdateCommand(agentVersion, release) {
   const supportsPackage =
-    compareVersion(agentVersion, "1.1.0") >= 0 &&
+    compareVersion(agentVersion, "1.1.1") >= 0 &&
     !!release.packageName &&
     !!release.packageSha256 &&
     release.packageSize != null;
