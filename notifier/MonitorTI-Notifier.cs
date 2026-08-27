@@ -36,11 +36,38 @@ namespace MonitorTI
         private static Task _connectTask;
         private static volatile bool _connected;
 
+        private static string LogPath
+        {
+            get
+            {
+                string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                return Path.Combine(baseDir, "MonitorTI", "logs", "notifier.log");
+            }
+        }
+
+        private static void Log(string message)
+        {
+            try
+            {
+                string line = "[" + DateTime.UtcNow.ToString("o") + "] " + message;
+                Directory.CreateDirectory(Path.GetDirectoryName(LogPath));
+                File.AppendAllText(LogPath, line + Environment.NewLine, Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        private static int CurrentSessionId()
+        {
+            try { return Process.GetCurrentProcess().SessionId; }
+            catch { return -1; }
+        }
+
         [STAThread]
         public static void Main(string[] args)
         {
             try
             {
+                Log("processo iniciado; sessionId=" + CurrentSessionId());
                 if (!ParseArgs(args) || !ValidatePipeName(_pipeName))
                 {
                     Fail("Argumentos ou pipe invalidos.");
@@ -51,6 +78,7 @@ namespace MonitorTI
                 // promovemos o processo para a sessao interativa do usuario via WTS.
                 if (ShouldPromote())
                 {
+                    Log("Session 0 detectada; promovendo para sessao interativa");
                     if (TryPromoteToUserSession(args))
                     {
                         Environment.Exit(0); // processo promovido ja foi lancado
@@ -73,6 +101,7 @@ namespace MonitorTI
                 {
                     form.Shown += (s, e) =>
                     {
+                        Log("Form.Shown");
                         _connectTask = Task.Run(() => ConnectAndSend("received"));
                         if (_autoAck)
                         {
@@ -84,8 +113,10 @@ namespace MonitorTI
                     };
                     form.Acked += () =>
                     {
+                        Log("ENTENDI clicado");
                         Task.Run(() => SendAckThenExit());
                     };
+                    Log("processo interativo iniciado; executando Application.Run");
                     Application.Run(form);
                 }
             }
@@ -105,6 +136,7 @@ namespace MonitorTI
                 {
                     _pipeWriter.WriteLine("acknowledged");
                     _pipeWriter.Flush();
+                    Log("acknowledged enviado");
                 }
             }
             catch { }
@@ -126,10 +158,15 @@ namespace MonitorTI
                 _connected = true;
                 _pipeWriter.WriteLine(message);
                 _pipeWriter.Flush();
+                if (string.Equals(message, "received", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log("received enviado");
+                }
             }
             catch
             {
                 _connected = false;
+                Log("erro de pipe ao enviar " + message);
             }
         }
 
@@ -283,6 +320,8 @@ namespace MonitorTI
             }
             if (activeId < 0) return false; // nenhuma sessao interativa ativa
 
+            Log("sessao interativa selecionada: " + activeId);
+
             IntPtr hToken = IntPtr.Zero;
             if (!WTS.WTSQueryUserToken(activeId, out hToken)) return false;
 
@@ -307,8 +346,21 @@ namespace MonitorTI
             argList.Add("--promoted");
             string cmdLine = "\"" + Application.ExecutablePath + "\" " + string.Join(" ", argList.ConvertAll(EscapeArg));
 
+            Log("CreateProcessAsUser iniciado");
             bool created = WTS.CreateProcessAsUser(hPrimary, null, cmdLine, IntPtr.Zero, IntPtr.Zero, false, 0x00000400, env, null, ref si, out pi);
-            try { if (created) { WTS.CloseHandle(pi.hProcess); WTS.CloseHandle(pi.hThread); } }
+            try
+            {
+                if (created)
+                {
+                    Log("processo filho criado; pid=" + pi.dwProcessId);
+                    WTS.CloseHandle(pi.hProcess);
+                    WTS.CloseHandle(pi.hThread);
+                }
+                else
+                {
+                    Log("erro de promocao CreateProcessAsUser");
+                }
+            }
             catch { }
             try { WTS.DestroyEnvironmentBlock(env); } catch { }
             try { WTS.CloseHandle(hPrimary); WTS.CloseHandle(hToken); } catch { }

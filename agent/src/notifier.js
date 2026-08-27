@@ -19,6 +19,36 @@ const PIPE_PREFIX = "MonitorTI-Notice-";
 const RECEIVED_TIMEOUT_MS = 60000;
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
+function isValidLevel(level) {
+  return ["info", "aviso", "urgente"].includes(String(level || "").toLowerCase());
+}
+
+function normalizeNoticeShowPayload(msg) {
+  const raw = msg && typeof msg === "object" ? (msg.data && typeof msg.data === "object" ? msg.data : msg) : null;
+  if (!raw || typeof raw !== "object") return null;
+
+  const noticeDeliveryId = String(raw.noticeDeliveryId || "").trim();
+  const title = String(raw.title || raw.titulo || "").trim();
+  const message = String(raw.message || raw.mensagem || "").trim();
+  const level = String(raw.level || raw.nivel || "").trim().toLowerCase();
+  const timestamp = String(raw.timestamp || raw.serverTime || raw.scheduledAt || "").trim();
+
+  if (!UUID_RE.test(noticeDeliveryId)) return null;
+  if (!title || title.length > 100) return null;
+  if (!message || message.length > 2000) return null;
+  if (!isValidLevel(level)) return null;
+  if (!timestamp || Number.isNaN(Date.parse(timestamp))) return null;
+
+  return {
+    noticeDeliveryId,
+    title,
+    message,
+    level,
+    scheduledAt: String(raw.scheduledAt || raw.timestamp || timestamp).trim(),
+    serverTime: String(raw.serverTime || raw.timestamp || timestamp).trim()
+  };
+}
+
 function createNotifier(opts) {
   const { configDir, getAppDir, getDeviceId, getWs, logEvent, version, getServerHttpBase, onNotifierReady } = opts;
 
@@ -195,12 +225,12 @@ function createNotifier(opts) {
   }
 
   function handleNoticeShow(ws, msg) {
-    const d = (msg && msg.data) || {};
-    const id = d.noticeDeliveryId;
-    if (!UUID_RE.test(id || "")) {
-      logEvent("notice_show ignorado: noticeDeliveryId invalido");
+    const d = normalizeNoticeShowPayload(msg);
+    if (!d) {
+      logEvent("notice_show rejeitado: payload invalido");
       return;
     }
+    const id = d.noticeDeliveryId;
     const cache = loadCache();
     let changed = pruneCache(cache);
     if (cache[id] && cache[id].state === "CONFIRMADO") {
@@ -442,4 +472,4 @@ function createNotifier(opts) {
   return { handleNoticeShow, start, ensureNotifierPresent, isNotifierReady };
 }
 
-module.exports = { createNotifier };
+module.exports = { createNotifier, normalizeNoticeShowPayload };
