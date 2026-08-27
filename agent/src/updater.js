@@ -13,7 +13,8 @@
 //      e MonitorTI-Notifier.exe. Ambos são trocados com backup/rollback individuais.
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const { execFileSync: defaultExecFileSync } = require("child_process");
+const { createOrUpdateTask: defaultCreateOrUpdateTask, queryTaskXml: defaultQueryTaskXml, TASK_NAME } = require("./notices/task");
 
 function log(m) {
   const line = `[updater ${new Date().toISOString()}] ${m}`;
@@ -119,8 +120,20 @@ function parseApplyUpdatePackageArgs(argv) {
   return { installExe, serviceName, sourceExe: agentSrc, files };
 }
 
-function run(argv) {
+function run(argv, deps = {}) {
   const isPackage = argv.indexOf("--apply-update-package") >= 0;
+  const execFileSync = deps.execFileSync || defaultExecFileSync;
+  const createOrUpdateTask = deps.createOrUpdateTask || defaultCreateOrUpdateTask;
+  const queryTaskXml = deps.queryTaskXml || defaultQueryTaskXml;
+  const hasInteractiveSession = deps.hasInteractiveSession || (() => {
+    try {
+      const ps = "(Get-CimInstance Win32_ComputerSystem).UserName";
+      const out = execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10000 });
+      return !!String(out || "").trim();
+    } catch {
+      return false;
+    }
+  });
   let parsed;
   try {
     parsed = isPackage ? parseApplyUpdatePackageArgs(argv) : parseApplyUpdateArgs(argv);
@@ -159,9 +172,63 @@ function run(argv) {
   );
 
   const backups = [];
+  let taskTouched = false;
+  let taskAlreadyExisted = false;
+  let taskSnapshot = null;
+
+  function captureTaskSnapshot() {
+    try {
+      const out = queryTaskXml();
+      taskSnapshot = out;
+      taskAlreadyExisted = !!out;
+      return out;
+    } catch {
+      taskSnapshot = null;
+      taskAlreadyExisted = false;
+      return null;
+    }
+  }
+
+  function ensureNotifierTask() {
+    try {
+      createOrUpdateTask();
+      taskTouched = true;
+      log("task companion garantida: " + TASK_NAME);
+      return true;
+    } catch (e) {
+      log("falha ao garantir task companion: " + e.message);
+      return false;
+    }
+  }
+
+  function rollbackTask() {
+    if (!taskTouched) return;
+    try {
+      if (taskAlreadyExisted) {
+        if (taskSnapshot) {
+          const tmpXml = path.join(path.dirname(sourceExe || installExe), "notifier-companion-task.rollback.xml");
+          try {
+            fs.writeFileSync(tmpXml, taskSnapshot, "utf8");
+            execFileSync("schtasks", ["/create", "/xml", tmpXml, "/tn", TASK_NAME, "/f"], { stdio: "ignore", timeout: 10000 });
+            log("rollback da task companion: definicao previa restaurada");
+          } finally {
+            try { if (fs.existsSync(tmpXml)) fs.unlinkSync(tmpXml); } catch {}
+          }
+        } else {
+          log("rollback da task companion: preservando definicao previa");
+        }
+      } else {
+        log("rollback da task companion: removendo task criada");
+        try { execFileSync("schtasks", ["/delete", "/tn", TASK_NAME, "/f"], { stdio: "ignore" }); } catch (e) {}
+      }
+    } catch (e) {
+      log("falha no rollback da task companion: " + e.message);
+    }
+  }
 
   function rollback() {
     log("INICIANDO ROLLBACK");
+    rollbackTask();
     if (!testMode) {
       try {
         const info = getServiceInfo(serviceName);
@@ -266,6 +333,12 @@ function run(argv) {
     }
     log("arquivos substituidos");
 
+    // 4.5) garante a task companion antes de reiniciar o Agent.
+    captureTaskSnapshot();
+    if (!ensureNotifierTask()) {
+      throw new Error("nao foi possivel garantir a task companion");
+    }
+
     // 5) reinicia o serviço
     if (!testMode) {
       execFileSync("net", ["start", serviceName], { stdio: "ignore" });
@@ -286,6 +359,21 @@ function run(argv) {
     }
     if (!running) {
       throw new Error("servico nao iniciou apos atualizacao");
+    }
+
+    // 7) se houver sessão interativa, solicita o run da task.
+    if (!testMode || deps.allowTaskRunInTestMode) {
+      if (hasInteractiveSession()) {
+        try {
+          execFileSync("schtasks", ["/run", "/tn", TASK_NAME], { stdio: "ignore", timeout: 10000 });
+          log("task companion acionada apos update");
+        } catch (e) {
+          log("task companion nao foi acionada apos update: " + e.message);
+          throw new Error("falha ao acionar task companion apos update");
+        }
+      } else {
+        log("sem sessao interativa; task companion aguardara proximo logon");
+      }
     }
 
     log("atualizacao concluida (servico Running)");
