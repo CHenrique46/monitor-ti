@@ -6,6 +6,7 @@ const WebSocket = require("ws");
 const checkDiskSpace = require("check-disk-space").default;
 const { execFile, spawn } = require("child_process");
 const { createNotifier } = require("./notifier");
+const { sendCurrentCapabilities } = require("./capabilities");
 
 // Atualizador: se iniciado com --apply-update (arquivo unico) ou
 // --apply-update-package (pacote Agent+Notifier), executa apenas a troca e
@@ -135,13 +136,7 @@ const notifier = createNotifier({
   // de conseguir exibi-los).
   onNotifierReady: () => {
     try {
-      if (activeWs && activeWs.readyState === 1) {
-        activeWs.send(JSON.stringify({
-          type: "capabilities",
-          deviceId,
-          data: { capabilities: ["notices"] }
-        }));
-      }
+      sendCurrentCapabilities(activeWs && activeWs.readyState === 1 ? activeWs : null, deviceId, notifier);
     } catch (e) {}
   }
 });
@@ -528,6 +523,7 @@ function connect(machine) {
       notifierStarted = true;
       notifier.start(ws);
     }
+    sendCurrentCapabilities(ws, machine.deviceId, notifier);
   });
 
   ws.on("message", (raw) => {
