@@ -21,4 +21,16 @@ async function getById(req, res) {
   }
 }
 
-module.exports = { list, getById };
+async function getCapabilities(req, res) {
+  try {
+    const item = await computadoresService.getCapabilitiesById(req.params.id);
+    if (!item) {
+      return res.status(404).json({ erro: "Computador não encontrado" });
+    }
+    return res.status(200).json(item);
+  } catch (err) {
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+}
+
+module.exports = { list, getById, getCapabilities };

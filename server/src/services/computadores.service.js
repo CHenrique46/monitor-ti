@@ -54,4 +54,30 @@ async function getById(id) {
   return c ? mapComputador(c) : null;
 }
 
-module.exports = { list, getById };
+async function getCapabilitiesById(id) {
+  const c = await prisma.computador.findUnique({
+    where: { id: Number(id) },
+    select: {
+      id: true,
+      deviceId: true,
+      agentVersion: true,
+      status: true
+    }
+  });
+
+  if (!c) return null;
+
+  const agentServer = require("../ws/agentServer");
+  const capabilities = agentServer.getCapabilities(c.deviceId);
+  return {
+    id: c.id,
+    deviceId: c.deviceId,
+    agentVersion: c.agentVersion,
+    status: c.status,
+    capabilities,
+    notifierReady: agentServer.hasCapability(c.deviceId, "notices"),
+    capabilitiesVolatile: true
+  };
+}
+
+module.exports = { list, getById, getCapabilitiesById };

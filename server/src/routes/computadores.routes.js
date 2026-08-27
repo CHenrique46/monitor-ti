@@ -5,6 +5,7 @@ const agentUpdateController = require("../controllers/agentUpdate.controller");
 
 router.get("/", computadoresController.list);
 router.get("/:id", computadoresController.getById);
+router.get("/:id/capabilities", computadoresController.getCapabilities);
 router.post("/:id/agent-update", agentUpdateController.trigger);
 router.get("/:id/agent-update", agentUpdateController.status);
 

@@ -135,9 +135,13 @@ const notifier = createNotifier({
   // este Agent agora tem a capacidade "notices" (evita receber avisos antes
   // de conseguir exibi-los).
   onNotifierReady: () => {
-    try {
-      sendCurrentCapabilities(activeWs && activeWs.readyState === 1 ? activeWs : null, deviceId, notifier);
-    } catch (e) {}
+    const ws = activeWs;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (ws !== activeWs) {
+      logEvent("socket stale ignorado ao anunciar capabilities");
+      return;
+    }
+    sendCurrentCapabilities(ws, deviceId, notifier, logEvent).catch(() => {});
   }
 });
 
@@ -325,6 +329,15 @@ let metricsTimer = null;
 let activeWs = null;
 let notifierStarted = false;
 let notifierEnsureStarted = false;
+
+async function announceCapabilities(ws) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (ws !== activeWs) {
+    logEvent("socket stale ignorado ao anunciar capabilities");
+    return;
+  }
+  await sendCurrentCapabilities(ws, machine.deviceId, notifier, logEvent);
+}
 
 // ===== Atualização centralizada do Agent =====
 
@@ -518,12 +531,15 @@ function connect(machine) {
   ws.on("open", () => {
     logEvent("Conectado ao Monitor TI Server.");
     ws.send(JSON.stringify({ type: "register", data: machine }));
+    logEvent("register enviado");
     startMetrics(ws, machine);
     if (!notifierStarted) {
       notifierStarted = true;
       notifier.start(ws);
     }
-    sendCurrentCapabilities(ws, machine.deviceId, notifier);
+    announceCapabilities(ws).catch((err) => {
+      logEvent("Erro ao enviar capabilities: " + err.message);
+    });
   });
 
   ws.on("message", (raw) => {
@@ -549,6 +565,7 @@ function connect(machine) {
     stopMetrics();
     logEvent("Desconectado do servidor.");
     logEvent(`Tentando reconectar em ${RECONNECT_DELAY / 1000}s...`);
+    if (activeWs === ws) activeWs = null;
     setTimeout(() => connect(machine), RECONNECT_DELAY);
   });
 }
