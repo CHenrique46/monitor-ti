@@ -5,8 +5,7 @@ const crypto = require("crypto");
 const WebSocket = require("ws");
 const checkDiskSpace = require("check-disk-space").default;
 const { execFile, spawn } = require("child_process");
-const { createNotifier } = require("./notifier");
-const { sendCurrentCapabilities } = require("./capabilities");
+const { createNoticeBridge } = require("./notices/bridge");
 
 // Atualizador: se iniciado com --apply-update (arquivo unico) ou
 // --apply-update-package (pacote Agent+Notifier), executa apenas a troca e
@@ -122,28 +121,11 @@ function getServerUrl() {
 
 const SERVER_URL = getServerUrl();
 
-// Módulo de avisos (Notifier): integra notice_show, fila, cache e IPC.
-const notifier = createNotifier({
-  configDir: CONFIG_DIR,
-  getAppDir,
-  getDeviceId: () => deviceId,
-  getWs: () => activeWs,
-  logEvent,
-  version: AGENT_VERSION,
-  getServerHttpBase: () => SERVER_URL,
-  // Quando o Notifier termina de ser obtido/instalado, avisa o servidor que
-  // este Agent agora tem a capacidade "notices" (evita receber avisos antes
-  // de conseguir exibi-los).
-  onNotifierReady: () => {
-    const ws = activeWs;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (ws !== activeWs) {
-      logEvent("socket stale ignorado ao anunciar capabilities");
-      return;
-    }
-    sendCurrentCapabilities(ws, deviceId, notifier, logEvent).catch(() => {});
-  }
-});
+let machine = null;
+let activeWs = null;
+
+// Módulo de avisos: legado por padrão, companion quando MTI_NOTICES_COMPANION=1.
+let noticesBridge = null;
 
 function getDeviceId() {
   try {
@@ -194,9 +176,8 @@ function getMachineInfo(deviceId) {
     cpusLogicas: cpus.length,
     sistemaRelease: os.release(),
     agentVersion: AGENT_VERSION,
-    // Capacidades reportadas ao servidor. "notices" só entra quando o Notifier
-    // está presente (e, após o bootstrap, quando terminar de ser instalado).
-    capabilities: notifier.isNotifierReady() ? ["notices"] : []
+    // Capacidades reportadas ao servidor. "notices" depende do modo ativo.
+    capabilities: noticesBridge && noticesBridge.isNotifierReady() ? ["notices"] : []
   };
 }
 
@@ -326,18 +307,6 @@ async function collectMetrics(deviceId) {
 }
 
 let metricsTimer = null;
-let activeWs = null;
-let notifierStarted = false;
-let notifierEnsureStarted = false;
-
-async function announceCapabilities(ws) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (ws !== activeWs) {
-    logEvent("socket stale ignorado ao anunciar capabilities");
-    return;
-  }
-  await sendCurrentCapabilities(ws, machine.deviceId, notifier, logEvent);
-}
 
 // ===== Atualização centralizada do Agent =====
 
@@ -404,6 +373,12 @@ async function handleUpdateCommand(ws, msg) {
   let tmpFile = null;
   let packageDir = null;
   try {
+    if (noticesBridge && typeof noticesBridge.shutdownForUpdate === "function") {
+      const ok = await noticesBridge.shutdownForUpdate();
+      if (!ok) {
+        logEvent("aviso: shutdown do companion expirou ou nao respondeu; seguindo com update controlado");
+      }
+    }
     sendUpdateStatus(ws, "update_downloading", version);
 
     const tmpDir = path.join(CONFIG_DIR, "agent-update");
@@ -523,23 +498,17 @@ function connect(machine) {
   const ws = new WebSocket(SERVER_URL);
   activeWs = ws;
 
-  if (!notifierEnsureStarted) {
-    notifierEnsureStarted = true;
-    notifier.ensureNotifierPresent();
-  }
-
   ws.on("open", () => {
     logEvent("Conectado ao Monitor TI Server.");
     ws.send(JSON.stringify({ type: "register", data: machine }));
     logEvent("register enviado");
     startMetrics(ws, machine);
-    if (!notifierStarted) {
-      notifierStarted = true;
-      notifier.start(ws);
+    if (noticesBridge) {
+      noticesBridge.onWsOpen(ws);
+      if (noticesBridge.isCompanionMode && noticesBridge.attemptCompanionTaskRunIfNeeded) {
+        noticesBridge.attemptCompanionTaskRunIfNeeded();
+      }
     }
-    announceCapabilities(ws).catch((err) => {
-      logEvent("Erro ao enviar capabilities: " + err.message);
-    });
   });
 
   ws.on("message", (raw) => {
@@ -552,7 +521,9 @@ function connect(machine) {
     if (msg && msg.type === "update_agent") {
       handleUpdateCommand(ws, msg).catch(() => {});
     } else if (msg && msg.type === "notice_show") {
-      notifier.handleNoticeShow(ws, msg);
+      if (noticesBridge) {
+        noticesBridge.handleServerMessage(ws, msg);
+      }
     }
   });
 
@@ -565,6 +536,9 @@ function connect(machine) {
     stopMetrics();
     logEvent("Desconectado do servidor.");
     logEvent(`Tentando reconectar em ${RECONNECT_DELAY / 1000}s...`);
+    if (noticesBridge) {
+      noticesBridge.onWsClose(ws);
+    }
     if (activeWs === ws) activeWs = null;
     setTimeout(() => connect(machine), RECONNECT_DELAY);
   });
@@ -572,6 +546,9 @@ function connect(machine) {
 
 function shutdown() {
   stopMetrics();
+  if (noticesBridge) {
+    noticesBridge.shutdown();
+  }
   if (activeWs) {
     try {
       if (activeWs.readyState === WebSocket.OPEN) activeWs.close();
@@ -590,7 +567,17 @@ process.on("SIGTERM", shutdown);
 logEvent("Monitor TI Agent iniciado.");
 const deviceId = getDeviceId();
 logEvent("deviceId: " + deviceId);
-const machine = getMachineInfo(deviceId);
+noticesBridge = createNoticeBridge({
+  configDir: CONFIG_DIR,
+  getAppDir,
+  getDeviceId: () => deviceId,
+  getServerHttpBase: () => SERVER_URL,
+  logEvent,
+  version: AGENT_VERSION,
+  getInteractiveUser: () => (machine && machine.usuario) || null,
+  companionEnabled: process.env.MTI_NOTICES_COMPANION
+});
+machine = getMachineInfo(deviceId);
 cpuUsagePercent(); // baseline da CPU
 
 // Inventario avancado + usuario interativo: coletados uma unica vez na

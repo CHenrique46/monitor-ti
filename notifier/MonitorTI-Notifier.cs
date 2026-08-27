@@ -24,6 +24,7 @@ namespace MonitorTI
 
     public class Program
     {
+        private const int PROTOCOL_VERSION = 1;
         private const string PIPE_PREFIX = "MonitorTI-Notice-";
         private const int MAX_PAYLOAD_BYTES = 64 * 1024;
 
@@ -31,10 +32,30 @@ namespace MonitorTI
         private static string _payloadFile;
         private static bool _autoAck;
         private static bool _promoted;
+        private static bool _companionMode;
         private static NamedPipeClientStream _pipe;
         private static StreamWriter _pipeWriter;
         private static Task _connectTask;
         private static volatile bool _connected;
+        private static volatile string _activeNoticeDeliveryId;
+
+        private const string COMPANION_PIPE_NAME = "MonitorTI-Notifier";
+        private const int COMPANION_HEARTBEAT_MS = 15000;
+        private const int COMPANION_RECONNECT_MS = 2000;
+        private const string COMPANION_VERSION = "1.1.8";
+
+        private static string ContextTag()
+        {
+            try
+            {
+                var p = Process.GetCurrentProcess();
+                return "[pid=" + p.Id + " session=" + p.SessionId + "]";
+            }
+            catch
+            {
+                return "[pid=? session=?]";
+            }
+        }
 
         private static string LogPath
         {
@@ -49,9 +70,14 @@ namespace MonitorTI
         {
             try
             {
-                string line = "[" + DateTime.UtcNow.ToString("o") + "] " + message;
+                string line = "[" + DateTime.UtcNow.ToString("o") + "] " + ContextTag() + " " + message;
                 Directory.CreateDirectory(Path.GetDirectoryName(LogPath));
                 File.AppendAllText(LogPath, line + Environment.NewLine, Encoding.UTF8);
+                if (string.Equals(Environment.GetEnvironmentVariable("MTI_PROMO_TRACE"), "1", StringComparison.OrdinalIgnoreCase))
+                {
+                    string tracePath = Path.Combine(Path.GetTempPath(), "MonitorTI-promo-trace.log");
+                    File.AppendAllText(tracePath, line + Environment.NewLine, Encoding.UTF8);
+                }
             }
             catch { }
         }
@@ -67,12 +93,30 @@ namespace MonitorTI
         {
             try
             {
+                if (HasArg(args, "--companion"))
+                {
+                    RunCompanionMode(args);
+                    return;
+                }
+
+                Application.ThreadException += (s, e) => Log("ThreadException: " + e.Exception.GetType().FullName + ": " + e.Exception.Message + "\n" + e.Exception.StackTrace);
+                AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+                {
+                    var ex = e.ExceptionObject as Exception;
+                    if (ex != null) Log("UnhandledException: " + ex.GetType().FullName + ": " + ex.Message + "\n" + ex.StackTrace);
+                    else Log("UnhandledException: " + e.ExceptionObject);
+                };
+
                 Log("processo iniciado; sessionId=" + CurrentSessionId());
+                Log("args=" + string.Join(" | ", args));
+                Log("executable=" + Application.ExecutablePath);
+                Log("currentDirectory=" + Environment.CurrentDirectory);
                 if (!ParseArgs(args) || !ValidatePipeName(_pipeName))
                 {
                     Fail("Argumentos ou pipe invalidos.");
                     return;
                 }
+                Log("argumentos validados; pipe=" + _pipeName + "; payload=" + _payloadFile + "; promoted=" + _promoted);
 
                 // Se estivermos em sessao 0 (servico/LocalSystem) ou como SYSTEM,
                 // promovemos o processo para a sessao interativa do usuario via WTS.
@@ -93,12 +137,14 @@ namespace MonitorTI
                     Fail("Conteudo do aviso invalido.");
                     return;
                 }
+                Log("payload carregado; noticeDeliveryId=" + payload.noticeDeliveryId + "; title=" + payload.title);
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
 
                 using (var form = new NoticeForm(payload))
                 {
+                    form.Load += (s, e) => Log("Form.Load");
                     form.Shown += (s, e) =>
                     {
                         Log("Form.Shown");
@@ -125,6 +171,79 @@ namespace MonitorTI
                 try { File.WriteAllText(Path.Combine(Path.GetTempPath(), "MonitorTI-Notifier-error.log"), ex.ToString()); } catch { }
                 Environment.Exit(1);
             }
+        }
+
+        private static void RunCompanionMode(string[] args)
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Log("companion mode iniciado; pipe=" + COMPANION_PIPE_NAME + "; sessionId=" + CurrentSessionId());
+            Application.Run(new CompanionHostForm(args));
+        }
+
+        private static string JsonEscape(string value)
+        {
+            if (value == null) return "";
+            var sb = new StringBuilder();
+            foreach (char c in value)
+            {
+                switch (c)
+                {
+                    case '\\': sb.Append("\\\\"); break;
+                    case '"': sb.Append("\\\""); break;
+                    case '\b': sb.Append("\\b"); break;
+                    case '\f': sb.Append("\\f"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (char.IsControl(c)) sb.Append("\\u" + ((int)c).ToString("x4"));
+                        else sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static string BuildJsonLine(params string[] pairs)
+        {
+            var sb = new StringBuilder();
+            sb.Append("{");
+            for (int i = 0; i < pairs.Length; i += 2)
+            {
+                if (i > 0) sb.Append(",");
+                sb.Append('"').Append(JsonEscape(pairs[i])).Append('"').Append(":").Append(pairs[i + 1]);
+            }
+            sb.Append("}");
+            return sb.ToString();
+        }
+
+        private static string JsonStringLiteral(string value)
+        {
+            return '"' + JsonEscape(value ?? "") + '"';
+        }
+
+        private static NoticePayload ParseNoticePayloadFromJson(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            var p = new NoticePayload();
+            p.noticeDeliveryId = GetJsonString(json, "noticeDeliveryId");
+            p.title = GetJsonString(json, "title");
+            p.message = GetJsonString(json, "message");
+            p.level = GetJsonString(json, "level");
+            p.scheduledAt = GetJsonString(json, "scheduledAt");
+            p.serverTime = GetJsonString(json, "serverTime");
+            return p;
+        }
+
+        private static string GetPipeMessageType(string json)
+        {
+            return GetJsonString(json, "type");
+        }
+
+        private static bool CanCloseFromUi()
+        {
+            return string.Equals(Environment.GetEnvironmentVariable("MTI_COMPANION_ALLOW_CLOSE"), "1", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void SendAckThenExit()
@@ -179,6 +298,7 @@ namespace MonitorTI
         private static NoticePayload ReadPayload()
         {
             if (string.IsNullOrEmpty(_payloadFile) || !File.Exists(_payloadFile)) return null;
+            Log("lendo payload: " + _payloadFile);
             byte[] bytes = File.ReadAllBytes(_payloadFile);
             if (bytes.Length > MAX_PAYLOAD_BYTES) return null;
             string json = Encoding.UTF8.GetString(bytes);
@@ -265,11 +385,23 @@ namespace MonitorTI
                     _autoAck = true;
                 else if (string.Equals(args[i], "--promoted", StringComparison.OrdinalIgnoreCase))
                     _promoted = true;
+                else if (string.Equals(args[i], "--companion", StringComparison.OrdinalIgnoreCase))
+                    _companionMode = true;
             }
             bool ok = !string.IsNullOrEmpty(_pipeName) && !string.IsNullOrEmpty(_payloadFile);
             if (ok && _pipeName.StartsWith("\\\\.\\pipe\\", StringComparison.OrdinalIgnoreCase))
                 _pipeName = _pipeName.Substring("\\\\.\\pipe\\".Length);
             return ok;
+        }
+
+        private static bool HasArg(string[] args, string name)
+        {
+            if (args == null) return false;
+            foreach (var a in args)
+            {
+                if (string.Equals(a, name, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
         }
 
         private static bool IsSystem()
@@ -298,11 +430,208 @@ namespace MonitorTI
             return "\"" + a.Replace("\"", "\"\"") + "\"";
         }
 
+        private static bool TryLaunchPromotedProcessFromToken(IntPtr sourceToken, string sourceLabel, string[] args)
+        {
+            IntPtr hPrimary = IntPtr.Zero;
+            IntPtr env = IntPtr.Zero;
+            IntPtr hProcess = IntPtr.Zero;
+            IntPtr hThread = IntPtr.Zero;
+            DateTime started = DateTime.UtcNow;
+
+            try
+            {
+                const uint TOKEN_ALL_ACCESS = 0xF01FF;
+                const int SecurityImpersonation = 2;
+                const int TokenPrimary = 1;
+
+                Log(sourceLabel + ": DuplicateTokenEx inicio");
+                if (!WTS.DuplicateTokenEx(sourceToken, TOKEN_ALL_ACCESS, IntPtr.Zero, SecurityImpersonation, TokenPrimary, out hPrimary))
+                {
+                    LogLastError(sourceLabel + ": DuplicateTokenEx");
+                    return false;
+                }
+                LogSuccess(sourceLabel + ": DuplicateTokenEx");
+
+                Log(sourceLabel + ": CreateEnvironmentBlock inicio");
+                if (!WTS.CreateEnvironmentBlock(out env, hPrimary, false))
+                {
+                    LogLastError(sourceLabel + ": CreateEnvironmentBlock");
+                    env = IntPtr.Zero;
+                }
+                else
+                {
+                    LogSuccess(sourceLabel + ": CreateEnvironmentBlock");
+                }
+
+                string owner = null;
+                try
+                {
+                    using (var id = new WindowsIdentity(hPrimary))
+                    {
+                        owner = id.Name;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    owner = "<indisponivel: " + ex.Message + ">";
+                }
+                Log(sourceLabel + ": owner=" + owner);
+
+                WTS.STARTUPINFO si = new WTS.STARTUPINFO();
+                si.cb = Marshal.SizeOf(typeof(WTS.STARTUPINFO));
+                si.lpDesktop = "winsta0\\default";
+                si.dwFlags = 0x00000100;
+                si.wShowWindow = 1;
+                WTS.PROCESS_INFORMATION pi;
+
+                var argList = new System.Collections.Generic.List<string>(args);
+                argList.Add("--promoted");
+                string cmdLine = "\"" + Application.ExecutablePath + "\" " + string.Join(" ", argList.ConvertAll(EscapeArg));
+                string currentDir = Path.GetDirectoryName(Application.ExecutablePath);
+
+                Log(sourceLabel + ": desktop=winsta0\\default; CreationFlags=0x400");
+                Log(sourceLabel + ": applicationName=<null>; commandLine=" + cmdLine);
+                Log(sourceLabel + ": currentDirectory=" + currentDir);
+                Log(sourceLabel + ": CreateProcessAsUser inicio");
+                if (!WTS.CreateProcessAsUser(hPrimary, null, cmdLine, IntPtr.Zero, IntPtr.Zero, false, 0x00000400, env, currentDir, ref si, out pi))
+                {
+                    LogLastError(sourceLabel + ": CreateProcessAsUser");
+                    return false;
+                }
+
+                hProcess = pi.hProcess;
+                hThread = pi.hThread;
+                LogSuccess(sourceLabel + ": CreateProcessAsUser");
+                Log(sourceLabel + ": processo filho criado; pid=" + pi.dwProcessId);
+                try
+                {
+                    var child = Process.GetProcessById(pi.dwProcessId);
+                    Log(sourceLabel + ": child session=" + child.SessionId);
+                    try { Log(sourceLabel + ": child exe=" + child.MainModule.FileName); } catch (Exception ex) { Log(sourceLabel + ": child exe indisponivel: " + ex.Message); }
+                }
+                catch (Exception ex)
+                {
+                    Log(sourceLabel + ": child process lookup falhou: " + ex.Message);
+                }
+
+                try
+                {
+                    uint wait = WTS.WaitForSingleObject(hProcess, 1500);
+                    if (wait == 0)
+                    {
+                        uint exitCode;
+                        if (WTS.GetExitCodeProcess(hProcess, out exitCode))
+                        {
+                            Log(sourceLabel + ": child terminou rapido; ExitCode=" + exitCode + "; lifetimeMs=" + (int)(DateTime.UtcNow - started).TotalMilliseconds);
+                        }
+                        else
+                        {
+                            LogLastError(sourceLabel + ": GetExitCodeProcess");
+                        }
+                    }
+                    else if (wait == 258)
+                    {
+                        Log(sourceLabel + ": child ainda em execucao apos 1500ms");
+                    }
+                    else
+                    {
+                        Log(sourceLabel + ": WaitForSingleObject retorno=" + wait);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log(sourceLabel + ": observacao do filho falhou: " + ex.Message);
+                }
+                return true;
+            }
+            finally
+            {
+                try { if (env != IntPtr.Zero) WTS.DestroyEnvironmentBlock(env); } catch { }
+                try { if (hProcess != IntPtr.Zero) WTS.CloseHandle(hProcess); } catch { }
+                try { if (hThread != IntPtr.Zero) WTS.CloseHandle(hThread); } catch { }
+                try { if (hPrimary != IntPtr.Zero) WTS.CloseHandle(hPrimary); } catch { }
+            }
+        }
+
+        private static bool TryLaunchFromExplorerSession(int sessionId, string[] args)
+        {
+            try
+            {
+                var explorers = Process.GetProcessesByName("explorer");
+                foreach (var p in explorers)
+                {
+                    try
+                    {
+                        if (p.SessionId != sessionId) continue;
+                        Log("explorer encontrado na sessao " + sessionId + ": pid=" + p.Id);
+                        IntPtr hProcess = WTS.OpenProcess(0x1000, false, p.Id);
+                        if (hProcess == IntPtr.Zero)
+                        {
+                            LogLastError("OpenProcess(explorer pid=" + p.Id + ")");
+                            continue;
+                        }
+
+                        try
+                        {
+                            IntPtr hToken = IntPtr.Zero;
+                            uint access = 0x0001 | 0x0002 | 0x0008 | 0x0080 | 0x0100;
+                            Log("OpenProcessToken inicio; access=0x" + access.ToString("X"));
+                            if (!WTS.OpenProcessToken(hProcess, access, out hToken))
+                            {
+                                LogLastError("OpenProcessToken(explorer pid=" + p.Id + ")");
+                                continue;
+                            }
+                            LogSuccess("OpenProcessToken(explorer pid=" + p.Id + ")");
+                            Log("token do explorer obtido: 0x" + hToken.ToString("X"));
+
+                            if (TryLaunchPromotedProcessFromToken(hToken, "explorer token", args))
+                            {
+                                WTS.CloseHandle(hToken);
+                                return true;
+                            }
+                            WTS.CloseHandle(hToken);
+                        }
+                        finally
+                        {
+                            WTS.CloseHandle(hProcess);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("explorer token fallback falhou: " + ex.Message);
+            }
+            return false;
+        }
+
+        private static void LogLastError(string api)
+        {
+            try
+            {
+                int code = Marshal.GetLastWin32Error();
+                var ex = new System.ComponentModel.Win32Exception(code);
+                Log(api + ": falha; GetLastWin32Error=" + code + " " + ex.Message);
+            }
+            catch { }
+        }
+
+        private static void LogSuccess(string api)
+        {
+            Log(api + ": sucesso");
+        }
+
         private static bool TryPromoteToUserSession(string[] args)
         {
             IntPtr ptr = IntPtr.Zero;
             int count = 0;
-            if (!WTS.WTSEnumerateSessions(IntPtr.Zero, 0, 1, out ptr, out count)) return false;
+            if (!WTS.WTSEnumerateSessions(IntPtr.Zero, 0, 1, out ptr, out count))
+            {
+                LogLastError("WTSEnumerateSessions");
+                return false;
+            }
+            LogSuccess("WTSEnumerateSessions");
             int activeId = -1;
             try
             {
@@ -322,49 +651,380 @@ namespace MonitorTI
 
             Log("sessao interativa selecionada: " + activeId);
 
-            IntPtr hToken = IntPtr.Zero;
-            if (!WTS.WTSQueryUserToken(activeId, out hToken)) return false;
-
-            IntPtr hPrimary = IntPtr.Zero;
-            if (!WTS.DuplicateTokenEx(hToken, 0x200FFFFF, IntPtr.Zero, 2, 1, out hPrimary))
+            // Caminho primario: token do explorer.exe da sessao interativa.
+            if (TryLaunchFromExplorerSession(activeId, args))
             {
-                WTS.CloseHandle(hToken);
+                return true;
+            }
+            Log("fallback explorer token nao conseguiu promover; tentando WTSQueryUserToken");
+
+            IntPtr hToken = IntPtr.Zero;
+            Log("WTSQueryUserToken(session=" + activeId + "): inicio");
+            if (!WTS.WTSQueryUserToken(activeId, out hToken))
+            {
+                LogLastError("WTSQueryUserToken(session=" + activeId + ")");
                 return false;
             }
+            LogSuccess("WTSQueryUserToken(session=" + activeId + ")");
+            Log("token obtido: 0x" + hToken.ToString("X"));
 
-            IntPtr env = IntPtr.Zero;
-            WTS.CreateEnvironmentBlock(out env, hPrimary, false);
+            bool created = TryLaunchPromotedProcessFromToken(hToken, "WTSQueryUserToken", args);
+            try { if (hToken != IntPtr.Zero) WTS.CloseHandle(hToken); } catch { }
+            return created;
+        }
 
-            WTS.STARTUPINFO si = new WTS.STARTUPINFO();
-            si.cb = Marshal.SizeOf(typeof(WTS.STARTUPINFO));
-            si.lpDesktop = "winsta0\\default";
-            si.dwFlags = 0x00000100;
-            si.wShowWindow = 1;
-            WTS.PROCESS_INFORMATION pi;
+        private sealed class CompanionHostForm : Form
+        {
+            private readonly string[] _args;
+            private CompanionController _controller;
 
-            var argList = new System.Collections.Generic.List<string>(args);
-            argList.Add("--promoted");
-            string cmdLine = "\"" + Application.ExecutablePath + "\" " + string.Join(" ", argList.ConvertAll(EscapeArg));
-
-            Log("CreateProcessAsUser iniciado");
-            bool created = WTS.CreateProcessAsUser(hPrimary, null, cmdLine, IntPtr.Zero, IntPtr.Zero, false, 0x00000400, env, null, ref si, out pi);
-            try
+            public CompanionHostForm(string[] args)
             {
-                if (created)
+                _args = args ?? new string[0];
+                ShowInTaskbar = false;
+                FormBorderStyle = FormBorderStyle.FixedToolWindow;
+                WindowState = FormWindowState.Minimized;
+                Opacity = 0;
+                Load += (s, e) => Hide();
+                Shown += (s, e) =>
                 {
-                    Log("processo filho criado; pid=" + pi.dwProcessId);
-                    WTS.CloseHandle(pi.hProcess);
-                    WTS.CloseHandle(pi.hThread);
-                }
-                else
+                    if (_controller == null)
+                    {
+                        _controller = new CompanionController(this, _args);
+                        _controller.Start();
+                    }
+                };
+                FormClosing += (s, e) =>
                 {
-                    Log("erro de promocao CreateProcessAsUser");
+                    try { if (_controller != null) _controller.Dispose(); } catch { }
+                };
+            }
+        }
+
+        private sealed class CompanionController : IDisposable
+        {
+            private readonly Control _ui;
+            private readonly string[] _args;
+            private readonly object _sendLock = new object();
+            private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+            private readonly System.Windows.Forms.Timer _heartbeatTimer = new System.Windows.Forms.Timer();
+            private NamedPipeClientStream _pipe;
+            private StreamReader _reader;
+            private StreamWriter _writer;
+            private Task _readerTask;
+            private NoticeForm _currentForm;
+            private volatile bool _registered;
+            private volatile bool _ready;
+            private volatile bool _disposed;
+
+            public CompanionController(Control ui, string[] args)
+            {
+                _ui = ui;
+                _args = args ?? new string[0];
+                _heartbeatTimer.Interval = COMPANION_HEARTBEAT_MS;
+                _heartbeatTimer.Tick += (s, e) =>
+                {
+                    if (_registered && _ready) SendHeartbeat();
+                };
+            }
+
+            public void Start()
+            {
+                Task.Run(() => ConnectLoop());
+            }
+
+            private async Task ConnectLoop()
+            {
+                while (!_cts.IsCancellationRequested)
+                {
+                    bool shouldDelay = false;
+                    try
+                    {
+                        ConnectOnce();
+                        await ReadLoop();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("companion reconnect: " + ex.Message);
+                    }
+                    finally
+                    {
+                        CleanupPipe();
+                        shouldDelay = !_cts.IsCancellationRequested;
+                    }
+
+                    if (shouldDelay)
+                    {
+                        await Task.Delay(COMPANION_RECONNECT_MS);
+                    }
                 }
             }
-            catch { }
-            try { WTS.DestroyEnvironmentBlock(env); } catch { }
-            try { WTS.CloseHandle(hPrimary); WTS.CloseHandle(hToken); } catch { }
-            return created;
+
+            private void ConnectOnce()
+            {
+                _pipe = new NamedPipeClientStream(".", COMPANION_PIPE_NAME, PipeDirection.InOut, PipeOptions.Asynchronous);
+                Log("companion_connecting " + COMPANION_PIPE_NAME);
+                if (!_pipe.ConnectAsync(10000).Wait(11000))
+                    throw new TimeoutException("timeout ao conectar no pipe");
+
+                _reader = new StreamReader(_pipe, Encoding.UTF8, false, 1024, true);
+                _writer = new StreamWriter(_pipe, new UTF8Encoding(false)) { AutoFlush = true };
+                _registered = false;
+                _ready = false;
+                SendRegister();
+                _readerTask = Task.Run(() => ReadLoopBody());
+            }
+
+            private async Task ReadLoop()
+            {
+                if (_readerTask != null)
+                {
+                    await _readerTask;
+                }
+            }
+
+            private void ReadLoopBody()
+            {
+                while (!_cts.IsCancellationRequested)
+                {
+                    string line;
+                    try
+                    {
+                        line = _reader.ReadLine();
+                    }
+                    catch
+                    {
+                        break;
+                    }
+
+                    if (line == null) break;
+                    HandleLine(line);
+                }
+            }
+
+            private void HandleLine(string line)
+            {
+                var type = GetPipeMessageType(line);
+                if (string.IsNullOrEmpty(type)) return;
+
+                if (string.Equals(type, "register_ok", StringComparison.OrdinalIgnoreCase))
+                {
+                    _registered = true;
+                    _ready = true;
+                    Log("register_ok recebido");
+                    if (!_heartbeatTimer.Enabled) _heartbeatTimer.Start();
+                    SendHeartbeat();
+                    return;
+                }
+
+                if (string.Equals(type, "notice_show", StringComparison.OrdinalIgnoreCase))
+                {
+                    var payload = ParseNoticePayloadFromJson(line);
+                    if (payload == null || string.IsNullOrEmpty(payload.noticeDeliveryId) || string.IsNullOrEmpty(payload.message))
+                    {
+                        Log("notice_show invalido no companion");
+                        SendError("INVALID_PAYLOAD", "Conteudo do aviso invalido");
+                        return;
+                    }
+
+                    if (_currentForm != null && !_currentForm.IsDisposed)
+                    {
+                        Log("notice_show rejeitado: já existe janela aberta");
+                        SendError("INVALID_STATE", "Já existe janela aberta");
+                        return;
+                    }
+
+                    if (_ui.IsDisposed)
+                    {
+                        SendError("INVALID_STATE", "UI indisponivel");
+                        return;
+                    }
+
+                    _ui.BeginInvoke((Action)(() => ShowNoticeOnUi(payload)));
+                    return;
+                }
+
+                if (string.Equals(type, "error", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log("error do Agent: " + (GetJsonString(line, "code") ?? "unknown") + " " + (GetJsonString(line, "message") ?? ""));
+                    return;
+                }
+
+                if (string.Equals(type, "shutdown", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log("shutdown recebido: " + (GetJsonString(line, "reason") ?? "unknown"));
+                    SendRaw(BuildJsonLine(
+                        "type", JsonStringLiteral("shutdown_ack"),
+                        "protocolVersion", PROTOCOL_VERSION.ToString(),
+                        "reason", JsonStringLiteral(GetJsonString(line, "reason") ?? "update"),
+                        "sessionId", Process.GetCurrentProcess().SessionId.ToString(),
+                        "pid", Process.GetCurrentProcess().Id.ToString(),
+                        "ts", JsonStringLiteral(DateTime.UtcNow.ToString("o"))
+                    ));
+                    Log("shutdown_ack enviado");
+                    try
+                    {
+                        if (_currentForm != null && !_currentForm.IsDisposed)
+                        {
+                            _currentForm.BeginInvoke((Action)(() => _currentForm.Close()));
+                        }
+                    }
+                    catch { }
+                    try
+                    {
+                        _ui.BeginInvoke((Action)(() => ((Form)_ui).Close()));
+                    }
+                    catch { }
+                    return;
+                }
+            }
+
+            private void ShowNoticeOnUi(NoticePayload payload)
+            {
+                if (_currentForm != null && !_currentForm.IsDisposed)
+                {
+                    SendError("INVALID_STATE", "Já existe janela aberta");
+                    return;
+                }
+
+                _currentForm = new NoticeForm(payload);
+                _currentForm.BlockWindowClose = true;
+                _currentForm.Shown += (s, e) =>
+                {
+                    Log("Form.Shown");
+                    SendReceived(payload.noticeDeliveryId);
+                };
+                _currentForm.Acked += () =>
+                {
+                    Log("ENTENDI clicado");
+                    SendAcknowledged(payload.noticeDeliveryId);
+                };
+                _currentForm.FormClosed += (s, e) =>
+                {
+                    if (string.Equals(_activeNoticeDeliveryId, payload.noticeDeliveryId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _activeNoticeDeliveryId = null;
+                    }
+                    _currentForm = null;
+                    _ready = true;
+                };
+
+                _activeNoticeDeliveryId = payload.noticeDeliveryId;
+                _currentForm.StartPosition = FormStartPosition.CenterScreen;
+                _currentForm.TopMost = true;
+                _currentForm.ShowInTaskbar = true;
+                _currentForm.Show();
+            }
+
+            private void SendRegister()
+            {
+                var username = WindowsIdentity.GetCurrent().Name;
+                var msg = BuildJsonLine(
+                    "type", JsonStringLiteral("register"),
+                    "protocolVersion", PROTOCOL_VERSION.ToString(),
+                    "notifierVersion", JsonStringLiteral(COMPANION_VERSION),
+                    "sessionId", Process.GetCurrentProcess().SessionId.ToString(),
+                    "pid", Process.GetCurrentProcess().Id.ToString(),
+                    "username", JsonStringLiteral(username),
+                    "activeNoticeDeliveryId", _activeNoticeDeliveryId == null ? "null" : JsonStringLiteral(_activeNoticeDeliveryId)
+                );
+                SendRaw(msg);
+                Log("register enviado");
+            }
+
+            private void SendHeartbeat()
+            {
+                if (_disposed) return;
+                var msg = BuildJsonLine(
+                    "type", JsonStringLiteral("heartbeat"),
+                    "protocolVersion", PROTOCOL_VERSION.ToString(),
+                    "sessionId", Process.GetCurrentProcess().SessionId.ToString(),
+                    "pid", Process.GetCurrentProcess().Id.ToString(),
+                    "ts", JsonStringLiteral(DateTime.UtcNow.ToString("o"))
+                );
+                SendRaw(msg);
+                _ready = true;
+                Log("heartbeat enviado");
+            }
+
+            private void SendReceived(string noticeDeliveryId)
+            {
+                var msg = BuildJsonLine(
+                    "type", JsonStringLiteral("received"),
+                    "protocolVersion", PROTOCOL_VERSION.ToString(),
+                    "noticeDeliveryId", JsonStringLiteral(noticeDeliveryId),
+                    "sessionId", Process.GetCurrentProcess().SessionId.ToString(),
+                    "pid", Process.GetCurrentProcess().Id.ToString(),
+                    "ts", JsonStringLiteral(DateTime.UtcNow.ToString("o"))
+                );
+                SendRaw(msg);
+                Log("received enviado");
+            }
+
+            private void SendAcknowledged(string noticeDeliveryId)
+            {
+                var msg = BuildJsonLine(
+                    "type", JsonStringLiteral("acknowledged"),
+                    "protocolVersion", PROTOCOL_VERSION.ToString(),
+                    "noticeDeliveryId", JsonStringLiteral(noticeDeliveryId),
+                    "sessionId", Process.GetCurrentProcess().SessionId.ToString(),
+                    "pid", Process.GetCurrentProcess().Id.ToString(),
+                    "ts", JsonStringLiteral(DateTime.UtcNow.ToString("o"))
+                );
+                SendRaw(msg);
+                Log("acknowledged enviado");
+            }
+
+            private void SendError(string code, string message)
+            {
+                var msg = BuildJsonLine(
+                    "type", JsonStringLiteral("error"),
+                    "protocolVersion", PROTOCOL_VERSION.ToString(),
+                    "code", JsonStringLiteral(code),
+                    "message", JsonStringLiteral(message)
+                );
+                SendRaw(msg);
+            }
+
+            private void SendRaw(string line)
+            {
+                try
+                {
+                    lock (_sendLock)
+                    {
+                        if (_writer == null) return;
+                        _writer.WriteLine(line);
+                        _writer.Flush();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log("companion pipe write falhou: " + ex.Message);
+                }
+            }
+
+            private void CleanupPipe()
+            {
+                try { _heartbeatTimer.Stop(); } catch { }
+                try { if (_reader != null) _reader.Dispose(); } catch { }
+                try { if (_writer != null) _writer.Dispose(); } catch { }
+                try { if (_pipe != null) _pipe.Dispose(); } catch { }
+                _reader = null;
+                _writer = null;
+                _pipe = null;
+                _registered = false;
+                _ready = false;
+            }
+
+            public void Dispose()
+            {
+                if (_disposed) return;
+                _disposed = true;
+                try { _cts.Cancel(); } catch { }
+                CleanupPipe();
+                try { _cts.Dispose(); } catch { }
+                try { _heartbeatTimer.Dispose(); } catch { }
+            }
         }
 
         private static void Fail(string reason)
@@ -416,35 +1076,53 @@ namespace MonitorTI
             public int dwThreadId;
         }
 
-        [DllImport("wtsapi32.dll")]
+        [DllImport("wtsapi32.dll", SetLastError = true)]
         public static extern bool WTSEnumerateSessions(IntPtr hServer, int Reserved, int Version, out IntPtr ppSessionInfo, out int pCount);
 
-        [DllImport("wtsapi32.dll")]
+        [DllImport("wtsapi32.dll", SetLastError = true)]
         public static extern void WTSFreeMemory(IntPtr pMemory);
 
-        [DllImport("wtsapi32.dll")]
+        [DllImport("wtsapi32.dll", SetLastError = true)]
         public static extern bool WTSQueryUserToken(int sessionId, out IntPtr phToken);
 
-        [DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        public static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool CloseHandle(IntPtr hObject);
 
-        [DllImport("kernel32.dll")]
+        [DllImport("advapi32.dll", SetLastError = true)]
         public static extern bool DuplicateTokenEx(IntPtr hExistingToken, uint dwDesiredAccess, IntPtr lpTokenAttributes, int ImpersonationLevel, int TokenType, out IntPtr phNewToken);
 
-        [DllImport("userenv.dll")]
+        [DllImport("userenv.dll", SetLastError = true)]
         public static extern bool CreateEnvironmentBlock(out IntPtr lpEnvironment, IntPtr hToken, bool bInherit);
 
-        [DllImport("userenv.dll")]
+        [DllImport("userenv.dll", SetLastError = true)]
         public static extern bool DestroyEnvironmentBlock(IntPtr lpEnvironment);
 
         [DllImport("advapi32.dll", SetLastError = true)]
         public static extern bool CreateProcessAsUser(IntPtr hToken, string lpApplicationName, string lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
     }
 
     public class NoticeForm : Form
     {
         public event Action Acked;
-        public void TriggerAck() { if (Acked != null) Acked(); }
+        public bool BlockWindowClose { get; set; }
+        private bool _allowClose;
+        public void TriggerAck()
+        {
+            _allowClose = true;
+            if (Acked != null) Acked();
+        }
         private readonly NoticePayload _payload;
         private const int FORM_WIDTH = 520;
         private const int MAX_FORM_HEIGHT = 640;
@@ -466,6 +1144,14 @@ namespace MonitorTI
             this.Text = Sanitize(this._payload.title);
             this.BackColor = SystemColors.Control;
             this.Padding = new Padding(16);
+            this.FormClosing += (s, e) =>
+            {
+                if (BlockWindowClose && !_allowClose)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+            };
 
             int contentWidth = FORM_WIDTH - 32;
 
