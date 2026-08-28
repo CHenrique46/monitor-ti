@@ -19,7 +19,14 @@ const WINSW_URL =
   "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe";
 
 function findISCC() {
+  const localAppIscc = path.join(
+    process.env.LOCALAPPDATA || "",
+    "Programs",
+    "Inno Setup 6",
+    "ISCC.exe"
+  );
   const fixed = [
+    localAppIscc,
     "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe",
     "C:\\Program Files\\Inno Setup 6\\ISCC.exe",
     "C:\\Program Files (x86)\\Inno Setup 5\\ISCC.exe"
