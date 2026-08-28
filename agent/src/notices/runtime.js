@@ -36,6 +36,8 @@ const {
 
 const DEFAULT_PIPE_PATH = "\\\\.\\pipe\\MonitorTI-Notifier";
 const PIPE_RETRY_MS = 2000;
+const LISTEN_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 3000];
+const LISTEN_RETRY_PERIOD_MS = 5000;
 
 function normalizePipePath(pipeName) {
   if (!pipeName) return DEFAULT_PIPE_PATH;
@@ -81,7 +83,8 @@ function createNoticeRuntime(opts) {
     processInfoLookup = defaultProcessInfoLookup,
     pipeName = DEFAULT_PIPE_PATH,
     heartbeatIntervalMs = HEARTBEAT_INTERVAL_MS,
-    heartbeatTimeoutMs = HEARTBEAT_TIMEOUT_MS
+    heartbeatTimeoutMs = HEARTBEAT_TIMEOUT_MS,
+    createServer = () => net.createServer({ allowHalfOpen: false, pauseOnConnect: false })
   } = opts;
 
   const pipePath = normalizePipePath(pipeName);
@@ -92,6 +95,12 @@ function createNoticeRuntime(opts) {
     queueSet: new Set(),
     server: null,
     started: false,
+    listening: false,
+    stopping: false,
+    listenInProgress: false,
+    listenRetryTimer: null,
+    listenFailureCount: 0,
+    listenRetryMs: LISTEN_RETRY_DELAYS_MS[0],
     capability: false,
     heartbeatTimer: null,
     shuttingDown: false,
@@ -102,6 +111,171 @@ function createNoticeRuntime(opts) {
 
   function log(m) {
     if (typeof logEvent === "function") logEvent(m);
+  }
+
+  function clearListenRetryTimer() {
+    if (state.listenRetryTimer) {
+      clearTimeout(state.listenRetryTimer);
+      state.listenRetryTimer = null;
+    }
+  }
+
+  function resetListenRetryBackoff() {
+    state.listenFailureCount = 0;
+    state.listenRetryMs = LISTEN_RETRY_DELAYS_MS[0];
+    clearListenRetryTimer();
+  }
+
+  function nextListenRetryDelayMs() {
+    if (state.listenFailureCount <= 0) return LISTEN_RETRY_DELAYS_MS[0];
+    const idx = state.listenFailureCount - 1;
+    return idx < LISTEN_RETRY_DELAYS_MS.length ? LISTEN_RETRY_DELAYS_MS[idx] : LISTEN_RETRY_PERIOD_MS;
+  }
+
+  function logListenFailure(err, retryMs, fatal = false) {
+    const code = err && err.code ? err.code : "UNKNOWN";
+    const errno = err && err.errno != null ? err.errno : "";
+    const syscall = err && err.syscall ? err.syscall : "listen";
+    const address = err && err.address ? err.address : pipePath;
+    log(
+      (fatal ? "pipe_server_listen_failed_fatal" : "pipe_server_listen_failed") +
+      " code=" + code +
+      " errno=" + errno +
+      " syscall=" + syscall +
+      " address=" + address +
+      " attempt=" + state.listenFailureCount +
+      " retryMs=" + retryMs
+    );
+  }
+
+  function isRecoverableListenError(err) {
+    const code = err && err.code ? String(err.code) : "";
+    return code === "EADDRINUSE" || code === "EACCES" || code === "EPERM";
+  }
+
+  function disposeListenServer(server) {
+    if (!server) return;
+    if (state.server === server) {
+      state.server = null;
+    }
+    state.listenInProgress = false;
+    state.listening = false;
+    try { server.close(); } catch {}
+  }
+
+  function scheduleListenRetry(reason, err) {
+    if (state.stopping || state.listenRetryTimer) return;
+    const retryMs = nextListenRetryDelayMs();
+    state.listenRetryMs = retryMs;
+    state.listenRetryTimer = setTimeout(() => {
+      state.listenRetryTimer = null;
+      if (state.stopping) return;
+      ensurePipeServerListening();
+    }, retryMs);
+    if (typeof state.listenRetryTimer.unref === "function") state.listenRetryTimer.unref();
+    logListenFailure(err, retryMs, false);
+    log("pipe_server_retry_scheduled reason=" + reason + " retryMs=" + retryMs);
+  }
+
+  function handleServerListening(server) {
+    if (state.stopping || state.server !== server) return;
+    state.listenInProgress = false;
+    state.listening = true;
+    state.started = true;
+    resetListenRetryBackoff();
+    log("pipe_server_listening " + pipePath);
+  }
+
+  function handleServerClose(server) {
+    if (state.server !== server) return;
+    state.listenInProgress = false;
+    state.listening = false;
+    state.server = null;
+    if (state.stopping) return;
+    if (state.started) scheduleListenRetry("close", { code: "SERVER_CLOSED", errno: 0, syscall: "close", address: pipePath });
+  }
+
+  function handleServerError(server, err) {
+    if (state.server !== server) return;
+    state.listenInProgress = false;
+    state.listening = false;
+    const recoverable = isRecoverableListenError(err);
+    if (recoverable) {
+      state.listenFailureCount += 1;
+    } else {
+      state.started = false;
+    }
+    disposeListenServer(server);
+    if (state.stopping) return;
+    if (recoverable) {
+      scheduleListenRetry("listen", err || { code: "UNKNOWN", errno: 0, syscall: "listen", address: pipePath });
+      return;
+    }
+    logListenFailure(err || { code: "UNKNOWN", errno: 0, syscall: "listen", address: pipePath }, 0, true);
+    if (state.heartbeatTimer) {
+      clearInterval(state.heartbeatTimer);
+      state.heartbeatTimer = null;
+    }
+  }
+
+  function createAndListenServer() {
+    if (state.stopping || state.listenInProgress || state.listening || state.server) return false;
+
+    const server = createServer();
+    server.on("connection", (socket) => {
+      const conn = {
+        socket,
+        state: NOTIFIER_STATES.CONNECTING,
+        sessionId: null,
+        pid: null,
+        username: null,
+        notifierVersion: null,
+        activeNoticeDeliveryId: null,
+        lastHeartbeat: 0,
+        registeredAt: null,
+        sessionEligible: false,
+        buffer: ""
+      };
+
+      log("notifier_connected");
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk) => {
+        conn.buffer += chunk;
+        while (true) {
+          const idx = conn.buffer.indexOf("\n");
+          if (idx < 0) break;
+          const line = conn.buffer.slice(0, idx).replace(/\r$/, "");
+          conn.buffer = conn.buffer.slice(idx + 1);
+          handleIncoming(conn, line);
+        }
+      });
+      socket.on("close", () => removeConnection(conn));
+      socket.on("error", (err) => {
+        log("pipe_error " + err.message);
+        removeConnection(conn);
+      });
+    });
+
+    state.server = server;
+    state.listenInProgress = true;
+    state.started = true;
+    server.on("listening", () => handleServerListening(server));
+    server.on("close", () => handleServerClose(server));
+    server.on("error", (err) => handleServerError(server, err));
+
+    try {
+      server.listen(pipePath, { readableAll: true, writableAll: true });
+      return true;
+    } catch (err) {
+      handleServerError(server, err);
+      return false;
+    }
+  }
+
+  function ensurePipeServerListening() {
+    if (state.stopping || state.listenRetryTimer) return false;
+    if (state.server || state.listening || state.listenInProgress) return false;
+    return createAndListenServer();
   }
 
   function getDeliverySnapshot(delivery) {
@@ -599,53 +773,31 @@ function createNoticeRuntime(opts) {
   }
 
   function start() {
-    if (state.started) return;
+    if (state.stopping) return;
+    if (state.started || state.listening || state.listenInProgress || state.server || state.listenRetryTimer) return;
+    state.stopping = false;
     state.started = true;
     hydratePersistedState();
     fs.mkdirSync(path.join(configDir, "state"), { recursive: true });
-    state.server = net.createServer({ allowHalfOpen: false, pauseOnConnect: false }, (socket) => {
-      const conn = {
-        socket,
-        state: NOTIFIER_STATES.CONNECTING,
-        sessionId: null,
-        pid: null,
-        username: null,
-        notifierVersion: null,
-        activeNoticeDeliveryId: null,
-        lastHeartbeat: 0,
-        registeredAt: null,
-        sessionEligible: false,
-        buffer: ""
-      };
-
-      log("notifier_connected");
-      socket.setEncoding("utf8");
-      socket.on("data", (chunk) => {
-        conn.buffer += chunk;
-        while (true) {
-          const idx = conn.buffer.indexOf("\n");
-          if (idx < 0) break;
-          const line = conn.buffer.slice(0, idx).replace(/\r$/, "");
-          conn.buffer = conn.buffer.slice(idx + 1);
-          handleIncoming(conn, line);
-        }
-      });
-      socket.on("close", () => removeConnection(conn));
-      socket.on("error", (err) => {
-        log("pipe_error " + err.message);
-        removeConnection(conn);
-      });
-    });
-
-    state.server.on("error", (err) => log("pipe_server_error " + err.message));
-    state.server.listen(pipePath, { readableAll: true, writableAll: true });
     state.heartbeatTimer = setInterval(heartbeatSweep, heartbeatIntervalMs);
     if (state.heartbeatTimer && typeof state.heartbeatTimer.unref === "function") state.heartbeatTimer.unref();
-    log("pipe_server_listening " + pipePath);
+    ensurePipeServerListening();
+    if (!state.listening && !state.listenRetryTimer && !state.server) {
+      state.started = false;
+      if (state.heartbeatTimer) {
+        clearInterval(state.heartbeatTimer);
+        state.heartbeatTimer = null;
+      }
+    }
   }
 
   function stop() {
     state.shuttingDown = true;
+    state.stopping = true;
+    state.started = false;
+    state.listening = false;
+    state.listenInProgress = false;
+    clearListenRetryTimer();
     for (const conn of state.connections.values()) {
       setConnectionState(conn, NOTIFIER_STATES.CLOSING, "agent stop");
       try { conn.socket.destroy(); } catch {}
@@ -657,6 +809,7 @@ function createNoticeRuntime(opts) {
     if (state.server) {
       try { state.server.close(); } catch {}
     }
+    state.server = null;
     state.started = false;
   }
 
@@ -709,7 +862,13 @@ function createNoticeRuntime(opts) {
       connections: getConnectionSnapshot(),
       queueLength: state.queue.length,
       capability: state.capability,
-      started: state.started
+      started: state.started,
+      listening: state.listening,
+      stopping: state.stopping,
+      listenInProgress: state.listenInProgress,
+      listenRetryMs: state.listenRetryMs,
+      listenFailures: state.listenFailureCount,
+      listenRetryPending: !!state.listenRetryTimer
     };
   }
 
