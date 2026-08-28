@@ -21,6 +21,7 @@ const {
 } = require("../agent/src/notices/state");
 const { createNoticeRuntime } = require("../agent/src/notices/runtime");
 const { validateSpec, buildInstallCommand, buildRemoveCommand } = require("./notifier-companion-task");
+const { version: AGENT_VERSION } = require("../agent/package.json");
 
 let pass = 0;
 let fail = 0;
@@ -145,7 +146,7 @@ function startRuntime(opts = {}) {
     getDeviceId: () => "device-test",
     getAppDir: () => configDir,
     logEvent: (m) => runtimeEvents.push(m),
-    version: "1.1.8",
+    version: AGENT_VERSION,
     getInteractiveUser: () => username,
     pipeName: name,
     heartbeatIntervalMs: 100,
@@ -192,15 +193,15 @@ async function run() {
   })());
 
   check("validate notice_show", validateNoticeShow({ type: "notice_show", protocolVersion: PROTOCOL_VERSION, noticeDeliveryId: uuid(), title: "Teste", message: "Mensagem", level: "info", timestamp: new Date().toISOString(), url: "https://exemplo.local" }).ok === true);
-  check("TASK static spec", validateSpec({ taskName: "MonitorTI-Notifier", trigger: "At log on of any user", runOnlyWhenUserIsLoggedOn: true, executable: "C:\\Program Files (x86)\\MonitorTI\\Agent\\MonitorTI-Notifier.exe", workingDirectory: "C:\\Program Files (x86)\\MonitorTI\\Agent", arguments: ["--companion"], elevation: "none" }) === true);
-  check("TASK install command", /schtasks .*\/create/.test(buildInstallCommand()));
-  check("TASK remove command", /schtasks .*\/delete/.test(buildRemoveCommand()));
+  check("TASK static spec", validateSpec({ taskName: "MonitorTI-Notifier", trigger: { type: "AtLogOn", user: null }, principal: { groupId: "S-1-5-11", logonType: "Group", runLevel: "Limited" }, executable: "C:\\Program Files (x86)\\MonitorTI\\Agent\\MonitorTI-Notifier.exe", workingDirectory: "C:\\Program Files (x86)\\MonitorTI\\Agent", arguments: ["--companion"], elevation: "none" }) === true);
+  check("TASK install command", /powershell\.exe/.test(buildInstallCommand()) && /-Mode install/.test(buildInstallCommand()));
+  check("TASK remove command", /powershell\.exe/.test(buildRemoveCommand()) && /-Mode remove/.test(buildRemoveCommand()));
 
   // Runtime integration: register, notice, busy, ack, reconnect.
   const rt = startRuntime();
   await wait(100);
   const client = await connectClient(rt.path);
-  client.send({ type: "register", protocolVersion: PROTOCOL_VERSION, notifierVersion: "1.1.8", sessionId: rt.sessionId, pid: 1234, username: rt.username, activeNoticeDeliveryId: null });
+  client.send({ type: "register", protocolVersion: PROTOCOL_VERSION, notifierVersion: AGENT_VERSION, sessionId: rt.sessionId, pid: 1234, username: rt.username, activeNoticeDeliveryId: null });
   const registerOk = JSON.parse(await client.nextLine());
   check("PIPE-001 register válido", registerOk.type === "register_ok" && registerOk.protocolVersion === PROTOCOL_VERSION);
   client.send({ type: "heartbeat", protocolVersion: PROTOCOL_VERSION, sessionId: rt.sessionId, pid: 1234, ts: new Date().toISOString() });
@@ -255,7 +256,7 @@ async function run() {
   check("RECONNECT-001 Notifier kill", rt.runtime.getState().connections.length === 0);
 
   const client2 = await connectClient(rt.path);
-  client2.send({ type: "register", protocolVersion: PROTOCOL_VERSION, notifierVersion: "1.1.8", sessionId: rt.sessionId, pid: 1234, username: rt.username, activeNoticeDeliveryId: null });
+  client2.send({ type: "register", protocolVersion: PROTOCOL_VERSION, notifierVersion: AGENT_VERSION, sessionId: rt.sessionId, pid: 1234, username: rt.username, activeNoticeDeliveryId: null });
   await client2.nextLine();
   client2.send({ type: "heartbeat", protocolVersion: PROTOCOL_VERSION, sessionId: rt.sessionId, pid: 1234, ts: new Date().toISOString() });
   await wait(50);

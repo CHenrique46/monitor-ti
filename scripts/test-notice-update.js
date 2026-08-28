@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { createNoticeBridge } = require("../agent/src/notices/bridge");
+const { version: AGENT_VERSION } = require("../agent/package.json");
 
 let pass = 0;
 let fail = 0;
@@ -55,7 +56,7 @@ function makeBridge(execResult = {}) {
       getDeviceId: () => "device-update",
       getServerHttpBase: () => "http://127.0.0.1:0",
       logEvent: () => {},
-      version: "1.1.8",
+      version: AGENT_VERSION,
       getInteractiveUser: () => (execResult.interactiveUser === undefined ? "Henrique" : execResult.interactiveUser),
       companionEnabled: true
     },
@@ -65,12 +66,17 @@ function makeBridge(execResult = {}) {
       },
       execFileSync(cmd, args, opts) {
         execCalls.push({ cmd, args, opts });
-        if (args[0] === "/query") {
-          if (execResult.queryThrows) throw new Error("task ausente");
-          return "TaskName: MonitorTI-Notifier";
-        }
-        if (args[0] === "/run") {
-          if (execResult.runThrows) throw new Error("run bloqueado");
+        if (cmd.toLowerCase().includes("powershell")) {
+          const modeIndex = args.findIndex((a) => String(a).toLowerCase() === "-mode");
+          const mode = modeIndex >= 0 ? String(args[modeIndex + 1] || "") : "";
+          if (mode === "state") {
+            if (execResult.queryThrows) throw new Error("task ausente");
+            return JSON.stringify({ exists: true, groupId: "S-1-5-11" });
+          }
+          if (mode === "run") {
+            if (execResult.runThrows) throw new Error("run bloqueado");
+            return "";
+          }
           return "";
         }
         return "";
@@ -134,7 +140,7 @@ async function main() {
     const ws = makeWs();
     bridge.onWsOpen(ws);
     bridge.attemptCompanionTaskRunIfNeeded();
-    check("UPDATE-006 task relaunch quando sessão ativa", execCalls.some((c) => c.args[0] === "/run"));
+    check("UPDATE-006 task relaunch quando sessão ativa", execCalls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("run")));
   }
 
   // UPDATE-007 sem sessão => não relaunch.

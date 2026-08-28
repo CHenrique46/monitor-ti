@@ -3,6 +3,7 @@ const os = require("os");
 const path = require("path");
 const updater = require("../agent/src/updater");
 const crypto = require("crypto");
+const { version: AGENT_VERSION } = require("../agent/package.json");
 
 let pass = 0;
 let fail = 0;
@@ -31,7 +32,7 @@ function mkInstallDir(prefix) {
 }
 
 function mkPackageDir() {
-  return path.join(__dirname, "..", "releases", "agent", "1.1.8");
+  return path.join(__dirname, "..", "releases", "agent", AGENT_VERSION);
 }
 
 function runUpdater(argv, options = {}) {
@@ -57,19 +58,44 @@ function runUpdater(argv, options = {}) {
   const execFileSync = (cmd, args, opts) => {
     calls.push({ cmd, args: Array.from(args || []), opts });
     const joined = args.join(" ");
-    if (cmd.toLowerCase().includes("schtasks")) {
-      if (joined.includes("/create") && options.failCreateTask) throw new Error("task create fail");
-      if (joined.includes("/delete") && options.failDeleteTask) throw new Error("task delete fail");
-      if (joined.includes("/run") && options.failRunTask) throw new Error("task run fail");
-      if (joined.includes("/query") && joined.includes("/xml")) {
-        if (options.taskSnapshotXml) return options.taskSnapshotXml;
-        throw new Error("task missing");
+    if (cmd.toLowerCase().includes("powershell")) {
+      const modeIndex = args.findIndex((a) => String(a).toLowerCase() === "-mode");
+      const mode = modeIndex >= 0 ? String(args[modeIndex + 1] || "") : "";
+      if (mode === "install" && options.failCreateTask) {
+        const err = new Error("task create fail");
+        err.status = 1;
+        err.stdout = "";
+        err.stderr = "";
+        throw err;
       }
-      if (joined.includes("/query")) return options.taskQueryText || "TaskName: MonitorTI-Notifier";
+      if (mode === "run" && options.failRunTask) {
+        const err = new Error("task run fail");
+        err.status = 1;
+        err.stdout = "";
+        err.stderr = "";
+        throw err;
+      }
+      if (mode === "remove") {
+        return "";
+      }
+      if (mode === "queryxml") {
+        return options.taskSnapshotXml || "";
+      }
+      if (mode === "state") {
+        return options.taskStateJson || JSON.stringify(options.taskSnapshotXml ? { exists: true } : { exists: false });
+      }
+      return options.taskPowerShellOutput || (mode === "install" ? "created" : "");
+    }
+    if (cmd.toLowerCase().includes("schtasks")) {
+      if (joined.includes("/create") && options.failRestoreTask) throw new Error("task restore fail");
+      if (joined.includes("/delete") && options.failDeleteTask) throw new Error("task delete fail");
       return "";
     }
-    if (cmd.toLowerCase().includes("powershell")) {
-      return options.interactiveUser === undefined ? "Henrique\r\n" : String(options.interactiveUser || "");
+    if (cmd.toLowerCase().includes("net")) {
+      return "";
+    }
+    if (cmd.toLowerCase().includes("taskkill")) {
+      return "";
     }
     return "";
   };
@@ -77,10 +103,11 @@ function runUpdater(argv, options = {}) {
   try {
     updater.run(argv, {
       execFileSync,
-      createOrUpdateTask: () => {
-        execFileSync("schtasks", ["/create", "/tn", "MonitorTI-Notifier", "/tr", '"C:\\Program Files (x86)\\MonitorTI\\Agent\\MonitorTI-Notifier.exe" --companion', "/sc", "onlogon", "/rl", "limited", "/f"], { stdio: "ignore" });
-      },
+      createOrUpdateTask: () => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Mode", "install"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
       queryTaskXml: () => options.taskSnapshotXml || null,
+      runTask: () => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Mode", "run"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+      removeTask: () => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Mode", "remove"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+      restoreTaskXml: (xml) => execFileSync("schtasks.exe", ["/create", "/xml", "C:\\Temp\\restore.xml", "/tn", "MonitorTI-Notifier", "/f"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
       hasInteractiveSession: () => options.interactiveUser !== null && options.interactiveUser !== undefined && String(options.interactiveUser).trim() !== "",
       allowTaskRunInTestMode: true
     });
@@ -116,7 +143,7 @@ function main() {
     const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       interactiveUser: "Henrique"
     });
-    check("UPDATE-TASK-001 task ausente criada", r.exitCode === 0 && r.calls.some((c) => c.cmd === "schtasks" && c.args.includes("/create")));
+    check("UPDATE-TASK-001 task ausente criada", r.exitCode === 0 && r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("install")));
   }
 
   // UPDATE-TASK-002 task correta -> idempotente.
@@ -128,7 +155,7 @@ function main() {
       taskSnapshotXml: snapshot,
       interactiveUser: "Henrique"
     });
-    const creates = r.calls.filter((c) => c.cmd === "schtasks" && c.args.includes("/create"));
+    const creates = r.calls.filter((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("install"));
     check("UPDATE-TASK-002 task correta idempotente", r.exitCode === 0 && creates.length >= 1);
   }
 
@@ -140,7 +167,7 @@ function main() {
       taskSnapshotXml: "<Task><Actions><Exec><Command>old.exe</Command></Exec></Actions></Task>",
       interactiveUser: "Henrique"
     });
-    check("UPDATE-TASK-003 task incorreta corrigida", r.exitCode === 0 && r.calls.some((c) => c.cmd === "schtasks" && c.args.includes("/create")));
+    check("UPDATE-TASK-003 task incorreta corrigida", r.exitCode === 0 && r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("install")));
   }
 
   // UPDATE-TASK-004 ensure task falha -> update falha controladamente.
@@ -162,7 +189,7 @@ function main() {
       failRunTask: true,
       interactiveUser: "Henrique"
     });
-    check("UPDATE-TASK-005 rollback remove task nova", r.exitCode === 1 && r.calls.some((c) => c.cmd === "schtasks" && c.args.includes("/delete")));
+    check("UPDATE-TASK-005 rollback remove task nova", r.exitCode === 1 && r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("remove")));
   }
 
   // UPDATE-TASK-006 task pré-existente preservada em rollback.
@@ -174,7 +201,7 @@ function main() {
       failRunTask: true,
       interactiveUser: "Henrique"
     });
-    check("UPDATE-TASK-006 rollback preserva task previa", r.exitCode === 1 && r.calls.some((c) => c.cmd === "schtasks" && c.args.includes("/xml")));
+    check("UPDATE-TASK-006 rollback preserva task previa", r.exitCode === 1 && r.calls.some((c) => c.cmd.toLowerCase().includes("schtasks") && c.args.includes("/create") && c.args.includes("/xml")));
   }
 
   // UPDATE-TASK-007 sessão ativa -> task Run após update.
@@ -184,7 +211,7 @@ function main() {
     const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       interactiveUser: "Henrique"
     });
-    check("UPDATE-TASK-007 task Run após update", r.exitCode === 0 && r.calls.some((c) => c.cmd === "schtasks" && c.args.includes("/run")));
+    check("UPDATE-TASK-007 task Run após update", r.exitCode === 0 && r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("run")));
   }
 
   // UPDATE-TASK-008 sem sessão -> task existe, mas não Run.
@@ -194,10 +221,10 @@ function main() {
     const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       interactiveUser: null
     });
-    check("UPDATE-TASK-008 sem sessão sem run", r.exitCode === 0 && !r.calls.some((c) => c.cmd === "schtasks" && c.args.includes("/run")));
+    check("UPDATE-TASK-008 sem sessão sem run", r.exitCode === 0 && !r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("run")));
   }
 
-  // UPDATE-TASK-009 1.1.6 -> 1.1.8 completo com task ausente.
+  // UPDATE-TASK-009 1.1.6 -> versao atual completo com task ausente.
   {
     const pkg = makePackageSandbox();
     const t = mkInstallDir("mti-update-task-legacy-");
@@ -206,7 +233,7 @@ function main() {
     const r = runUpdater(["node", "x", "--apply-update-package", pkg, t.installExe, "MonitorTIAgent"], {
       interactiveUser: "Henrique"
     });
-    check("UPDATE-TASK-009 1.1.6->1.1.8 task ausente completo", r.exitCode === 0 && sha256(t.installExe) === expectedAgent && sha256(t.notifierExe) === expectedNotifier && r.calls.some((c) => c.cmd === "schtasks" && c.args.includes("/create")));
+    check("UPDATE-TASK-009 1.1.6->" + AGENT_VERSION + " task ausente completo", r.exitCode === 0 && sha256(t.installExe) === expectedAgent && sha256(t.notifierExe) === expectedNotifier && r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("install")));
   }
 
   console.log("\nRESULTADO: " + pass + " PASS, " + fail + " FAIL");

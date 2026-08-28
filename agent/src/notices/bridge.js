@@ -1,6 +1,6 @@
 const { createNotifier: defaultCreateNotifier } = require("../notifier");
 const { createNoticeRuntime: defaultCreateNoticeRuntime } = require("./runtime");
-const { execFileSync } = require("child_process");
+const { queryTaskState: defaultQueryTaskState, runTask: defaultRunTask } = require("./task");
 
 const COMPANION_TASK_NAME = "MonitorTI-Notifier";
 
@@ -38,7 +38,9 @@ function createNoticeBridge(opts, deps = {}) {
 
   const createNotifier = deps.createNotifier || defaultCreateNotifier;
   const createNoticeRuntime = deps.createNoticeRuntime || defaultCreateNoticeRuntime;
-  const execFileSyncImpl = deps.execFileSync || execFileSync;
+  const execFileSyncImpl = deps.execFileSync;
+  const queryTaskState = deps.queryTaskState || (() => defaultQueryTaskState(execFileSyncImpl));
+  const runTask = deps.runTask || (() => defaultRunTask(execFileSyncImpl));
 
   let currentWs = null;
   let lastCapabilitiesKey = null;
@@ -177,12 +179,9 @@ function createNoticeBridge(opts, deps = {}) {
 
   function queryCompanionTask() {
     try {
-      const out = execFileSyncImpl("schtasks", ["/query", "/tn", COMPANION_TASK_NAME, "/fo", "list", "/v"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 10000
-      });
-      return { ok: true, output: out };
+      const state = queryTaskState();
+      if (!state || state.exists === false) return { ok: false, error: "task ausente" };
+      return { ok: true, output: state };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -197,7 +196,7 @@ function createNoticeBridge(opts, deps = {}) {
     const q = queryCompanionTask();
     if (!q.ok) return false;
     try {
-      execFileSyncImpl("schtasks", ["/run", "/tn", COMPANION_TASK_NAME], { stdio: "ignore", timeout: 10000 });
+      runTask();
       log("scheduled task run solicitado: " + COMPANION_TASK_NAME);
       return true;
     } catch (err) {

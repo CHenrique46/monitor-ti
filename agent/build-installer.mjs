@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import task from "./src/notices/task.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const agentRoot = __dirname;
@@ -69,7 +70,12 @@ async function main() {
   }
   console.log("ISCC: " + iscc);
 
-  // 4) compila o instalador
+  // 4) gera o helper da task companion a partir da fonte única.
+  const taskHelperPath = path.join(installerDir, "notifier-companion-task.ps1");
+  fs.writeFileSync(taskHelperPath, task.buildPowerShellScript(), "utf8");
+  console.log("Task helper gerado: " + taskHelperPath);
+
+  // 5) compila o instalador
   fs.mkdirSync(outDir, { recursive: true });
   execSync(`"${iscc}" "${issFile}" /O"${outDir}"`, {
     cwd: installerDir,

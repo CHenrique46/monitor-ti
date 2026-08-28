@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { createNoticeBridge } = require("../agent/src/notices/bridge");
+const { version: AGENT_VERSION } = require("../agent/package.json");
 
 let pass = 0;
 let fail = 0;
@@ -121,7 +122,7 @@ async function main() {
       getDeviceId: () => "device-companion",
       getServerHttpBase: () => "http://127.0.0.1:0",
       logEvent: (m) => logs.push(m),
-      version: "1.1.8",
+      version: AGENT_VERSION,
       getInteractiveUser: () => "Henrique",
       processInfoLookup: () => ({ exists: true, sessionId: 1, domain: "", user: "Henrique", path: "C:\\Test\\companion.exe" }),
       companionEnabled: true
@@ -138,7 +139,7 @@ async function main() {
   companionBridge.onWsOpen(ws);
   check("INT-001 Agent companion inicia pipe", !!companionBridge.getRuntimeState() && !!companionBridge.getRuntimeState().pipePath);
   check("INT-009 companion nao chama fluxo legado", legacyFactoryCalls === 0);
-  check("INT-013 1.1.8 companion default", companionBridge.isCompanionMode === true);
+  check("INT-013 companion default", companionBridge.isCompanionMode === true);
 
   const pipePath = companionBridge.getRuntimeState().pipePath;
   const client = await connectClient(pipePath);

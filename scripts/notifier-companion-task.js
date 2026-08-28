@@ -1,11 +1,21 @@
 const task = require("../agent/src/notices/task");
 
-function joinCommand(args) {
-  return ["schtasks"].concat(args).join(" ");
+function buildPowerShellCommand(mode) {
+  return [
+    "powershell.exe",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    `"${task.getTaskScriptPath()}"`,
+    "-Mode",
+    mode
+  ].join(" ");
 }
 
 function buildCreateOrUpdateCommand() {
-  return joinCommand(task.buildCreateOrUpdateArgs());
+  return buildPowerShellCommand("install");
 }
 
 function buildInstallCommand() {
@@ -17,19 +27,20 @@ function buildUpdateCommand() {
 }
 
 function buildRunCommand() {
-  return joinCommand(task.buildRunArgs());
+  return buildPowerShellCommand("run");
 }
 
 function buildQueryCommand() {
-  return joinCommand(task.buildQueryArgs());
+  return buildPowerShellCommand("query");
 }
 
 function buildRemoveCommand() {
-  return joinCommand(task.buildRemoveArgs());
+  return buildPowerShellCommand("remove");
 }
 
 module.exports = {
   ...task,
+  buildPowerShellCommand,
   buildCreateOrUpdateCommand,
   buildInstallCommand,
   buildUpdateCommand,

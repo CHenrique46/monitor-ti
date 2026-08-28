@@ -14,7 +14,14 @@
 const fs = require("fs");
 const path = require("path");
 const { execFileSync: defaultExecFileSync } = require("child_process");
-const { createOrUpdateTask: defaultCreateOrUpdateTask, queryTaskXml: defaultQueryTaskXml, TASK_NAME } = require("./notices/task");
+const {
+  createOrUpdateTask: defaultCreateOrUpdateTask,
+  queryTaskXml: defaultQueryTaskXml,
+  restoreTaskXml: defaultRestoreTaskXml,
+  removeTask: defaultRemoveTask,
+  runTask: defaultRunTask,
+  TASK_NAME
+} = require("./notices/task");
 
 function log(m) {
   const line = `[updater ${new Date().toISOString()}] ${m}`;
@@ -36,6 +43,19 @@ function log(m) {
 function sleep(ms) {
   const end = Date.now() + ms;
   while (Date.now() < end) {}
+}
+
+function formatTaskCommandFailure(operation, err) {
+  const exitCode = err && typeof err.status === "number" ? err.status : (err && typeof err.code === "number" ? err.code : null);
+  const stdout = err && err.stdout != null ? String(err.stdout) : "";
+  const stderr = err && err.stderr != null ? String(err.stderr) : "";
+  return (
+    "operacao=" + operation +
+    " exitCode=" + (exitCode === null ? "null" : exitCode) +
+    " stdout=" + JSON.stringify(stdout.trim()) +
+    " stderr=" + JSON.stringify(stderr.trim()) +
+    " erro=" + (err && err.message ? err.message : String(err))
+  );
 }
 
 // Retorna true se o arquivo NÃO está travado (pode ser aberto para escrita).
@@ -125,6 +145,9 @@ function run(argv, deps = {}) {
   const execFileSync = deps.execFileSync || defaultExecFileSync;
   const createOrUpdateTask = deps.createOrUpdateTask || defaultCreateOrUpdateTask;
   const queryTaskXml = deps.queryTaskXml || defaultQueryTaskXml;
+  const restoreTaskXml = deps.restoreTaskXml || defaultRestoreTaskXml;
+  const removeTask = deps.removeTask || defaultRemoveTask;
+  const runTask = deps.runTask || defaultRunTask;
   const hasInteractiveSession = deps.hasInteractiveSession || (() => {
     try {
       const ps = "(Get-CimInstance Win32_ComputerSystem).UserName";
@@ -182,7 +205,8 @@ function run(argv, deps = {}) {
       taskSnapshot = out;
       taskAlreadyExisted = !!out;
       return out;
-    } catch {
+    } catch (e) {
+      log("falha ao capturar snapshot da task: " + formatTaskCommandFailure("queryxml", e));
       taskSnapshot = null;
       taskAlreadyExisted = false;
       return null;
@@ -191,12 +215,12 @@ function run(argv, deps = {}) {
 
   function ensureNotifierTask() {
     try {
-      createOrUpdateTask();
+      const result = createOrUpdateTask();
       taskTouched = true;
-      log("task companion garantida: " + TASK_NAME);
+      log("task companion garantida: " + TASK_NAME + (result ? " (" + String(result).trim() + ")" : ""));
       return true;
     } catch (e) {
-      log("falha ao garantir task companion: " + e.message);
+      log("falha ao garantir task companion: " + formatTaskCommandFailure("ensure", e));
       return false;
     }
   }
@@ -206,20 +230,18 @@ function run(argv, deps = {}) {
     try {
       if (taskAlreadyExisted) {
         if (taskSnapshot) {
-          const tmpXml = path.join(path.dirname(sourceExe || installExe), "notifier-companion-task.rollback.xml");
           try {
-            fs.writeFileSync(tmpXml, taskSnapshot, "utf8");
-            execFileSync("schtasks", ["/create", "/xml", tmpXml, "/tn", TASK_NAME, "/f"], { stdio: "ignore", timeout: 10000 });
+            restoreTaskXml(taskSnapshot);
             log("rollback da task companion: definicao previa restaurada");
-          } finally {
-            try { if (fs.existsSync(tmpXml)) fs.unlinkSync(tmpXml); } catch {}
+          } catch (e) {
+            log("falha ao restaurar task companion: " + formatTaskCommandFailure("restore", e));
           }
         } else {
           log("rollback da task companion: preservando definicao previa");
         }
       } else {
         log("rollback da task companion: removendo task criada");
-        try { execFileSync("schtasks", ["/delete", "/tn", TASK_NAME, "/f"], { stdio: "ignore" }); } catch (e) {}
+        try { removeTask(); } catch (e) { log("falha ao remover task criada: " + formatTaskCommandFailure("remove", e)); }
       }
     } catch (e) {
       log("falha no rollback da task companion: " + e.message);
@@ -365,10 +387,10 @@ function run(argv, deps = {}) {
     if (!testMode || deps.allowTaskRunInTestMode) {
       if (hasInteractiveSession()) {
         try {
-          execFileSync("schtasks", ["/run", "/tn", TASK_NAME], { stdio: "ignore", timeout: 10000 });
+          runTask();
           log("task companion acionada apos update");
         } catch (e) {
-          log("task companion nao foi acionada apos update: " + e.message);
+          log("task companion nao foi acionada apos update: " + formatTaskCommandFailure("run", e));
           throw new Error("falha ao acionar task companion apos update");
         }
       } else {

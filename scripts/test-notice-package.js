@@ -2,6 +2,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFileSync, spawnSync } = require("child_process");
+const { version: AGENT_VERSION } = require("../agent/package.json");
 
 let pass = 0;
 let fail = 0;
@@ -25,8 +26,8 @@ function sha256(file) {
 }
 
 function main() {
-  const pkgDir = path.join(__dirname, "..", "releases", "agent", "1.1.8");
-  const zip = path.join(pkgDir, "MonitorTI-Agent-1.1.8.zip");
+  const pkgDir = path.join(__dirname, "..", "releases", "agent", AGENT_VERSION);
+  const zip = path.join(pkgDir, "MonitorTI-Agent-" + AGENT_VERSION + ".zip");
   const manifestPath = path.join(pkgDir, "manifest.json");
 
   check("PKG-001 zip existe", fs.existsSync(zip));
@@ -43,7 +44,7 @@ function main() {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const agent = path.join(pkgDir, "MonitorTI-Agent.exe");
   const not = path.join(pkgDir, "MonitorTI-Notifier.exe");
-  check("PKG-005 manifest version", manifest.version === "1.1.8");
+  check("PKG-005 manifest version", manifest.version === AGENT_VERSION);
   check("PKG-006 sha agent", manifest.files.find((f) => f.name === "MonitorTI-Agent.exe").sha256 === sha256(agent));
   check("PKG-007 sha notifier", manifest.files.find((f) => f.name === "MonitorTI-Notifier.exe").sha256 === sha256(not));
   check("PKG-008 zip possui manifest", fs.existsSync(path.join(extracted, "manifest.json")));

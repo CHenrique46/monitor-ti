@@ -5,6 +5,7 @@ const net = require("net");
 const crypto = require("crypto");
 const { createNoticeRuntime } = require("../agent/src/notices/runtime");
 const { loadNoticeState, saveNoticeState, pruneState, emptyState, getStatePath } = require("../agent/src/notices/persistence");
+const { version: AGENT_VERSION } = require("../agent/package.json");
 
 let pass = 0;
 let fail = 0;
@@ -110,7 +111,7 @@ function makeRuntime(configDir, pipeName) {
     getDeviceId: () => "device-persist",
     getAppDir: () => configDir,
     logEvent: (m) => events.push(m),
-    version: "1.1.8",
+    version: AGENT_VERSION,
     getInteractiveUser: () => "Henrique",
     pipeName,
     heartbeatIntervalMs: 100,
