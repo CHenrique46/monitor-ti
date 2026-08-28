@@ -36,6 +36,7 @@ function buildUpdateCommand(agentVersion, release) {
     }
     return {
       type: "update_agent",
+      currentVersion: agentVersion,
       version: release.version,
       sha256: release.packageSha256,
       size: release.packageSize,
@@ -47,6 +48,7 @@ function buildUpdateCommand(agentVersion, release) {
   // Fluxo legado (arquivo único).
   return {
     type: "update_agent",
+    currentVersion: agentVersion,
     version: release.version,
     sha256: release.sha256,
     size: release.size

@@ -50,6 +50,7 @@ async function trigger(req, res) {
 
     agentServer.setUpdateState(c.deviceId, {
       status: "update_pending",
+      currentVersion: c.agentVersion,
       version: release.version,
       targetVersion: release.version,
       message: "Solicitacao enviada ao agent.",

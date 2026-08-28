@@ -14,6 +14,7 @@
 const fs = require("fs");
 const path = require("path");
 const { execFileSync: defaultExecFileSync } = require("child_process");
+const WebSocket = require("ws");
 const {
   createOrUpdateTask: defaultCreateOrUpdateTask,
   queryTaskXml: defaultQueryTaskXml,
@@ -56,6 +57,78 @@ function formatTaskCommandFailure(operation, err) {
     " stderr=" + JSON.stringify(stderr.trim()) +
     " erro=" + (err && err.message ? err.message : String(err))
   );
+}
+
+function sanitizeUpdateMessage(message) {
+  return String(message || "")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseOptionalArgs(argv) {
+  function readFlag(name) {
+    const idx = argv.indexOf(name);
+    if (idx < 0 || idx + 1 >= argv.length) return null;
+    return argv[idx + 1];
+  }
+  return {
+    currentVersion: readFlag("--current-version"),
+    targetVersion: readFlag("--target-version"),
+    serverUrl: readFlag("--server-url"),
+    deviceId: readFlag("--device-id")
+  };
+}
+
+async function sendUpdateFailedToServer(ctx, details) {
+  if (!ctx || !ctx.serverUrl || !ctx.deviceId) return false;
+  const payload = {
+    type: "update_status",
+    deviceId: ctx.deviceId,
+    status: "update_failed",
+    currentVersion: ctx.currentVersion || null,
+    targetVersion: ctx.targetVersion || null,
+    version: ctx.targetVersion || null,
+    stage: details.stage || null,
+    error: sanitizeUpdateMessage(details.error),
+    rolledBack: !!details.rolledBack,
+    timestamp: new Date().toISOString()
+  };
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      try { ws.close(); } catch (e) {}
+      resolve(ok);
+    };
+    const ws = new WebSocket(ctx.serverUrl);
+    const timer = setTimeout(() => {
+      try { ws.terminate(); } catch (e) {}
+      finish(false);
+    }, 5000);
+    if (typeof timer.unref === "function") timer.unref();
+    ws.on("open", () => {
+      try {
+        ws.send(JSON.stringify(payload), (err) => {
+          clearTimeout(timer);
+          if (err) return finish(false);
+          setTimeout(() => finish(true), 100);
+        });
+      } catch (e) {
+        clearTimeout(timer);
+        finish(false);
+      }
+    });
+    ws.on("error", () => {
+      clearTimeout(timer);
+      finish(false);
+    });
+    ws.on("close", () => {
+      clearTimeout(timer);
+      finish(false);
+    });
+  });
 }
 
 // Retorna true se o arquivo NÃO está travado (pode ser aberto para escrita).
@@ -140,7 +213,7 @@ function parseApplyUpdatePackageArgs(argv) {
   return { installExe, serviceName, sourceExe: agentSrc, files };
 }
 
-function run(argv, deps = {}) {
+async function run(argv, deps = {}) {
   const isPackage = argv.indexOf("--apply-update-package") >= 0;
   const execFileSync = deps.execFileSync || defaultExecFileSync;
   const createOrUpdateTask = deps.createOrUpdateTask || defaultCreateOrUpdateTask;
@@ -148,6 +221,7 @@ function run(argv, deps = {}) {
   const restoreTaskXml = deps.restoreTaskXml || defaultRestoreTaskXml;
   const removeTask = deps.removeTask || defaultRemoveTask;
   const runTask = deps.runTask || defaultRunTask;
+  const updateContext = Object.assign(parseOptionalArgs(argv), deps.updateContext || {});
   const hasInteractiveSession = deps.hasInteractiveSession || (() => {
     try {
       const ps = "(Get-CimInstance Win32_ComputerSystem).UserName";
@@ -198,6 +272,7 @@ function run(argv, deps = {}) {
   let taskTouched = false;
   let taskAlreadyExisted = false;
   let taskSnapshot = null;
+  let stage = "init";
 
   function captureTaskSnapshot() {
     try {
@@ -279,6 +354,7 @@ function run(argv, deps = {}) {
   }
 
   try {
+    stage = "stop_service";
     // 1) garante que o serviço está parado (idempotente)
     if (!testMode) {
       try {
@@ -290,6 +366,7 @@ function run(argv, deps = {}) {
       log("TEST: pulando parada de servico");
     }
 
+    stage = "wait_unlock";
     // 2) aguarda o executável instalado ficar desbloqueado (serviço parado)
     let stopped = false;
     if (testMode) {
@@ -318,6 +395,7 @@ function run(argv, deps = {}) {
     }
     log("servico parado e executavel desbloqueado");
 
+    stage = "backup";
     // 3) backup de cada destino já existente
     for (const f of files) {
       if (fs.existsSync(f.dst)) {
@@ -332,6 +410,7 @@ function run(argv, deps = {}) {
       }
     }
 
+    stage = "copy_files";
     // 4) substitui cada arquivo do pacote (somente com o destino desbloqueado; retry)
     for (const f of files) {
       let ok = false;
@@ -355,12 +434,14 @@ function run(argv, deps = {}) {
     }
     log("arquivos substituidos");
 
+    stage = "ensure_task";
     // 4.5) garante a task companion antes de reiniciar o Agent.
     captureTaskSnapshot();
     if (!ensureNotifierTask()) {
       throw new Error("nao foi possivel garantir a task companion");
     }
 
+    stage = "restart_service";
     // 5) reinicia o serviço
     if (!testMode) {
       execFileSync("net", ["start", serviceName], { stdio: "ignore" });
@@ -368,6 +449,7 @@ function run(argv, deps = {}) {
       log("TEST: pulando inicio de servico");
     }
 
+    stage = "verify_running";
     // 6) confirma início por consulta estruturada CIM (estado Running)
     let running = false;
     if (testMode) {
@@ -383,6 +465,7 @@ function run(argv, deps = {}) {
       throw new Error("servico nao iniciou apos atualizacao");
     }
 
+    stage = "activate_companion";
     // 7) se houver sessão interativa, solicita o run da task.
     if (!testMode || deps.allowTaskRunInTestMode) {
       if (hasInteractiveSession()) {
@@ -402,6 +485,15 @@ function run(argv, deps = {}) {
   } catch (e) {
     log("ERRO na atualizacao: " + e.message);
     if (backups.length) rollback();
+    try {
+      await sendUpdateFailedToServer(updateContext, {
+        stage,
+        error: e.message,
+        rolledBack: backups.length > 0
+      });
+    } catch (notifyErr) {
+      log("falha ao notificar update_failed: " + notifyErr.message);
+    }
     process.exit(1);
     return;
   }
@@ -422,5 +514,8 @@ module.exports = {
 };
 
 if (require.main === module) {
-  run(process.argv);
+  run(process.argv).catch((err) => {
+    log("ERRO fatal no updater: " + err.message);
+    process.exit(1);
+  });
 }

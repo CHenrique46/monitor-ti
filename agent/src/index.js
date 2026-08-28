@@ -419,7 +419,20 @@ async function handleUpdateCommand(ws, msg) {
       logEvent("Iniciando substituicao segura (pacote)...");
       const child = spawn(
         agentInPkg,
-        ["--apply-update-package", packageDir, installExe, AGENT_SERVICE_NAME],
+        [
+          "--apply-update-package",
+          packageDir,
+          installExe,
+          AGENT_SERVICE_NAME,
+          "--current-version",
+          AGENT_VERSION,
+          "--target-version",
+          version,
+          "--server-url",
+          SERVER_URL,
+          "--device-id",
+          machine && machine.deviceId ? machine.deviceId : deviceId
+        ],
         { detached: true, stdio: "ignore", windowsHide: true }
       );
       child.unref();
@@ -454,7 +467,19 @@ async function handleUpdateCommand(ws, msg) {
     const installExe = process.execPath;
     const child = spawn(
       tmpFile,
-      ["--apply-update", installExe, AGENT_SERVICE_NAME],
+      [
+        "--apply-update",
+        installExe,
+        AGENT_SERVICE_NAME,
+        "--current-version",
+        AGENT_VERSION,
+        "--target-version",
+        version,
+        "--server-url",
+        SERVER_URL,
+        "--device-id",
+        machine && machine.deviceId ? machine.deviceId : deviceId
+      ],
       { detached: true, stdio: "ignore", windowsHide: true }
     );
     child.unref();

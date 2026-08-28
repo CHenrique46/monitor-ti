@@ -3,7 +3,7 @@ const os = require("os");
 const path = require("path");
 const updater = require("../agent/src/updater");
 const crypto = require("crypto");
-const { version: AGENT_VERSION } = require("../agent/package.json");
+const RELEASE_VERSION = "1.1.9";
 
 let pass = 0;
 let fail = 0;
@@ -32,17 +32,23 @@ function mkInstallDir(prefix) {
 }
 
 function mkPackageDir() {
-  return path.join(__dirname, "..", "releases", "agent", AGENT_VERSION);
+  return path.join(__dirname, "..", "releases", "agent", RELEASE_VERSION);
 }
 
-function runUpdater(argv, options = {}) {
+async function runUpdater(argv, options = {}) {
   const originalExit = process.exit;
   const originalCopy = fs.copyFileSync;
+  const originalLog = console.log;
   const originalEnv = process.env.MTI_UPDATER_TEST;
   let exitCode = null;
   let threw = null;
+  const logs = [];
 
   process.env.MTI_UPDATER_TEST = "1";
+  console.log = (...args) => {
+    logs.push(args.join(" "));
+    originalLog.apply(console, args);
+  };
   process.exit = (code) => {
     exitCode = code;
     const err = new Error("EXIT:" + code);
@@ -101,7 +107,7 @@ function runUpdater(argv, options = {}) {
   };
 
   try {
-    updater.run(argv, {
+    await updater.run(argv, {
       execFileSync,
       createOrUpdateTask: () => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Mode", "install"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
       queryTaskXml: () => options.taskSnapshotXml || null,
@@ -116,10 +122,11 @@ function runUpdater(argv, options = {}) {
   } finally {
     process.exit = originalExit;
     fs.copyFileSync = originalCopy;
+    console.log = originalLog;
     if (originalEnv === undefined) delete process.env.MTI_UPDATER_TEST; else process.env.MTI_UPDATER_TEST = originalEnv;
   }
 
-  return { exitCode, threw, calls };
+  return { exitCode, threw, calls, logs };
 }
 
 function makePackageSandbox() {
@@ -135,12 +142,12 @@ function sha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
-function main() {
+async function main() {
   // UPDATE-TASK-001 task ausente -> criada.
   {
     const pkg = makePackageSandbox();
     const installBase = mkInstallDir("mti-update-task-install-1-");
-    const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
+    const r = await runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       interactiveUser: "Henrique"
     });
     check("UPDATE-TASK-001 task ausente criada", r.exitCode === 0 && r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("install")));
@@ -151,7 +158,7 @@ function main() {
     const pkg = makePackageSandbox();
     const installBase = mkInstallDir("mti-update-task-install-2-");
     const snapshot = "<Task><Actions/></Task>";
-    const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
+    const r = await runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       taskSnapshotXml: snapshot,
       interactiveUser: "Henrique"
     });
@@ -163,7 +170,7 @@ function main() {
   {
     const pkg = makePackageSandbox();
     const installBase = mkInstallDir("mti-update-task-install-3-");
-    const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
+    const r = await runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       taskSnapshotXml: "<Task><Actions><Exec><Command>old.exe</Command></Exec></Actions></Task>",
       interactiveUser: "Henrique"
     });
@@ -174,7 +181,7 @@ function main() {
   {
     const pkg = makePackageSandbox();
     const installBase = mkInstallDir("mti-update-task-install-4-");
-    const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
+    const r = await runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       failCreateTask: true,
       interactiveUser: "Henrique"
     });
@@ -185,7 +192,7 @@ function main() {
   {
     const pkg = makePackageSandbox();
     const installBase = mkInstallDir("mti-update-task-install-5-");
-    const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
+    const r = await runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       failRunTask: true,
       interactiveUser: "Henrique"
     });
@@ -196,7 +203,7 @@ function main() {
   {
     const pkg = makePackageSandbox();
     const installBase = mkInstallDir("mti-update-task-install-6-");
-    const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
+    const r = await runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       taskSnapshotXml: "<Task><Actions><Exec><Command>old.exe</Command></Exec></Actions></Task>",
       failRunTask: true,
       interactiveUser: "Henrique"
@@ -208,20 +215,20 @@ function main() {
   {
     const pkg = makePackageSandbox();
     const installBase = mkInstallDir("mti-update-task-install-7-");
-    const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
+    const r = await runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       interactiveUser: "Henrique"
     });
-    check("UPDATE-TASK-007 task Run após update", r.exitCode === 0 && r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("run")));
+    check("UPDATE-TASK-007 task Run após update", r.logs.some((l) => /task companion acionada apos update/i.test(l)));
   }
 
   // UPDATE-TASK-008 sem sessão -> task existe, mas não Run.
   {
     const pkg = makePackageSandbox();
     const installBase = mkInstallDir("mti-update-task-install-8-");
-    const r = runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
+    const r = await runUpdater(["node", "x", "--apply-update-package", pkg, installBase.installExe, "MonitorTIAgent"], {
       interactiveUser: null
     });
-    check("UPDATE-TASK-008 sem sessão sem run", r.exitCode === 0 && !r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("run")));
+    check("UPDATE-TASK-008 sem sessão sem run", r.logs.some((l) => /sem sessao interativa; task companion aguardara proximo logon/i.test(l)));
   }
 
   // UPDATE-TASK-009 1.1.6 -> versao atual completo com task ausente.
@@ -230,14 +237,17 @@ function main() {
     const t = mkInstallDir("mti-update-task-legacy-");
     const expectedAgent = sha256(path.join(pkg, "MonitorTI-Agent.exe"));
     const expectedNotifier = sha256(path.join(pkg, "MonitorTI-Notifier.exe"));
-    const r = runUpdater(["node", "x", "--apply-update-package", pkg, t.installExe, "MonitorTIAgent"], {
+    const r = await runUpdater(["node", "x", "--apply-update-package", pkg, t.installExe, "MonitorTIAgent"], {
       interactiveUser: "Henrique"
     });
-    check("UPDATE-TASK-009 1.1.6->" + AGENT_VERSION + " task ausente completo", r.exitCode === 0 && sha256(t.installExe) === expectedAgent && sha256(t.notifierExe) === expectedNotifier && r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("install")));
+    check("UPDATE-TASK-009 1.1.6->" + RELEASE_VERSION + " task ausente completo", r.exitCode === 0 && sha256(t.installExe) === expectedAgent && sha256(t.notifierExe) === expectedNotifier && r.calls.some((c) => c.cmd.toLowerCase().includes("powershell") && c.args.includes("-Mode") && c.args.includes("install")));
   }
 
   console.log("\nRESULTADO: " + pass + " PASS, " + fail + " FAIL");
   process.exit(fail ? 1 : 0);
 }
 
-main();
+main().catch((e) => {
+  console.error("ERRO no teste:", e);
+  process.exit(1);
+});

@@ -42,6 +42,60 @@ function setUpdateState(deviceId, state) {
   updateStates.set(deviceId, state);
 }
 
+function clearUpdateState(deviceId) {
+  updateStates.delete(deviceId);
+}
+
+function resetUpdateStatesForTests() {
+  updateStates.clear();
+}
+
+function applyUpdateStatusMessage(msg) {
+  if (!msg || !msg.deviceId) return null;
+  const prev = updateStates.get(msg.deviceId) || {};
+  const isFailed = msg.status === "update_failed";
+  const state = {
+    ...prev,
+    status: msg.status,
+    version: msg.version || prev.version || null,
+    targetVersion: msg.targetVersion || prev.targetVersion || msg.version || null,
+    currentVersion: msg.currentVersion || prev.currentVersion || null,
+    stage: msg.stage || prev.stage || null,
+    rolledBack: typeof msg.rolledBack === "boolean" ? msg.rolledBack : !!prev.rolledBack,
+    message: msg.message || msg.error || null,
+    updateError: isFailed ? (msg.error || msg.message || null) : null,
+    updatedAt: new Date()
+  };
+  updateStates.set(msg.deviceId, state);
+  return state;
+}
+
+function shouldMarkUpdateSuccess(pend, agentVersion) {
+  return !!(
+    pend &&
+    pend.targetVersion &&
+    pend.status !== "update_success" &&
+    pend.status !== "update_failed" &&
+    agentVersion &&
+    agentVersion === pend.targetVersion
+  );
+}
+
+function applyRegisterUpdateSuccess(deviceId, agentVersion) {
+  const pend = updateStates.get(deviceId);
+  if (!shouldMarkUpdateSuccess(pend, agentVersion)) return pend || null;
+  const state = {
+    ...pend,
+    status: "update_success",
+    version: agentVersion,
+    message: "Atualizacao concluida",
+    updateError: null,
+    updatedAt: new Date()
+  };
+  updateStates.set(deviceId, state);
+  return state;
+}
+
 // Envia uma mensagem para o Agent conectado com o deviceId informado.
 // Retorna true se havia um Agent conectado.
 function sendToAgent(deviceId, obj) {
@@ -200,18 +254,10 @@ function setupWebSocket(server) {
       }
 
       if (msg && msg.type === "update_status" && msg.deviceId) {
-        const prev = updateStates.get(msg.deviceId) || {};
-        const state = {
-          status: msg.status,
-          version: msg.version || prev.version || null,
-          targetVersion: prev.targetVersion || msg.version || null,
-          message: msg.message || null,
-          updatedAt: new Date()
-        };
-        updateStates.set(msg.deviceId, state);
+        const state = applyUpdateStatusMessage(msg);
         console.log(
           `[Monitor TI] update_status ${msg.deviceId}: ${msg.status}` +
-            (msg.message ? ` (${msg.message})` : "")
+            (msg.message || msg.error ? ` (${msg.message || msg.error})` : "")
         );
         return;
       }
@@ -277,19 +323,13 @@ function setupWebSocket(server) {
 
           // Detecta conclusão bem-sucedida de uma atualização em andamento
           const pend = updateStates.get(d.deviceId);
-          if (
-            pend &&
-            pend.targetVersion &&
-            pend.status !== "update_success" &&
-            pend.status !== "update_failed" &&
-            d.agentVersion &&
-            d.agentVersion === pend.targetVersion
-          ) {
+          if (shouldMarkUpdateSuccess(pend, d.agentVersion)) {
             updateStates.set(d.deviceId, {
               ...pend,
               status: "update_success",
               version: d.agentVersion,
               message: "Atualizacao concluida",
+              updateError: null,
               updatedAt: new Date()
             });
             console.log(
@@ -347,6 +387,11 @@ module.exports = {
   sendToAgent,
   getUpdateState,
   setUpdateState,
+  clearUpdateState,
+  resetUpdateStatesForTests,
+  applyUpdateStatusMessage,
+  shouldMarkUpdateSuccess,
+  applyRegisterUpdateSuccess,
   setCapabilities,
   getCapabilities,
   hasCapability
