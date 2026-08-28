@@ -12,6 +12,7 @@ const avisosRoutes = require("./routes/avisos.routes");
 const { setupWebSocket } = require("./ws/agentServer");
 const prisma = require("./prisma");
 const { logEvent } = require("./logger");
+const { normalizeComputersOfflineOnStartup } = require("./services/presence.service");
 const historicoService = require("./services/historico.service");
 const avisosService = require("./services/avisos.service");
 
@@ -67,16 +68,23 @@ async function waitForDatabase() {
 }
 
 if (require.main === module) {
-  const server = http.createServer(app);
-  setupWebSocket(server);
+  (async () => {
+    await waitForDatabase();
+    await normalizeComputersOfflineOnStartup();
 
-  server.listen(PORT, "0.0.0.0", () => {
-    logEvent(`[Monitor TI] Server rodando na porta ${PORT}`);
+    const server = http.createServer(app);
+    setupWebSocket(server);
+
+    server.listen(PORT, "0.0.0.0", () => {
+      logEvent(`[Monitor TI] Server rodando na porta ${PORT}`);
+    });
+
+    historicoService.iniciarRetencao();
+    avisosService.iniciarAgendador();
+  })().catch((err) => {
+    console.error("[Monitor TI] erro no startup:", err.message);
+    process.exitCode = 1;
   });
-
-  waitForDatabase();
-  historicoService.iniciarRetencao();
-  avisosService.iniciarAgendador();
 }
 
 module.exports = app;
