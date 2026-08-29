@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import SiteNav from './SiteNav'
 import { computeAlerts } from '../utils/alerts'
 import {
   bytesToGB,
@@ -232,6 +233,7 @@ export default function ComputerDetails() {
 
   return (
     <div className="container">
+      <SiteNav />
       <Link className="back-link" to="/">
         ← Voltar ao Dashboard
       </Link>

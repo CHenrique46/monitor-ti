@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import SummaryCards from './SummaryCards'
 import SearchBar from './SearchBar'
 import ComputerCard from './ComputerCard'
+import SiteNav from './SiteNav'
 import { computeAlerts, sortComputadores } from '../utils/alerts'
 import { fmtDate } from '../utils/formatters'
 import { API_URL } from '../config'
@@ -102,6 +103,7 @@ export default function Dashboard() {
 
   return (
     <div className="container">
+      <SiteNav />
       <h1>Monitor TI</h1>
       <p>
         Servidor:{' '}
