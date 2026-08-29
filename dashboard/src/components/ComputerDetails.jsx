@@ -42,6 +42,8 @@ export default function ComputerDetails() {
   const [release, setRelease] = useState(null)
   const [updateStatus, setUpdateStatus] = useState(null)
   const [confirm, setConfirm] = useState(false)
+  const [remoteActions, setRemoteActions] = useState([])
+  const [spoolerConfirm, setSpoolerConfirm] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -145,6 +147,22 @@ export default function ComputerDetails() {
     }
   }, [id, release])
 
+  useEffect(() => {
+    let active = true
+    const loadActions = async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/computadores/${id}/actions?take=10`)
+        if (active && r.ok) setRemoteActions(await r.json())
+      } catch (e) {}
+    }
+    loadActions()
+    const t = setInterval(loadActions, 5000)
+    return () => {
+      active = false
+      clearInterval(t)
+    }
+  }, [id])
+
   const updateAvailable =
     release && c && c.agentVersion && release.version !== c.agentVersion
   const inProgress =
@@ -152,6 +170,9 @@ export default function ComputerDetails() {
     ["update_pending", "update_downloading", "update_validating", "update_installing"].includes(
       updateStatus.status
     )
+  const remoteInProgress = remoteActions.some((a) =>
+    ["PENDING", "DISPATCHED", "RUNNING"].includes(a.status)
+  )
 
   const statusLabel = (s) => {
     switch (s) {
@@ -167,6 +188,25 @@ export default function ComputerDetails() {
         return "Atualizado ✓"
       case "update_failed":
         return "Falha na atualização"
+      default:
+        return s || ""
+    }
+  }
+
+  const actionStatusLabel = (s) => {
+    switch (s) {
+      case "PENDING":
+        return "Pendente"
+      case "DISPATCHED":
+        return "Enviado"
+      case "RUNNING":
+        return "Executando"
+      case "SUCCESS":
+        return "Concluído"
+      case "FAILED":
+        return "Falhou"
+      case "REJECTED":
+        return "Rejeitado"
       default:
         return s || ""
     }
@@ -188,6 +228,25 @@ export default function ComputerDetails() {
     } catch (e) {
       setUpdateStatus({ status: "update_failed", message: e.message })
     }
+  }
+
+  const triggerSpoolerReset = async () => {
+    setSpoolerConfirm(false)
+    try {
+      const r = await fetch(`${API_URL}/api/computadores/${id}/actions/spooler-reset`, {
+        method: 'POST'
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        if (body.execution) {
+          setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
+        }
+        return
+      }
+      if (body.execution) {
+        setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
+      }
+    } catch (e) {}
   }
 
   if (notFound) {
@@ -349,6 +408,75 @@ export default function ComputerDetails() {
                 </div>
               </div>
             )}
+          </Section>
+
+          <Section title="Ações remotas">
+            <div>
+              <span className="detail-key">Spooler</span>
+              <span className="detail-val">Reset da fila de impressão</span>
+            </div>
+            {remoteActions[0] && (
+              <div className={`update-status ${remoteActions[0].status === 'FAILED' || remoteActions[0].status === 'REJECTED' ? 'failed' : remoteActions[0].status === 'SUCCESS' ? 'ok' : 'running'}`}>
+                {remoteActions[0].label || 'Reiniciar spooler'}: {actionStatusLabel(remoteActions[0].status)}
+                {remoteActions[0].mensagem ? ` — ${remoteActions[0].mensagem}` : ''}
+                {remoteActions[0].erro ? ` — ${remoteActions[0].erro}` : ''}
+              </div>
+            )}
+
+            {online && !remoteInProgress && (
+              <button type="button" className="btn-update" onClick={() => setSpoolerConfirm(true)}>
+                Reiniciar spooler
+              </button>
+            )}
+            {online && remoteInProgress && (
+              <div className="muted">Uma ação remota já está em andamento.</div>
+            )}
+            {!online && (
+              <div className="muted">Computador offline: ação remota indisponível.</div>
+            )}
+
+            {spoolerConfirm && (
+              <div className="confirm-box">
+                <p>
+                  Reiniciar o spooler de impressão de <strong>{c.hostname}</strong>?
+                </p>
+                <div className="confirm-actions">
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={() => setSpoolerConfirm(false)}
+                  >
+                    Cancelar
+                  </button>
+                  <button type="button" className="btn-update" onClick={triggerSpoolerReset}>
+                    Reiniciar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="alert-history">
+              {remoteActions.length === 0 ? (
+                <div className="muted">Nenhuma execução registrada.</div>
+              ) : (
+                remoteActions.map((a) => (
+                  <div key={a.actionExecutionId} className={`alert-history-item ${a.status === 'SUCCESS' ? 'resolvido' : a.status === 'FAILED' || a.status === 'REJECTED' ? 'ativo' : ''}`}>
+                    <div className="ah-top">
+                      <span className="alert info">{a.label || a.action}</span>
+                      <span className="ah-badge">{actionStatusLabel(a.status)}</span>
+                    </div>
+                    <div className="ah-meta">
+                      {a.actionExecutionId}
+                      {` · ${fmtDate(a.solicitadaEm)}`}
+                      {a.concluidaEm ? ` · Concluída: ${fmtDate(a.concluidaEm)}` : ''}
+                    </div>
+                    {(a.mensagem || a.erro) && (
+                      <div className="muted">{a.mensagem || a.erro}</div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </Section>
 
           <Section title="Sistema">

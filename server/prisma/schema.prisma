@@ -44,6 +44,7 @@ model Computador {
   metricas      MetricaComputador[]
   alertas      Alerta[]
   entregasAviso EntregaAviso[]
+  acoesRemotas  AcaoRemotaExecucao[]
 }
 
 model DiscoFisico {
@@ -205,4 +206,26 @@ model EntregaAviso {
 
   @@index([computadorId, estado])
   @@index([expiraEm])
+}
+
+model AcaoRemotaExecucao {
+  id                Int      @id @default(autoincrement())
+  actionExecutionId String   @unique
+  computadorId      Int
+  computador        Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+
+  action            String
+  status            String   @default("PENDING") // PENDING|DISPATCHED|RUNNING|SUCCESS|FAILED|REJECTED
+  mensagem          String?
+  erro              String?
+  resultado         Json?
+
+  solicitadaEm      DateTime @default(now())
+  enviadaEm         DateTime?
+  iniciadaEm        DateTime?
+  concluidaEm       DateTime?
+  atualizadoEm      DateTime @updatedAt
+
+  @@index([computadorId, solicitadaEm])
+  @@index([computadorId, action, status])
 }

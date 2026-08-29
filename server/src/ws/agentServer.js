@@ -3,6 +3,7 @@ const prisma = require("../prisma");
 const historicoService = require("../services/historico.service");
 const alertasService = require("../services/alertas.service");
 const avisosService = require("../services/avisos.service");
+const remoteActionsService = require("../services/remoteActions.service");
 
 const HEARTBEAT_INTERVAL = 30000;
 
@@ -272,6 +273,17 @@ function setupWebSocket(server) {
           `[Monitor TI] update_status ${msg.deviceId}: ${msg.status}` +
             (msg.message || msg.error ? ` (${msg.message || msg.error})` : "")
         );
+        return;
+      }
+
+      if (msg && msg.type === "remote_action_status" && msg.actionExecutionId) {
+        const state = await remoteActionsService.applyAgentStatusMessage(msg);
+        if (state) {
+          console.log(
+            `[Monitor TI] remote_action_status ${msg.actionExecutionId}: ${state.status}` +
+              (state.mensagem || state.erro ? ` (${state.mensagem || state.erro})` : "")
+          );
+        }
         return;
       }
 

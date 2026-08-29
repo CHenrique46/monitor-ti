@@ -6,6 +6,7 @@ const WebSocket = require("ws");
 const checkDiskSpace = require("check-disk-space").default;
 const { execFile, spawn } = require("child_process");
 const { createNoticeBridge } = require("./notices/bridge");
+const remoteActions = require("./remoteActions");
 
 // Atualizador: se iniciado com --apply-update (arquivo unico) ou
 // --apply-update-package (pacote Agent+Notifier), executa apenas a troca e
@@ -311,6 +312,7 @@ let metricsTimer = null;
 // ===== Atualização centralizada do Agent =====
 
 let updating = false; // guarda para não iniciar atualização em paralelo
+const remoteActionState = new Map();
 
 function sendUpdateStatus(ws, status, version, message) {
   try {
@@ -325,6 +327,107 @@ function sendUpdateStatus(ws, status, version, message) {
     );
   } catch (e) {
     // ignore
+  }
+}
+
+function sendRemoteActionStatus(ws, payload) {
+  try {
+    ws.send(
+      JSON.stringify({
+        type: "remote_action_status",
+        deviceId,
+        protocolVersion: 1,
+        timestamp: new Date().toISOString(),
+        ...payload
+      })
+    );
+  } catch (e) {
+    // ignore
+  }
+}
+
+function execFilePromise(file, args, options) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, options, (err, stdout, stderr) => {
+      if (err) {
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function runSpoolerReset() {
+  const script = [
+    "try { Stop-Service -Name Spooler -Force -ErrorAction SilentlyContinue } catch {}",
+    "Start-Sleep -Seconds 2",
+    'Remove-Item -Path "$env:WINDIR\\System32\\spool\\PRINTERS\\*" -Force -ErrorAction SilentlyContinue',
+    "try { Start-Service -Name Spooler -ErrorAction Stop } catch { throw }"
+  ].join("; ");
+
+  await execFilePromise(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+    { windowsHide: true, timeout: 30000 }
+  );
+}
+
+async function handleRemoteActionCommand(ws, msg) {
+  const actionExecutionId = String((msg && msg.actionExecutionId) || "").trim();
+  const action = String((msg && msg.action) || "").trim().toLowerCase();
+  if (!actionExecutionId || action !== "spooler_reset") {
+    sendRemoteActionStatus(ws, {
+      actionExecutionId: actionExecutionId || null,
+      action: action || null,
+      status: "FAILED",
+      message: "Comando invalido.",
+      error: "Comando invalido."
+    });
+    return;
+  }
+
+  const existing = remoteActionState.get(actionExecutionId);
+  if (existing && ["SUCCESS", "FAILED"].includes(existing.status)) {
+    sendRemoteActionStatus(ws, existing);
+    return;
+  }
+  if (existing && existing.status === "RUNNING") return;
+
+  const running = {
+    actionExecutionId,
+    action,
+    status: "RUNNING",
+    message: "Executando reset do spooler.",
+    error: null
+  };
+  remoteActionState.set(actionExecutionId, running);
+  sendRemoteActionStatus(ws, running);
+
+  try {
+    await runSpoolerReset();
+    const success = {
+      actionExecutionId,
+      action,
+      status: "SUCCESS",
+      message: "Spooler reiniciado com sucesso.",
+      error: null,
+      result: { spooler: "restarted" }
+    };
+    remoteActionState.set(actionExecutionId, success);
+    sendRemoteActionStatus(ws, success);
+  } catch (err) {
+    const failed = {
+      actionExecutionId,
+      action,
+      status: "FAILED",
+      message: "Falha ao reiniciar spooler.",
+      error: err && err.message ? err.message : String(err)
+    };
+    remoteActionState.set(actionExecutionId, failed);
+    sendRemoteActionStatus(ws, failed);
   }
 }
 
@@ -545,6 +648,8 @@ function connect(machine) {
     }
     if (msg && msg.type === "update_agent") {
       handleUpdateCommand(ws, msg).catch(() => {});
+    } else if (msg && msg.type === "remote_action") {
+      remoteActions.handleRemoteAction(ws, msg).catch(() => {});
     } else if (msg && msg.type === "notice_show") {
       if (noticesBridge) {
         noticesBridge.handleServerMessage(ws, msg);
