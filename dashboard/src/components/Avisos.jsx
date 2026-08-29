@@ -10,11 +10,13 @@ import {
   buildAgendamentoUpdateBody,
   buildAvisoPayload,
   filterComputersForSelection,
+  filterAvisosHistory,
   describeScheduleTarget,
   formatApiError,
   formatRecurrenceLabel,
   formatScheduleStatus,
   formatZoneDateTime,
+  formatNullableDateTime,
   getScheduleFormFromRecord,
   getZoneDateInputValue,
   getZoneTimeInputValue,
@@ -24,6 +26,7 @@ import {
   mapEstadoToLabel,
   mapNivelToLabel,
   getZoneWeekday,
+  summarizeHistoryDeliveries,
   saoPauloToUtc,
   selectVisibleComputerIds
 } from '../utils/avisos'
@@ -74,6 +77,10 @@ export default function Avisos() {
   const [selectionStatusFilter, setSelectionStatusFilter] = useState('all')
   const [selectionReadinessFilter, setSelectionReadinessFilter] = useState('all')
   const [mode, setMode] = useState('immediate')
+  const [historySearch, setHistorySearch] = useState('')
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('all')
+  const [historyLevelFilter, setHistoryLevelFilter] = useState('all')
+  const [historyPeriodFilter, setHistoryPeriodFilter] = useState('all')
   const [schedule, setSchedule] = useState(defaultScheduleState())
   const [editingScheduleId, setEditingScheduleId] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -155,6 +162,26 @@ export default function Avisos() {
   }, [alvoTipo, computadores, selectedSet])
 
   const history = useMemo(() => groupAvisosHistory(avisos, entregas, computadores), [avisos, entregas, computadores])
+
+  const filteredHistory = useMemo(
+    () =>
+      filterAvisosHistory(
+        history,
+        {
+          search: historySearch,
+          status: historyStatusFilter,
+          nivel: historyLevelFilter,
+          period: historyPeriodFilter
+        },
+        new Date()
+      ),
+    [history, historyLevelFilter, historyPeriodFilter, historySearch, historyStatusFilter]
+  )
+
+  const historyTotals = useMemo(
+    () => summarizeHistoryDeliveries(filteredHistory),
+    [filteredHistory]
+  )
 
   const visibleComputers = useMemo(
     () =>
@@ -828,31 +855,89 @@ export default function Avisos() {
 
           <section className="panel">
             <h2>Histórico</h2>
-            {history.length === 0 ? (
-              <p className="empty">Nenhum aviso enviado ainda.</p>
+            <div className="history-toolbar">
+              <input
+                type="search"
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                placeholder="Buscar por título, hostname ou usuário"
+              />
+              <select value={historyStatusFilter} onChange={(e) => setHistoryStatusFilter(e.target.value)}>
+                <option value="all">Todos</option>
+                <option value="PENDENTE">Pendente</option>
+                <option value="ENVIADO">Enviado</option>
+                <option value="EXIBIDO">Exibido</option>
+                <option value="CONFIRMADO">Confirmado</option>
+                <option value="EXPIRADO">Expirado</option>
+                <option value="FALHOU">Falhou</option>
+              </select>
+              <select value={historyLevelFilter} onChange={(e) => setHistoryLevelFilter(e.target.value)}>
+                <option value="all">Todos</option>
+                <option value="info">Informativo</option>
+                <option value="aviso">Atenção</option>
+                <option value="urgente">Crítico</option>
+              </select>
+              <select value={historyPeriodFilter} onChange={(e) => setHistoryPeriodFilter(e.target.value)}>
+                <option value="all">Todos</option>
+                <option value="today">Hoje</option>
+                <option value="7d">Últimos 7 dias</option>
+                <option value="30d">Últimos 30 dias</option>
+              </select>
+            </div>
+
+            <div className="history-summary-row">
+              <span>{filteredHistory.length} registros encontrados</span>
+              <span>{historyTotals.entregas} entregas</span>
+            </div>
+
+            {filteredHistory.length === 0 ? (
+              <p className="empty">Nenhum aviso corresponde aos filtros.</p>
             ) : (
               <div className="avisos-history">
-                {history.map((item) => (
-                  <article key={item.id} className="aviso-history-item">
-                    <div className="aviso-history-top">
-                      <div>
+                {filteredHistory.map((item) => (
+                  <details key={item.id} className="aviso-history-item">
+                    <summary className="aviso-history-summary">
+                      <div className="aviso-history-main">
                         <div className="aviso-history-title">{item.titulo}</div>
                         <div className="aviso-history-meta">
                           {mapNivelToLabel(item.nivel)} · {fmtServerDate(item.criadoEm)}
                         </div>
                       </div>
-                      <span className={`ah-badge ${item.primaryStatus === 'CONFIRMADO' ? 'resolvido' : ''}`}>
-                        {mapEstadoToLabel(item.primaryStatus)}
-                      </span>
+                      <div className="aviso-history-side">
+                        <span className={`ah-badge ${item.primaryStatus === 'CONFIRMADO' ? 'resolvido' : ''}`}>
+                          {mapEstadoToLabel(item.primaryStatus)}
+                        </span>
+                        <span className="aviso-history-small">
+                          {item.quantidadeMaquinas} máquina(s) · {historyStatusSummary(item.counts)}
+                        </span>
+                      </div>
+                    </summary>
+
+                    <div className="aviso-history-info compact">
+                      <span>{item.destinoLabel}</span>
+                      <span>aviso #{item.avisoId || '-'}</span>
+                      <span>ocorrência #{item.ocorrenciaId || '-'}</span>
                     </div>
 
-                    <div className="aviso-history-info">
-                      <span>{item.destinoLabel}</span>
-                      <span>
-                        {item.quantidadeMaquinas} máquina(s) · {historyStatusSummary(item.counts)}
-                      </span>
+                    <div className="history-deliveries">
+                      {item.deliveries.map((delivery) => (
+                        <div key={delivery.id} className="history-delivery-row">
+                          <div className="history-delivery-main">
+                            <strong>{delivery.computador?.hostname || 'Computador'}</strong>
+                            <span>{delivery.computador?.usuario || '—'}</span>
+                          </div>
+                          <div className="history-delivery-status">
+                            <span className={`delivery-state ${String(delivery.estado || '').toLowerCase()}`}>
+                              {mapEstadoToLabel(delivery.estado)}
+                            </span>
+                            <span>Enviado: {formatNullableDateTime(delivery.enviadoEm)}</span>
+                            <span>Exibido: {formatNullableDateTime(delivery.exibidoEm)}</span>
+                            <span>Confirmado: {formatNullableDateTime(delivery.confirmadoEm)}</span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </article>
+                  </details>
                 ))}
               </div>
             )}

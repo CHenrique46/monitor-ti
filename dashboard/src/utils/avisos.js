@@ -39,6 +39,19 @@ function computerSearchBlob(computer = {}) {
   return [computer.hostname, computer.usuario, computer.ip].filter(Boolean).join(" ").toLowerCase();
 }
 
+function historySearchBlob(item = {}) {
+  const deliveryText = (item.deliveries || [])
+    .map((delivery) => [delivery.computador?.hostname, delivery.computador?.usuario].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join(" ");
+  return [item.titulo, deliveryText].filter(Boolean).join(" ").toLowerCase();
+}
+
+function startOfZoneDay(date = new Date()) {
+  const p = zoneParts(date);
+  return saoPauloToUtc(Number(p.year), Number(p.month), Number(p.day), 0, 0);
+}
+
 export function mapNivelToBackend(value) {
   const raw = normalizeText(value).toLowerCase();
   if (!raw) return "info";
@@ -183,6 +196,59 @@ export function describeScheduleTarget(schedule, computers = []) {
   if (!ids.length) return "-";
   if (ids.length === computers.length && computers.length > 0) return "Todas as máquinas";
   return ids.length === 1 ? "1 máquina selecionada" : `${ids.length} máquinas selecionadas`;
+}
+
+export function getHistoryPeriodRange(period = 'all', now = new Date()) {
+  const todayStart = startOfZoneDay(now);
+  const periods = {
+    today: todayStart,
+    '7d': new Date(todayStart.getTime() - 6 * 24 * 3600 * 1000),
+    '30d': new Date(todayStart.getTime() - 29 * 24 * 3600 * 1000)
+  };
+  const start = periods[period] || null;
+  return {
+    start,
+    end: now
+  };
+}
+
+export function filterAvisosHistory(history = [], filters = {}, now = new Date()) {
+  const search = normalizeSearchText(filters.search);
+  const status = String(filters.status || 'all').toUpperCase();
+  const nivel = String(filters.nivel || 'all').toLowerCase();
+  const period = String(filters.period || 'all').toLowerCase();
+  const { start, end } = getHistoryPeriodRange(period, now);
+
+  return (history || []).filter((item) => {
+    if (search && !historySearchBlob(item).includes(search)) return false;
+    if (status !== 'ALL' && String(item.primaryStatus || '').toUpperCase() !== status) return false;
+    if (nivel !== 'all' && String(item.nivel || '').toLowerCase() !== nivel) return false;
+
+    if (start || end) {
+      const when = new Date(item.criadoEm || item.atualizadoEm || 0).getTime();
+      if (start && when < start.getTime()) return false;
+      if (end && when > end.getTime()) return false;
+    }
+
+    return true;
+  });
+}
+
+export function summarizeHistoryDeliveries(history = []) {
+  return (history || []).reduce(
+    (acc, item) => {
+      acc.registros += 1;
+      acc.entregas += Number(item.quantidadeMaquinas || 0);
+      return acc;
+    },
+    { registros: 0, entregas: 0 }
+  );
+}
+
+export function formatNullableDateTime(value) {
+  if (!value) return '—';
+  const formatted = formatZoneDateTime(value);
+  return formatted === '-' ? '—' : formatted;
 }
 
 export function isComputerReadyForNotice(computer = {}) {
@@ -489,6 +555,10 @@ export default {
   filterComputersForSelection,
   selectVisibleComputerIds,
   buildSelectionSummary,
+  getHistoryPeriodRange,
+  filterAvisosHistory,
+  summarizeHistoryDeliveries,
+  formatNullableDateTime,
   buildAgendamentoDraft,
   buildAgendamentoCreatePayload,
   buildAgendamentoUpdateBody,

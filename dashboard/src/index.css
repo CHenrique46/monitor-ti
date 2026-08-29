@@ -952,11 +952,70 @@ p {
   gap: 10px;
 }
 
+.history-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) 130px 150px 150px;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.history-toolbar input,
+.history-toolbar select {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.history-summary-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #94a3b8;
+  font-size: 0.84rem;
+  margin-bottom: 10px;
+}
+
 .aviso-history-item {
   border: 1px solid #334155;
   border-radius: 8px;
   background: #0f172a;
   padding: 10px;
+}
+
+.aviso-history-item > summary {
+  list-style: none;
+}
+
+.aviso-history-item > summary::-webkit-details-marker {
+  display: none;
+}
+
+.aviso-history-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.aviso-history-main {
+  min-width: 0;
+}
+
+.aviso-history-side {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  text-align: right;
+}
+
+.aviso-history-small {
+  color: #94a3b8;
+  font-size: 0.78rem;
 }
 
 .aviso-history-top {
@@ -975,6 +1034,53 @@ p {
 .aviso-history-info {
   color: #94a3b8;
   font-size: 0.84rem;
+}
+
+.aviso-history-info.compact {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.history-deliveries {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.history-delivery-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.history-delivery-main {
+  display: grid;
+  gap: 2px;
+  min-width: 140px;
+}
+
+.history-delivery-main strong {
+  color: #e2e8f0;
+}
+
+.history-delivery-main span,
+.history-delivery-status {
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.history-delivery-status {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
 }
 
 .aviso-history-info {
@@ -1007,6 +1113,21 @@ p {
 
   .selection-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .history-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .aviso-history-summary,
+  .history-delivery-row {
+    flex-direction: column;
+  }
+
+  .aviso-history-side,
+  .history-delivery-status {
+    justify-items: start;
+    text-align: left;
   }
 }
 
