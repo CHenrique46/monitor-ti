@@ -760,6 +760,40 @@ p {
   flex-wrap: wrap;
 }
 
+.selection-box {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.selection-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) 140px 190px;
+  gap: 8px;
+}
+
+.selection-toolbar input,
+.selection-toolbar select {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.selection-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #94a3b8;
+  font-size: 0.84rem;
+}
+
 .btn-tool {
   background: #0f172a;
   color: #e2e8f0;
@@ -783,7 +817,7 @@ p {
 .computer-picker {
   display: grid;
   gap: 8px;
-  max-height: 220px;
+  max-height: 260px;
   overflow: auto;
   padding-right: 4px;
 }
@@ -806,6 +840,16 @@ p {
   display: block;
   color: #94a3b8;
   margin-top: 2px;
+}
+
+.computer-option .computer-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  font-size: 0.72rem;
+  color: #cbd5e1;
 }
 
 .destination-preview {
@@ -958,6 +1002,10 @@ p {
   }
 
   .schedule-grid.two-cols {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-toolbar {
     grid-template-columns: 1fr;
   }
 }

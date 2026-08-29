@@ -31,6 +31,14 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+export function normalizeSearchText(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+function computerSearchBlob(computer = {}) {
+  return [computer.hostname, computer.usuario, computer.ip].filter(Boolean).join(" ").toLowerCase();
+}
+
 export function mapNivelToBackend(value) {
   const raw = normalizeText(value).toLowerCase();
   if (!raw) return "info";
@@ -175,6 +183,45 @@ export function describeScheduleTarget(schedule, computers = []) {
   if (!ids.length) return "-";
   if (ids.length === computers.length && computers.length > 0) return "Todas as máquinas";
   return ids.length === 1 ? "1 máquina selecionada" : `${ids.length} máquinas selecionadas`;
+}
+
+export function isComputerReadyForNotice(computer = {}) {
+  if (typeof computer.noticesReady === "boolean") return computer.noticesReady;
+  if (typeof computer.notifierReady === "boolean") return computer.notifierReady;
+  return null;
+}
+
+export function filterComputersForSelection(computers = [], filters = {}) {
+  const search = normalizeSearchText(filters.search);
+  const statusFilter = String(filters.statusFilter || "all").toLowerCase();
+  const readinessFilter = String(filters.readinessFilter || "all").toLowerCase();
+
+  return (computers || []).filter((computer) => {
+    if (search && !computerSearchBlob(computer).includes(search)) return false;
+
+    if (statusFilter === "online" && computer.status !== "online") return false;
+    if (statusFilter === "offline" && computer.status !== "offline") return false;
+
+    const ready = isComputerReadyForNotice(computer);
+    if (readinessFilter === "ready" && ready !== true) return false;
+    if (readinessFilter === "unready" && ready !== false) return false;
+
+    return true;
+  });
+}
+
+export function selectVisibleComputerIds(selectedIds = [], visibleComputers = []) {
+  return Array.from(
+    new Set([...(selectedIds || []).map((id) => Number(id)).filter(Number.isInteger), ...(visibleComputers || []).map((c) => Number(c.id)).filter(Number.isInteger)])
+  );
+}
+
+export function buildSelectionSummary(computers = [], visibleComputers = [], selectedIds = []) {
+  const total = (computers || []).length;
+  const visible = (visibleComputers || []).length;
+  const selected = Array.from(new Set((selectedIds || []).map((id) => Number(id)).filter(Number.isInteger))).length;
+  const visibleSelected = (visibleComputers || []).filter((c) => selectedIds.includes(c.id)).length;
+  return { total, visible, selected, visibleSelected };
 }
 
 export function buildAgendamentoDraft(form = {}, now = new Date()) {
@@ -438,6 +485,10 @@ export default {
   formatRecurrenceLabel,
   formatScheduleStatus,
   describeScheduleTarget,
+  isComputerReadyForNotice,
+  filterComputersForSelection,
+  selectVisibleComputerIds,
+  buildSelectionSummary,
   buildAgendamentoDraft,
   buildAgendamentoCreatePayload,
   buildAgendamentoUpdateBody,

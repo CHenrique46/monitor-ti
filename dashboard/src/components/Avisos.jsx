@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom'
 import SiteNav from './SiteNav'
 import { API_URL } from '../config'
 import {
+  buildSelectionSummary,
   WEEKDAY_OPTIONS,
   buildAgendamentoCreatePayload,
   buildAgendamentoDraft,
   buildAgendamentoUpdateBody,
   buildAvisoPayload,
+  filterComputersForSelection,
   describeScheduleTarget,
   formatApiError,
   formatRecurrenceLabel,
@@ -18,10 +20,12 @@ import {
   getZoneTimeInputValue,
   groupAvisosHistory,
   historyStatusSummary,
+  isComputerReadyForNotice,
   mapEstadoToLabel,
   mapNivelToLabel,
   getZoneWeekday,
-  saoPauloToUtc
+  saoPauloToUtc,
+  selectVisibleComputerIds
 } from '../utils/avisos'
 
 function Stat({ label, value, tone = '' }) {
@@ -66,6 +70,9 @@ export default function Avisos() {
   const [nivel, setNivel] = useState('info')
   const [alvoTipo, setAlvoTipo] = useState('todos')
   const [selectedIds, setSelectedIds] = useState([])
+  const [selectionSearch, setSelectionSearch] = useState('')
+  const [selectionStatusFilter, setSelectionStatusFilter] = useState('all')
+  const [selectionReadinessFilter, setSelectionReadinessFilter] = useState('all')
   const [mode, setMode] = useState('immediate')
   const [schedule, setSchedule] = useState(defaultScheduleState())
   const [editingScheduleId, setEditingScheduleId] = useState(null)
@@ -95,7 +102,25 @@ export default function Avisos() {
       if (!agendamentosRes.ok) failures.push('agendamentos')
       setLoadError(failures.length ? `Falha ao carregar: ${failures.join(', ')}.` : '')
 
-      if (computersRes.ok) setComputadores(await computersRes.json())
+      if (computersRes.ok) {
+        const items = await computersRes.json()
+        const enriched = await Promise.all(
+          items.map(async (computer) => {
+            try {
+              const capRes = await fetch(`${API_URL}/api/computadores/${computer.id}/capabilities`)
+              if (!capRes.ok) return { ...computer, noticesReady: null }
+              const cap = await capRes.json()
+              return {
+                ...computer,
+                noticesReady: typeof cap.notifierReady === 'boolean' ? cap.notifierReady : null
+              }
+            } catch (e) {
+              return { ...computer, noticesReady: null }
+            }
+          })
+        )
+        setComputadores(enriched)
+      }
       if (avisosRes.ok) setAvisos(await avisosRes.json())
       if (entregasRes.ok) setEntregas(await entregasRes.json())
       if (agendamentosRes.ok) setAgendamentos(await agendamentosRes.json())
@@ -131,6 +156,26 @@ export default function Avisos() {
 
   const history = useMemo(() => groupAvisosHistory(avisos, entregas, computadores), [avisos, entregas, computadores])
 
+  const visibleComputers = useMemo(
+    () =>
+      filterComputersForSelection(computadores, {
+        search: selectionSearch,
+        statusFilter: selectionStatusFilter,
+        readinessFilter: selectionReadinessFilter
+      }),
+    [computadores, selectionReadinessFilter, selectionSearch, selectionStatusFilter]
+  )
+
+  const selectionSummary = useMemo(
+    () => buildSelectionSummary(computadores, visibleComputers, selectedIds),
+    [computadores, selectedIds, visibleComputers]
+  )
+
+  const readinessFilterAvailable = useMemo(
+    () => computadores.some((c) => isComputerReadyForNotice(c) != null),
+    [computadores]
+  )
+
   const scheduleDraft = useMemo(() => {
     if (mode !== 'schedule') return null
     try {
@@ -160,6 +205,12 @@ export default function Avisos() {
   const clearEditState = () => {
     setEditingScheduleId(null)
     setPendingScheduleAction(null)
+  }
+
+  const clearSelectionFilters = () => {
+    setSelectionSearch('')
+    setSelectionStatusFilter('all')
+    setSelectionReadinessFilter('all')
   }
 
   const resetImmediateForm = () => {
@@ -192,6 +243,13 @@ export default function Avisos() {
     setAlvoTipo('selecionados')
   }
 
+  const selectVisible = () => {
+    setSelectedIds((current) => selectVisibleComputerIds(current, visibleComputers))
+    setAlvoTipo('selecionados')
+  }
+
+  const clearSelection = () => setSelectedIds([])
+
   const loadScheduleRecord = (record) => {
     const form = getScheduleFormFromRecord(record)
     setMode('schedule')
@@ -200,6 +258,7 @@ export default function Avisos() {
     setNivel(form.nivel)
     setAlvoTipo(form.alvoTipo)
     setSelectedIds(form.alvoTipo === 'selecionados' ? form.alvoIds : [])
+    clearSelectionFilters()
     setSchedule({
       tipo: form.tipo,
       data: form.data,
@@ -462,43 +521,85 @@ export default function Avisos() {
               </label>
             </div>
 
-            <div className="destination-tools">
-              <button type="button" className="btn-tool" onClick={selectAll} disabled={formDisabled}>
-                Selecionar todas
-              </button>
-              <button type="button" className="btn-tool" onClick={selectOnline} disabled={formDisabled}>
-                Selecionar online
-              </button>
-              <button type="button" className="btn-tool" onClick={() => setSelectedIds([])} disabled={formDisabled}>
-                Limpar seleção
-              </button>
-            </div>
-
             {alvoTipo === 'selecionados' && (
-              <div className="computer-picker">
-                {computadores.length === 0 ? (
-                  <p className="muted">Nenhum computador disponível para seleção.</p>
-                ) : (
-                  computadores.map((c) => (
-                    <label key={c.id} className="computer-option">
-                      <input
-                        type="checkbox"
-                        checked={selectedSet.has(c.id)}
-                        onChange={() => toggleSelected(c.id)}
-                        disabled={formDisabled}
-                      />
-                      <span>
-                        <strong>{c.hostname || '(sem nome)'}</strong>
-                        <small>
-                          {c.usuario || '-'} · {c.status === 'online' ? 'Online' : 'Offline'}
-                        </small>
-                        {'noticesReady' in c && (
-                          <small>Prontidão para avisos: {c.noticesReady ? 'Pronto' : 'Indisponível'}</small>
-                        )}
-                      </span>
-                    </label>
-                  ))
-                )}
+              <div className="selection-box">
+                <div className="selection-toolbar">
+                  <input
+                    type="search"
+                    value={selectionSearch}
+                    onChange={(e) => setSelectionSearch(e.target.value)}
+                    placeholder="Buscar por hostname, usuário ou IP"
+                    disabled={formDisabled}
+                  />
+
+                  <select
+                    value={selectionStatusFilter}
+                    onChange={(e) => setSelectionStatusFilter(e.target.value)}
+                    disabled={formDisabled}
+                  >
+                    <option value="all">Todas</option>
+                    <option value="online">Online</option>
+                    <option value="offline">Offline</option>
+                  </select>
+
+                  {readinessFilterAvailable && (
+                    <select
+                      value={selectionReadinessFilter}
+                      onChange={(e) => setSelectionReadinessFilter(e.target.value)}
+                      disabled={formDisabled}
+                    >
+                      <option value="all">Todas</option>
+                      <option value="ready">Aptas para aviso</option>
+                      <option value="unready">Indisponíveis para aviso</option>
+                    </select>
+                  )}
+                </div>
+
+                <div className="selection-meta">
+                  <span>{selectionSummary.selected} selecionadas</span>
+                  <span>{selectionSummary.visible} visíveis</span>
+                  <span>{selectionSummary.total} máquinas</span>
+                </div>
+
+                <div className="destination-tools">
+                  <button type="button" className="btn-tool" onClick={selectVisible} disabled={formDisabled}>
+                    Selecionar visíveis
+                  </button>
+                  <button type="button" className="btn-tool" onClick={clearSelection} disabled={formDisabled}>
+                    Limpar seleção
+                  </button>
+                </div>
+
+                <div className="computer-picker">
+                  {visibleComputers.length === 0 ? (
+                    <p className="muted">Nenhum computador corresponde aos filtros.</p>
+                  ) : (
+                    visibleComputers.map((c) => {
+                      const ready = isComputerReadyForNotice(c)
+                      return (
+                        <label key={c.id} className="computer-option">
+                          <input
+                            type="checkbox"
+                            checked={selectedSet.has(c.id)}
+                            onChange={() => toggleSelected(c.id)}
+                            disabled={formDisabled}
+                          />
+                          <span>
+                            <strong>{c.hostname || '(sem nome)'}</strong>
+                            <small>
+                              {c.usuario || '-'} · {c.status === 'online' ? 'Online' : 'Offline'}
+                              {c.ip ? ` · ${c.ip}` : ''}
+                              {c.agentVersion ? ` · v${c.agentVersion}` : ''}
+                            </small>
+                            {ready != null && (
+                              <small>Prontidão para avisos: {ready ? 'Pronto' : 'Indisponível'}</small>
+                            )}
+                          </span>
+                        </label>
+                      )
+                    })
+                  )}
+                </div>
               </div>
             )}
 
