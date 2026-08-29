@@ -3,21 +3,26 @@ import { Link } from 'react-router-dom'
 import SiteNav from './SiteNav'
 import { API_URL } from '../config'
 import {
-  NIVEL_OPTIONS,
+  WEEKDAY_OPTIONS,
+  buildAgendamentoCreatePayload,
+  buildAgendamentoDraft,
+  buildAgendamentoUpdateBody,
   buildAvisoPayload,
+  describeScheduleTarget,
   formatApiError,
+  formatRecurrenceLabel,
+  formatScheduleStatus,
+  formatZoneDateTime,
+  getScheduleFormFromRecord,
+  getZoneDateInputValue,
+  getZoneTimeInputValue,
   groupAvisosHistory,
   historyStatusSummary,
   mapEstadoToLabel,
-  mapNivelToLabel
+  mapNivelToLabel,
+  getZoneWeekday,
+  saoPauloToUtc
 } from '../utils/avisos'
-
-function fmtDate(value) {
-  if (!value) return '-'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '-'
-  return d.toLocaleString('pt-BR')
-}
 
 function Stat({ label, value, tone = '' }) {
   return (
@@ -28,52 +33,84 @@ function Stat({ label, value, tone = '' }) {
   )
 }
 
+function fmtServerDate(value) {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '-'
+  return d.toLocaleString('pt-BR')
+}
+
+const defaultScheduleState = () => {
+  const baseDate = getZoneDateInputValue()
+  const baseTime = getZoneTimeInputValue()
+  const [year, month, day] = baseDate.split('-').map(Number)
+  const [hour, minute] = baseTime.split(':').map(Number)
+  const tomorrow = saoPauloToUtc(year, month, day + 1, hour, minute)
+
+  return {
+    tipo: 'once',
+    data: getZoneDateInputValue(tomorrow),
+    hora: baseTime,
+    diaSemana: getZoneWeekday()
+  }
+}
+
 export default function Avisos() {
   const [serverOk, setServerOk] = useState(true)
   const [computadores, setComputadores] = useState([])
   const [avisos, setAvisos] = useState([])
   const [entregas, setEntregas] = useState([])
+  const [agendamentos, setAgendamentos] = useState([])
   const [titulo, setTitulo] = useState('')
   const [mensagem, setMensagem] = useState('')
   const [nivel, setNivel] = useState('info')
   const [alvoTipo, setAlvoTipo] = useState('todos')
   const [selectedIds, setSelectedIds] = useState([])
+  const [mode, setMode] = useState('immediate')
+  const [schedule, setSchedule] = useState(defaultScheduleState())
+  const [editingScheduleId, setEditingScheduleId] = useState(null)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
-  const [pendingPayload, setPendingPayload] = useState(null)
   const [loadError, setLoadError] = useState('')
+  const [pendingImmediatePayload, setPendingImmediatePayload] = useState(null)
+  const [pendingScheduleAction, setPendingScheduleAction] = useState(null)
+  const [pendingDeleteSchedule, setPendingDeleteSchedule] = useState(null)
+
+  const reloadData = async () => {
+    try {
+      const [computersRes, avisosRes, entregasRes, agendamentosRes] = await Promise.all([
+        fetch(`${API_URL}/api/computadores`),
+        fetch(`${API_URL}/api/avisos`),
+        fetch(`${API_URL}/api/avisos/entregas?limit=300`),
+        fetch(`${API_URL}/api/avisos/agendamentos`)
+      ])
+
+      setServerOk(computersRes.ok && avisosRes.ok && entregasRes.ok && agendamentosRes.ok)
+
+      const failures = []
+      if (!computersRes.ok) failures.push('computadores')
+      if (!avisosRes.ok) failures.push('avisos')
+      if (!entregasRes.ok) failures.push('entregas')
+      if (!agendamentosRes.ok) failures.push('agendamentos')
+      setLoadError(failures.length ? `Falha ao carregar: ${failures.join(', ')}.` : '')
+
+      if (computersRes.ok) setComputadores(await computersRes.json())
+      if (avisosRes.ok) setAvisos(await avisosRes.json())
+      if (entregasRes.ok) setEntregas(await entregasRes.json())
+      if (agendamentosRes.ok) setAgendamentos(await agendamentosRes.json())
+    } catch (e) {
+      setServerOk(false)
+      setLoadError('Falha ao carregar os dados da tela de avisos.')
+    }
+  }
 
   useEffect(() => {
     let active = true
 
     const load = async () => {
-      try {
-        const [computersRes, avisosRes, entregasRes] = await Promise.all([
-          fetch(`${API_URL}/api/computadores`),
-          fetch(`${API_URL}/api/avisos`),
-          fetch(`${API_URL}/api/avisos/entregas?limit=300`)
-        ])
-
-        if (!active) return
-        setServerOk(computersRes.ok && avisosRes.ok && entregasRes.ok)
-        const failures = []
-
-        if (!computersRes.ok) failures.push('computadores')
-        if (!avisosRes.ok) failures.push('avisos')
-        if (!entregasRes.ok) failures.push('entregas')
-
-        setLoadError(
-          failures.length ? `Falha ao carregar: ${failures.join(', ')}.` : ''
-        )
-
-        if (computersRes.ok) setComputadores(await computersRes.json())
-        if (avisosRes.ok) setAvisos(await avisosRes.json())
-        if (entregasRes.ok) setEntregas(await entregasRes.json())
-      } catch (e) {
-        if (active) setServerOk(false)
-        if (active) setLoadError('Falha ao carregar os dados da tela de avisos.')
-      }
+      if (!active) return
+      await reloadData()
     }
 
     load()
@@ -87,27 +124,57 @@ export default function Avisos() {
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
   const targetComputers = useMemo(() => {
-    if (alvoTipo === 'selecionados') {
-      return computadores.filter((c) => selectedSet.has(c.id))
-    }
-    if (alvoTipo === 'online') {
-      return computadores.filter((c) => c.status === 'online')
-    }
+    if (alvoTipo === 'selecionados') return computadores.filter((c) => selectedSet.has(c.id))
+    if (alvoTipo === 'online') return computadores.filter((c) => c.status === 'online')
     return computadores
   }, [alvoTipo, computadores, selectedSet])
 
   const history = useMemo(() => groupAvisosHistory(avisos, entregas, computadores), [avisos, entregas, computadores])
 
-  const stats = useMemo(() => {
-    const counts = { PENDENTE: 0, ENVIADO: 0, EXIBIDO: 0, CONFIRMADO: 0, EXPIRADO: 0, FALHOU: 0 }
-    for (const entrega of entregas) {
-      const key = String(entrega?.estado || '').toUpperCase()
-      if (Object.prototype.hasOwnProperty.call(counts, key)) counts[key] += 1
+  const scheduleDraft = useMemo(() => {
+    if (mode !== 'schedule') return null
+    try {
+      return buildAgendamentoDraft(
+        {
+          tipo: schedule.tipo,
+          data: schedule.data,
+          hora: schedule.hora,
+          diaSemana: schedule.diaSemana
+        },
+        new Date()
+      )
+    } catch (e) {
+      return { error: e.message }
     }
-    return counts
-  }, [entregas])
+  }, [mode, schedule])
 
-  const clearSelection = () => setSelectedIds([])
+  const immediateCanSubmit = titulo.trim() && mensagem.trim() && targetComputers.length > 0
+  const scheduleCanSubmit =
+    titulo.trim() && mensagem.trim() && targetComputers.length > 0 && !scheduleDraft?.error
+
+  const clearMessages = () => {
+    setNotice('')
+    setError('')
+  }
+
+  const clearEditState = () => {
+    setEditingScheduleId(null)
+    setPendingScheduleAction(null)
+  }
+
+  const resetImmediateForm = () => {
+    setTitulo('')
+    setMensagem('')
+    setNivel('info')
+    setSelectedIds([])
+    setAlvoTipo('todos')
+    setPendingImmediatePayload(null)
+  }
+
+  const resetScheduleForm = () => {
+    setSchedule(defaultScheduleState())
+    setPendingScheduleAction(null)
+  }
 
   const toggleSelected = (id) => {
     setSelectedIds((current) =>
@@ -125,49 +192,108 @@ export default function Avisos() {
     setAlvoTipo('selecionados')
   }
 
-  const needsConfirmation =
-    alvoTipo === 'todos' || alvoTipo === 'online' || (alvoTipo === 'selecionados' && selectedIds.length > 1)
-
-  const sendAviso = async (payload) => {
-    const response = await fetch(`${API_URL}/api/avisos`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+  const loadScheduleRecord = (record) => {
+    const form = getScheduleFormFromRecord(record)
+    setMode('schedule')
+    setTitulo(form.titulo)
+    setMensagem(form.mensagem)
+    setNivel(form.nivel)
+    setAlvoTipo(form.alvoTipo)
+    setSelectedIds(form.alvoTipo === 'selecionados' ? form.alvoIds : [])
+    setSchedule({
+      tipo: form.tipo,
+      data: form.data,
+      hora: form.hora,
+      diaSemana: form.diaSemana
     })
+    setEditingScheduleId(record.id)
+    clearMessages()
+    setPendingImmediatePayload(null)
+  }
 
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      throw new Error(formatApiError(data, 'Falha ao enviar aviso'))
+  const buildImmediateAction = () => buildAvisoPayload({ titulo, mensagem, nivel, alvoTipo }, selectedIds)
+
+  const buildScheduleAction = () => {
+    const form = {
+      titulo,
+      mensagem,
+      nivel,
+      alvoTipo,
+      tipo: schedule.tipo,
+      data: schedule.data,
+      hora: schedule.hora,
+      diaSemana: schedule.diaSemana
     }
 
-    setTitulo('')
-    setMensagem('')
-    setNivel('info')
-    setNotice('Aviso enviado com sucesso.')
-    setPendingPayload(null)
+    if (editingScheduleId) {
+      return {
+        method: 'PUT',
+        url: `${API_URL}/api/avisos/agendamentos/${editingScheduleId}`,
+        body: buildAgendamentoUpdateBody(form, selectedIds)
+      }
+    }
 
-    const [nextAvisos, nextEntregas] = await Promise.all([
-      fetch(`${API_URL}/api/avisos`).then((r) => (r.ok ? r.json() : avisos)),
-      fetch(`${API_URL}/api/avisos/entregas?limit=300`).then((r) => (r.ok ? r.json() : entregas))
-    ])
-    setAvisos(nextAvisos)
-    setEntregas(nextEntregas)
+    const { payload, draft } = buildAgendamentoCreatePayload(form, selectedIds)
+    return {
+      method: 'POST',
+      url: `${API_URL}/api/avisos`,
+      body: payload,
+      summary: draft.summary
+    }
   }
 
   const handleSubmit = async (event) => {
     event.preventDefault()
-    setError('')
-    setNotice('')
-    const payload = buildAvisoPayload({ titulo, mensagem, nivel, alvoTipo }, selectedIds)
+    clearMessages()
 
-    if (needsConfirmation) {
-      setPendingPayload(payload)
+    if (mode === 'immediate') {
+      const payload = buildImmediateAction()
+      if (selectedIds.length > 1 || alvoTipo === 'todos' || alvoTipo === 'online') {
+        setPendingScheduleAction(null)
+        setPendingImmediatePayload(payload)
+        return
+      }
+
+      setSaving(true)
+      try {
+        const response = await fetch(`${API_URL}/api/avisos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(formatApiError(data, 'Falha ao enviar aviso'))
+        resetImmediateForm()
+        setNotice('Aviso enviado com sucesso.')
+        await reloadData()
+      } catch (e) {
+        setError(e.message || 'Falha ao enviar aviso')
+      } finally {
+        setSaving(false)
+      }
       return
     }
 
+    const action = buildScheduleAction()
+    setPendingImmediatePayload(null)
+    setPendingScheduleAction(action)
+  }
+
+  const confirmImmediateSend = async () => {
+    if (!pendingImmediatePayload) return
     setSaving(true)
+    clearMessages()
     try {
-      await sendAviso(payload)
+      const response = await fetch(`${API_URL}/api/avisos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pendingImmediatePayload)
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(formatApiError(data, 'Falha ao enviar aviso'))
+      resetImmediateForm()
+      setNotice('Aviso enviado com sucesso.')
+      await reloadData()
     } catch (e) {
       setError(e.message || 'Falha ao enviar aviso')
     } finally {
@@ -175,21 +301,65 @@ export default function Avisos() {
     }
   }
 
-  const confirmSend = async () => {
-    if (!pendingPayload) return
+  const confirmScheduleAction = async () => {
+    if (!pendingScheduleAction) return
     setSaving(true)
-    setError('')
+    clearMessages()
     try {
-      await sendAviso(pendingPayload)
+      const response = await fetch(pendingScheduleAction.url, {
+        method: pendingScheduleAction.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pendingScheduleAction.body)
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(formatApiError(data, 'Falha ao salvar agendamento'))
+      resetImmediateForm()
+      resetScheduleForm()
+      clearEditState()
+      setNotice(
+        pendingScheduleAction.method === 'PUT'
+          ? 'Agendamento atualizado com sucesso.'
+          : 'Agendamento criado com sucesso.'
+      )
+      await reloadData()
     } catch (e) {
-      setError(e.message || 'Falha ao enviar aviso')
+      setError(e.message || 'Falha ao salvar agendamento')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const confirmDeleteSchedule = async () => {
+    if (!pendingDeleteSchedule) return
+    setSaving(true)
+    clearMessages()
+    try {
+      const response = await fetch(`${API_URL}/api/avisos/agendamentos/${pendingDeleteSchedule.id}`, {
+        method: 'DELETE'
+      })
+      if (!response.ok && response.status !== 204) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(formatApiError(data, 'Falha ao cancelar agendamento'))
+      }
+      if (editingScheduleId === pendingDeleteSchedule.id) {
+        clearEditState()
+        resetScheduleForm()
+      }
+      setNotice('Agendamento cancelado.')
+      setPendingDeleteSchedule(null)
+      await reloadData()
+    } catch (e) {
+      setError(e.message || 'Falha ao cancelar agendamento')
     } finally {
       setSaving(false)
     }
   }
 
   const formDisabled = saving
-  const canSubmit = titulo.trim() && mensagem.trim() && targetComputers.length > 0
+  const canSubmit = mode === 'immediate' ? immediateCanSubmit : scheduleCanSubmit
+
+  const scheduleLabel = editingScheduleId ? 'Salvar alterações' : 'Agendar'
+  const scheduleSummary = scheduleDraft?.summary || '-'
 
   return (
     <div className="container avisos-page">
@@ -197,7 +367,7 @@ export default function Avisos() {
       <div className="page-head">
         <div>
           <h1>Avisos</h1>
-          <p>Envie notificações imediatas e acompanhe o status de entrega por máquina.</p>
+          <p>Envie comunicados imediatos ou agende execuções recorrentes para as máquinas.</p>
         </div>
         <Link className="details-link" to="/">
           Voltar ao Dashboard
@@ -209,21 +379,39 @@ export default function Avisos() {
       </p>
       {!serverOk && <p className="server-warn">Não foi possível atualizar os dados.</p>}
       {loadError && <p className="notice error">{loadError}</p>}
-
       {notice && <p className="notice success">{notice}</p>}
       {error && <p className="notice error">{error}</p>}
 
       <div className="summary aviso-summary">
         <Stat label="Total" value={avisos.length} />
-        <Stat label="Pendente" value={stats.PENDENTE} />
-        <Stat label="Enviado" value={stats.ENVIADO} />
-        <Stat label="Confirmado" value={stats.CONFIRMADO} tone="online" />
+        <Stat label="Pendente" value={entregas.filter((e) => e.estado === 'PENDENTE').length} />
+        <Stat label="Enviado" value={entregas.filter((e) => e.estado === 'ENVIADO').length} />
+        <Stat label="Confirmado" value={entregas.filter((e) => e.estado === 'CONFIRMADO').length} tone="online" />
       </div>
 
       <div className="avisos-layout">
         <section className="panel">
           <h2>Novo aviso</h2>
           <form className="aviso-form" onSubmit={handleSubmit}>
+            <div className="segmented-control" role="tablist" aria-label="Modo do aviso">
+              <button
+                type="button"
+                className={mode === 'immediate' ? 'segment-btn active' : 'segment-btn'}
+                onClick={() => setMode('immediate')}
+                disabled={formDisabled}
+              >
+                Enviar agora
+              </button>
+              <button
+                type="button"
+                className={mode === 'schedule' ? 'segment-btn active' : 'segment-btn'}
+                onClick={() => setMode('schedule')}
+                disabled={formDisabled}
+              >
+                Agendar
+              </button>
+            </div>
+
             <label>
               Título
               <input
@@ -268,7 +456,7 @@ export default function Avisos() {
                   disabled={formDisabled}
                 >
                   <option value="todos">Todas as máquinas</option>
-                  <option value="online">Somente online</option>
+                  <option value="online">Máquinas online</option>
                   <option value="selecionados">Selecionar máquinas</option>
                 </select>
               </label>
@@ -281,7 +469,7 @@ export default function Avisos() {
               <button type="button" className="btn-tool" onClick={selectOnline} disabled={formDisabled}>
                 Selecionar online
               </button>
-              <button type="button" className="btn-tool" onClick={clearSelection} disabled={formDisabled}>
+              <button type="button" className="btn-tool" onClick={() => setSelectedIds([])} disabled={formDisabled}>
                 Limpar seleção
               </button>
             </div>
@@ -302,17 +490,129 @@ export default function Avisos() {
                       <span>
                         <strong>{c.hostname || '(sem nome)'}</strong>
                         <small>
-                          {c.usuario || '-'} · {c.status || '-'}
+                          {c.usuario || '-'} · {c.status === 'online' ? 'Online' : 'Offline'}
                         </small>
-                        {('noticesReady' in c) && (
-                          <small>
-                            Prontidão para avisos: {c.noticesReady ? 'Pronto' : 'Indisponível'}
-                          </small>
+                        {'noticesReady' in c && (
+                          <small>Prontidão para avisos: {c.noticesReady ? 'Pronto' : 'Indisponível'}</small>
                         )}
                       </span>
                     </label>
                   ))
                 )}
+              </div>
+            )}
+
+            {mode === 'schedule' && (
+              <div className="schedule-box">
+                <div className="schedule-kind">
+                  <label className={schedule.tipo === 'once' ? 'radio-pill active' : 'radio-pill'}>
+                    <input
+                      type="radio"
+                      name="schedule-type"
+                      value="once"
+                      checked={schedule.tipo === 'once'}
+                      onChange={() => setSchedule((s) => ({ ...s, tipo: 'once' }))}
+                      disabled={formDisabled}
+                    />
+                    Uma vez
+                  </label>
+                  <label className={schedule.tipo === 'daily' ? 'radio-pill active' : 'radio-pill'}>
+                    <input
+                      type="radio"
+                      name="schedule-type"
+                      value="daily"
+                      checked={schedule.tipo === 'daily'}
+                      onChange={() => setSchedule((s) => ({ ...s, tipo: 'daily' }))}
+                      disabled={formDisabled}
+                    />
+                    Diariamente
+                  </label>
+                  <label className={schedule.tipo === 'weekly' ? 'radio-pill active' : 'radio-pill'}>
+                    <input
+                      type="radio"
+                      name="schedule-type"
+                      value="weekly"
+                      checked={schedule.tipo === 'weekly'}
+                      onChange={() => setSchedule((s) => ({ ...s, tipo: 'weekly' }))}
+                      disabled={formDisabled}
+                    />
+                    Semanalmente
+                  </label>
+                </div>
+
+                {schedule.tipo === 'once' && (
+                  <div className="schedule-grid two-cols">
+                    <label>
+                      Data
+                      <input
+                        type="date"
+                        value={schedule.data}
+                        onChange={(e) => setSchedule((s) => ({ ...s, data: e.target.value }))}
+                        disabled={formDisabled}
+                      />
+                    </label>
+                    <label>
+                      Horário
+                      <input
+                        type="time"
+                        value={schedule.hora}
+                        onChange={(e) => setSchedule((s) => ({ ...s, hora: e.target.value }))}
+                        disabled={formDisabled}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {schedule.tipo === 'daily' && (
+                  <div className="schedule-grid one-col">
+                    <label>
+                      Horário
+                      <input
+                        type="time"
+                        value={schedule.hora}
+                        onChange={(e) => setSchedule((s) => ({ ...s, hora: e.target.value }))}
+                        disabled={formDisabled}
+                      />
+                    </label>
+                    <p className="schedule-note">Todos os dias às {schedule.hora || '--:--'}.</p>
+                  </div>
+                )}
+
+                {schedule.tipo === 'weekly' && (
+                  <div className="schedule-grid two-cols">
+                    <label>
+                      Dia da semana
+                      <select
+                        value={schedule.diaSemana}
+                        onChange={(e) => setSchedule((s) => ({ ...s, diaSemana: Number(e.target.value) }))}
+                        disabled={formDisabled}
+                      >
+                        {WEEKDAY_OPTIONS.map((item) => (
+                          <option key={item.value} value={item.value}>
+                            {item.short}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Horário
+                      <input
+                        type="time"
+                        value={schedule.hora}
+                        onChange={(e) => setSchedule((s) => ({ ...s, hora: e.target.value }))}
+                        disabled={formDisabled}
+                      />
+                    </label>
+                    <p className="schedule-note">
+                      Toda {WEEKDAY_OPTIONS.find((d) => d.value === Number(schedule.diaSemana))?.long || 'segunda-feira'} às {schedule.hora || '--:--'}.
+                    </p>
+                  </div>
+                )}
+
+                <div className="schedule-preview">
+                  Primeira execução: <strong>{scheduleSummary}</strong>
+                </div>
+                {scheduleDraft?.error && <p className="schedule-error">{scheduleDraft.error}</p>}
               </div>
             )}
 
@@ -328,10 +628,10 @@ export default function Avisos() {
             </div>
 
             <button type="submit" className="btn-update" disabled={formDisabled || !canSubmit}>
-              {saving ? 'Enviando...' : 'Enviar agora'}
+              {saving ? 'Processando...' : mode === 'immediate' ? 'Enviar agora' : scheduleLabel}
             </button>
 
-            {pendingPayload && (
+            {pendingImmediatePayload && (
               <div className="confirm-box">
                 <p>
                   Este aviso será enviado para{' '}
@@ -345,16 +645,34 @@ export default function Avisos() {
                   . Deseja continuar?
                 </p>
                 <div className="confirm-actions">
-                  <button
-                    type="button"
-                    className="btn-cancel"
-                    onClick={() => setPendingPayload(null)}
-                    disabled={saving}
-                  >
+                  <button type="button" className="btn-cancel" onClick={() => setPendingImmediatePayload(null)}>
                     Cancelar
                   </button>
-                  <button type="button" className="btn-update" onClick={confirmSend} disabled={saving}>
+                  <button type="button" className="btn-update" onClick={confirmImmediateSend} disabled={saving}>
                     Confirmar envio
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {pendingScheduleAction && (
+              <div className="confirm-box">
+                <p>
+                  Título: <strong>{titulo || '-'}</strong>
+                </p>
+                <p>
+                  Destino: <strong>{describeScheduleTarget(pendingScheduleAction.body, computadores)}</strong>
+                </p>
+                <p>
+                  Execução: <strong>{pendingScheduleAction.summary || scheduleSummary}</strong>
+                </p>
+                <p>Deseja criar este agendamento?</p>
+                <div className="confirm-actions">
+                  <button type="button" className="btn-cancel" onClick={() => setPendingScheduleAction(null)}>
+                    Cancelar
+                  </button>
+                  <button type="button" className="btn-update" onClick={confirmScheduleAction} disabled={saving}>
+                    Confirmar agendamento
                   </button>
                 </div>
               </div>
@@ -362,38 +680,100 @@ export default function Avisos() {
           </form>
         </section>
 
-        <section className="panel">
-          <h2>Histórico</h2>
-          {history.length === 0 ? (
-            <p className="empty">Nenhum aviso enviado ainda.</p>
-          ) : (
-            <div className="avisos-history">
-              {history.map((item) => (
-                <article key={item.id} className="aviso-history-item">
-                  <div className="aviso-history-top">
-                    <div>
-                      <div className="aviso-history-title">{item.titulo}</div>
-                      <div className="aviso-history-meta">
-                        {mapNivelToLabel(item.nivel)} · {fmtDate(item.criadoEm)}
+        <div className="avisos-side">
+          <section className="panel">
+            <h2>Agendamentos</h2>
+            {agendamentos.length === 0 ? (
+              <p className="empty">Nenhum agendamento cadastrado.</p>
+            ) : (
+              <div className="schedule-list">
+                {agendamentos.map((agendamento) => (
+                  <article key={agendamento.id} className="schedule-item">
+                    <div className="schedule-item-top">
+                      <div>
+                        <div className="schedule-title">{agendamento.aviso?.titulo || '(sem título)'}</div>
+                        <div className="schedule-meta">
+                          {formatRecurrenceLabel(agendamento)} · {describeScheduleTarget(agendamento, computadores)}
+                        </div>
                       </div>
+                      <span className={`schedule-badge ${agendamento.ativo ? 'active' : 'inactive'}`}>
+                        {formatScheduleStatus(agendamento)}
+                      </span>
                     </div>
-                    <span className={`ah-badge ${item.primaryStatus === 'CONFIRMADO' ? 'resolvido' : ''}`}>
-                      {mapEstadoToLabel(item.primaryStatus)}
-                    </span>
-                  </div>
 
-                  <div className="aviso-history-info">
-                    <span>{item.destinoLabel}</span>
-                    <span>
-                      {item.quantidadeMaquinas} máquina(s) · {historyStatusSummary(item.counts)}
-                    </span>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+                    <div className="schedule-info">
+                      <span>Próxima execução: {formatZoneDateTime(agendamento.proximaExecucao || agendamento.agendadoPara)}</span>
+                      <span>Nível: {mapNivelToLabel(agendamento.aviso?.nivel || 'info')}</span>
+                    </div>
+
+                    <div className="schedule-actions">
+                      <button type="button" className="btn-tool" onClick={() => loadScheduleRecord(agendamento)} disabled={saving}>
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-tool danger"
+                        onClick={() => setPendingDeleteSchedule(agendamento)}
+                        disabled={saving}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="panel">
+            <h2>Histórico</h2>
+            {history.length === 0 ? (
+              <p className="empty">Nenhum aviso enviado ainda.</p>
+            ) : (
+              <div className="avisos-history">
+                {history.map((item) => (
+                  <article key={item.id} className="aviso-history-item">
+                    <div className="aviso-history-top">
+                      <div>
+                        <div className="aviso-history-title">{item.titulo}</div>
+                        <div className="aviso-history-meta">
+                          {mapNivelToLabel(item.nivel)} · {fmtServerDate(item.criadoEm)}
+                        </div>
+                      </div>
+                      <span className={`ah-badge ${item.primaryStatus === 'CONFIRMADO' ? 'resolvido' : ''}`}>
+                        {mapEstadoToLabel(item.primaryStatus)}
+                      </span>
+                    </div>
+
+                    <div className="aviso-history-info">
+                      <span>{item.destinoLabel}</span>
+                      <span>
+                        {item.quantidadeMaquinas} máquina(s) · {historyStatusSummary(item.counts)}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
       </div>
+
+      {pendingDeleteSchedule && (
+        <div className="confirm-box confirm-floating">
+          <p>
+            Este agendamento será cancelado. Deseja continuar?
+          </p>
+          <div className="confirm-actions">
+            <button type="button" className="btn-cancel" onClick={() => setPendingDeleteSchedule(null)}>
+              Cancelar
+            </button>
+            <button type="button" className="btn-update" onClick={confirmDeleteSchedule} disabled={saving}>
+              Confirmar cancelamento
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

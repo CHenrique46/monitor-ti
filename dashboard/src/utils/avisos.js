@@ -13,6 +13,18 @@ export const STATUS_LABELS = {
   FALHOU: "Falhou"
 };
 
+export const TIMEZONE = "America/Sao_Paulo";
+
+export const WEEKDAY_OPTIONS = [
+  { value: 0, short: "Dom", long: "domingo" },
+  { value: 1, short: "Seg", long: "segunda-feira" },
+  { value: 2, short: "Ter", long: "terça-feira" },
+  { value: 3, short: "Qua", long: "quarta-feira" },
+  { value: 4, short: "Qui", long: "quinta-feira" },
+  { value: 5, short: "Sex", long: "sexta-feira" },
+  { value: 6, short: "Sáb", long: "sábado" }
+];
+
 const STATUS_ORDER = ["PENDENTE", "ENVIADO", "EXIBIDO", "CONFIRMADO", "EXPIRADO", "FALHOU"];
 
 function normalizeText(value) {
@@ -43,6 +55,240 @@ export function mapEstadoToLabel(value) {
 function statusPriority(value) {
   const idx = STATUS_ORDER.indexOf(String(value || "").toUpperCase());
   return idx < 0 ? STATUS_ORDER.length : idx;
+}
+
+function zoneParts(date = new Date()) {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: TIMEZONE,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+  const parts = {};
+  for (const part of dtf.formatToParts(date)) {
+    if (part.type !== "literal") parts[part.type] = part.value;
+  }
+  return parts;
+}
+
+export function getZoneWeekday(date = new Date()) {
+  const label = new Intl.DateTimeFormat("en-US", {
+    timeZone: TIMEZONE,
+    weekday: "short"
+  }).format(date);
+  const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[label] ?? 0;
+}
+
+export function saoPauloToUtc(year, month, day, hour, minute) {
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const p = zoneParts(new Date(utcGuess));
+  const spComoUtc = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    Number(p.hour) % 24,
+    Number(p.minute),
+    Number(p.second)
+  );
+  const offset = spComoUtc - utcGuess;
+  return new Date(utcGuess - offset);
+}
+
+export function getZoneDateInputValue(date = new Date()) {
+  const p = zoneParts(date);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+export function getZoneTimeInputValue(date = new Date()) {
+  const p = zoneParts(date);
+  return `${p.hour}:${p.minute}`;
+}
+
+export function formatZoneDateTime(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: TIMEZONE,
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(d);
+}
+
+export function formatZoneTime(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(d);
+}
+
+export function weekdayLabel(value, variant = "short") {
+  const item = WEEKDAY_OPTIONS.find((opt) => opt.value === Number(value));
+  return item ? item[variant] : "-";
+}
+
+export function formatRecurrenceLabel(schedule) {
+  if (!schedule) return "-";
+  const tipo = String(schedule.tipo || "").toLowerCase();
+  const anchor = schedule.proximaExecucao || schedule.agendadoPara;
+  const time = formatZoneTime(anchor);
+  if (tipo === "once") {
+    return `Uma vez - ${formatZoneDateTime(anchor)}`;
+  }
+  if (tipo === "daily") {
+    return `Diariamente às ${time}`;
+  }
+  if (tipo === "weekly") {
+    return `Toda ${weekdayLabel(schedule.diaSemana, "long")} às ${time}`;
+  }
+  return tipo || "-";
+}
+
+export function formatScheduleStatus(schedule) {
+  if (!schedule) return "-";
+  return schedule.ativo ? "Ativo" : "Inativo";
+}
+
+export function describeScheduleTarget(schedule, computers = []) {
+  if (!schedule) return "-";
+  if (schedule.alvoTipo === "todos") return "Todas as máquinas";
+  if (schedule.alvoTipo === "online") return "Máquinas online";
+  const ids = Array.isArray(schedule.alvoIds)
+    ? schedule.alvoIds
+    : (() => {
+        try {
+          return JSON.parse(schedule.alvoIds || "[]");
+        } catch (e) {
+          return [];
+        }
+      })();
+  if (!ids.length) return "-";
+  if (ids.length === computers.length && computers.length > 0) return "Todas as máquinas";
+  return ids.length === 1 ? "1 máquina selecionada" : `${ids.length} máquinas selecionadas`;
+}
+
+export function buildAgendamentoDraft(form = {}, now = new Date()) {
+  const tipo = String(form?.tipo || "once").toLowerCase();
+  const hora = normalizeText(form?.hora);
+  if (!hora || !/^\d{2}:\d{2}$/.test(hora)) {
+    throw new Error("Hora obrigatória.");
+  }
+
+  const [h, mi] = hora.split(":").map(Number);
+  if (!Number.isInteger(h) || !Number.isInteger(mi) || h < 0 || h > 23 || mi < 0 || mi > 59) {
+    throw new Error("Hora inválida.");
+  }
+
+  const current = zoneParts(now);
+
+  if (tipo === "once") {
+    if (!form?.data || !/^\d{4}-\d{2}-\d{2}$/.test(String(form.data))) {
+      throw new Error("Data obrigatória.");
+    }
+    const [Y, M, D] = String(form.data).split("-").map(Number);
+    if (![Y, M, D].every(Number.isInteger)) throw new Error("Data inválida.");
+    const scheduledAt = saoPauloToUtc(Y, M, D, h, mi);
+    if (scheduledAt.getTime() <= now.getTime()) {
+      throw new Error("Escolha uma data/hora futura.");
+    }
+    return {
+      tipo,
+      data: form.data,
+      hora,
+      diaSemana: null,
+      scheduledAt,
+      summary: `Uma vez - ${formatZoneDateTime(scheduledAt)}`
+    };
+  }
+
+  if (tipo === "daily") {
+    const candidateToday = saoPauloToUtc(Number(current.year), Number(current.month), Number(current.day), h, mi);
+    const scheduledAt = candidateToday.getTime() > now.getTime()
+      ? candidateToday
+      : saoPauloToUtc(Number(current.year), Number(current.month), Number(current.day) + 1, h, mi);
+    return {
+      tipo,
+      data: `${current.year}-${current.month}-${current.day}`,
+      hora,
+      diaSemana: null,
+      scheduledAt,
+      summary: `Diariamente às ${hora}`
+    };
+  }
+
+  if (tipo === "weekly") {
+    const weekday = Number(form?.diaSemana);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+      throw new Error("Dia da semana obrigatório.");
+    }
+    const currentWeekday = getZoneWeekday(now);
+    const delta = (weekday - currentWeekday + 7) % 7;
+    let scheduledAt = saoPauloToUtc(Number(current.year), Number(current.month), Number(current.day) + delta, h, mi);
+    if (scheduledAt.getTime() <= now.getTime()) {
+      scheduledAt = saoPauloToUtc(Number(current.year), Number(current.month), Number(current.day) + delta + 7, h, mi);
+    }
+    return {
+      tipo,
+      data: getZoneDateInputValue(scheduledAt),
+      hora,
+      diaSemana: weekday,
+      scheduledAt,
+      summary: `Toda ${weekdayLabel(weekday, "long")} às ${hora}`
+    };
+  }
+
+  throw new Error("Tipo de agendamento inválido.");
+}
+
+export function buildAgendamentoCreatePayload(form = {}, selectedIds = [], now = new Date()) {
+  const draft = buildAgendamentoDraft(form, now);
+  const alvoTipo = String(form?.alvoTipo || "todos").trim();
+  const payload = {
+    titulo: normalizeText(form?.titulo),
+    mensagem: normalizeText(form?.mensagem),
+    nivel: mapNivelToBackend(form?.nivel),
+    alvoTipo,
+    envio: "agendar",
+    agendamento: {
+      tipo: draft.tipo,
+      data: draft.data,
+      hora: draft.hora
+    }
+  };
+
+  if (draft.diaSemana != null) payload.agendamento.diaSemana = draft.diaSemana;
+
+  if (alvoTipo === "selecionados") {
+    const ids = Array.from(new Set((selectedIds || []).map((id) => Number(id)).filter(Number.isInteger)));
+    payload.alvoIds = ids;
+  }
+
+  return { payload, draft };
+}
+
+export function buildAgendamentoUpdateBody(form = {}, selectedIds = [], now = new Date()) {
+  const { payload } = buildAgendamentoCreatePayload(form, selectedIds, now);
+  return {
+    titulo: payload.titulo,
+    mensagem: payload.mensagem,
+    nivel: payload.nivel,
+    alvoTipo: payload.alvoTipo,
+    ...(payload.alvoIds ? { alvoIds: payload.alvoIds } : {}),
+    tipo: payload.agendamento.tipo,
+    data: payload.agendamento.data,
+    hora: payload.agendamento.hora,
+    ...(payload.agendamento.diaSemana != null ? { diaSemana: payload.agendamento.diaSemana } : {})
+  };
 }
 
 export function buildAvisoPayload(form, selectedIds = []) {
@@ -138,6 +384,31 @@ export function groupAvisosHistory(avisos = [], entregas = [], computers = []) {
     .sort((a, b) => new Date(b.criadoEm || 0).getTime() - new Date(a.criadoEm || 0).getTime());
 }
 
+export function getScheduleFormFromRecord(record = {}) {
+  const anchor = record.agendadoPara || record.proximaExecucao || null;
+  const tipo = String(record.tipo || "once");
+  const weekdayFromAnchor = anchor ? getZoneWeekday(anchor) : 0;
+  return {
+    titulo: record.aviso?.titulo || "",
+    mensagem: record.aviso?.mensagem || "",
+    nivel: record.aviso?.nivel || "info",
+    alvoTipo: record.alvoTipo || "todos",
+    alvoIds: Array.isArray(record.alvoIds)
+      ? record.alvoIds
+      : (() => {
+          try {
+            return JSON.parse(record.alvoIds || "[]");
+          } catch (e) {
+            return [];
+          }
+        })(),
+    tipo,
+    data: anchor ? getZoneDateInputValue(anchor) : "",
+    hora: anchor ? getZoneTimeInputValue(anchor) : "",
+    diaSemana: record.diaSemana != null ? Number(record.diaSemana) : weekdayFromAnchor
+  };
+}
+
 export function historyStatusSummary(counts = {}) {
   const parts = STATUS_ORDER.filter((status) => counts[status] > 0).map(
     (status) => `${mapEstadoToLabel(status)} ${counts[status]}`
@@ -150,14 +421,30 @@ export { statusPriority };
 export default {
   NIVEL_OPTIONS,
   STATUS_LABELS,
+  TIMEZONE,
+  WEEKDAY_OPTIONS,
   mapNivelToBackend,
   mapNivelToLabel,
   mapEstadoToLabel,
   buildAvisoPayload,
   formatApiError,
+  saoPauloToUtc,
+  getZoneWeekday,
+  getZoneDateInputValue,
+  getZoneTimeInputValue,
+  formatZoneDateTime,
+  formatZoneTime,
+  weekdayLabel,
+  formatRecurrenceLabel,
+  formatScheduleStatus,
+  describeScheduleTarget,
+  buildAgendamentoDraft,
+  buildAgendamentoCreatePayload,
+  buildAgendamentoUpdateBody,
   groupAvisosHistory,
   historyStatusSummary,
   inferDestinoLabel,
   countByStatus,
-  statusPriority
+  statusPriority,
+  getScheduleFormFromRecord
 };
