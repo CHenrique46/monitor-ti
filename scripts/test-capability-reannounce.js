@@ -100,8 +100,10 @@ async function main() {
   {
     agentServer.setCapabilities("dev-d", ["notices"]);
     check("D1 server has notices", agentServer.hasCapability("dev-d", "notices") === true);
-    agentServer.setCapabilities("dev-d", []);
-    check("D2 server remove notices", agentServer.hasCapability("dev-d", "notices") === false && agentServer.getCapabilities("dev-d").length === 0);
+    agentServer.applyRegisterCapabilities("dev-d", []);
+    check("D2 register vazio nao remove notices", agentServer.hasCapability("dev-d", "notices") === true);
+    agentServer.clearCapabilities("dev-d");
+    check("D3 disconnect real remove notices", agentServer.hasCapability("dev-d", "notices") === false && agentServer.getCapabilities("dev-d").length === 0);
   }
 
   // E) reconnect repetido -> notices continua correta.
@@ -166,8 +168,10 @@ async function main() {
   // J) setCapabilities(deviceId, []) remove notices anterior.
   {
     agentServer.setCapabilities("dev-j", ["notices"]);
-    agentServer.setCapabilities("dev-j", []);
-    check("J setCapabilities([]) remove", agentServer.hasCapability("dev-j", "notices") === false && agentServer.getCapabilities("dev-j").length === 0);
+    agentServer.applyRegisterCapabilities("dev-j", []);
+    check("J register vazio nao remove", agentServer.hasCapability("dev-j", "notices") === true);
+    agentServer.clearCapabilities("dev-j");
+    check("J disconnect real remove", agentServer.hasCapability("dev-j", "notices") === false && agentServer.getCapabilities("dev-j").length === 0);
   }
 
   // K) regressão: register e capabilities continuam sendo os únicos eventos da capability path.

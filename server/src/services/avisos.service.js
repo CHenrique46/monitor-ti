@@ -415,11 +415,15 @@ async function enviarParaAgente(deviceId, entrega) {
   }
   return agentServer.sendToAgent(deviceId, {
     type: "notice_show",
+    protocolVersion: 1,
     noticeDeliveryId: entrega.noticeDeliveryId,
-    titulo: entrega.titulo,
-    mensagem: entrega.mensagem,
-    nivel: entrega.nivel,
-    timestamp: entrega.criadoEm.toISOString()
+    title: entrega.titulo,
+    message: entrega.mensagem,
+    level: entrega.nivel,
+    timestamp: entrega.criadoEm.toISOString(),
+    scheduledAt: entrega.ocorrencia?.agendadoPara ? entrega.ocorrencia.agendadoPara.toISOString() : undefined,
+    expiresAt: entrega.expiraEm ? entrega.expiraEm.toISOString() : undefined,
+    serverTime: entrega.criadoEm.toISOString()
   });
 }
 

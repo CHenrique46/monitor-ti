@@ -44,6 +44,38 @@ namespace MonitorTI
         private const int COMPANION_RECONNECT_MS = 2000;
         private const string COMPANION_VERSION = "1.1.8";
 
+        private static string CompanionPipeName
+        {
+            get
+            {
+                try
+                {
+                    var raw = Environment.GetEnvironmentVariable("MTI_COMPANION_PIPE_NAME");
+                    if (!string.IsNullOrWhiteSpace(raw)) return raw.Trim();
+                }
+                catch { }
+                return COMPANION_PIPE_NAME;
+            }
+        }
+
+        private static int CompanionHeartbeatMs
+        {
+            get
+            {
+                try
+                {
+                    var raw = Environment.GetEnvironmentVariable("MTI_COMPANION_HEARTBEAT_MS");
+                    int value;
+                    if (!string.IsNullOrWhiteSpace(raw) && int.TryParse(raw, out value) && value > 0)
+                    {
+                        return value;
+                    }
+                }
+                catch { }
+                return COMPANION_HEARTBEAT_MS;
+            }
+        }
+
         private static string ContextTag()
         {
             try
@@ -177,7 +209,7 @@ namespace MonitorTI
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Log("companion mode iniciado; pipe=" + COMPANION_PIPE_NAME + "; sessionId=" + CurrentSessionId());
+            Log("companion mode iniciado; pipe=" + CompanionPipeName + "; sessionId=" + CurrentSessionId());
             Application.Run(new CompanionHostForm(args));
         }
 
@@ -707,7 +739,8 @@ namespace MonitorTI
             private readonly string[] _args;
             private readonly object _sendLock = new object();
             private readonly CancellationTokenSource _cts = new CancellationTokenSource();
-            private readonly System.Windows.Forms.Timer _heartbeatTimer = new System.Windows.Forms.Timer();
+            private readonly System.Threading.Timer _heartbeatTimer;
+            private readonly int _heartbeatIntervalMs;
             private NamedPipeClientStream _pipe;
             private StreamReader _reader;
             private StreamWriter _writer;
@@ -721,11 +754,16 @@ namespace MonitorTI
             {
                 _ui = ui;
                 _args = args ?? new string[0];
-                _heartbeatTimer.Interval = COMPANION_HEARTBEAT_MS;
-                _heartbeatTimer.Tick += (s, e) =>
-                {
-                    if (_registered && _ready) SendHeartbeat();
-                };
+                _heartbeatIntervalMs = CompanionHeartbeatMs;
+                _heartbeatTimer = new System.Threading.Timer(
+                    _ =>
+                    {
+                        if (_disposed || !_registered || !_ready) return;
+                        SendHeartbeat();
+                    },
+                    null,
+                    Timeout.Infinite,
+                    Timeout.Infinite);
             }
 
             public void Start()
@@ -745,7 +783,7 @@ namespace MonitorTI
                     }
                     catch (Exception ex)
                     {
-                        Log("companion reconnect: " + ex.Message);
+                        LogException("companion reconnect", ex);
                     }
                     finally
                     {
@@ -760,10 +798,41 @@ namespace MonitorTI
                 }
             }
 
+            private void LogException(string prefix, Exception ex)
+            {
+                if (ex == null)
+                {
+                    Log(prefix + " exception=null");
+                    return;
+                }
+
+                Log(prefix + " exception type=" + ex.GetType().FullName + " message=" + ex.Message + " hresult=" + ex.HResult);
+
+                var agg = ex as AggregateException;
+                if (agg != null)
+                {
+                    int idx = 0;
+                    foreach (var inner in agg.Flatten().InnerExceptions)
+                    {
+                        Log(prefix + " inner[" + idx + "] type=" + inner.GetType().FullName + " message=" + inner.Message + " hresult=" + inner.HResult);
+                        idx++;
+                    }
+                }
+
+                var innerEx = ex.InnerException;
+                int innerIndex = 0;
+                while (innerEx != null)
+                {
+                    Log(prefix + " cause[" + innerIndex + "] type=" + innerEx.GetType().FullName + " message=" + innerEx.Message + " hresult=" + innerEx.HResult);
+                    innerEx = innerEx.InnerException;
+                    innerIndex++;
+                }
+            }
+
             private void ConnectOnce()
             {
-                _pipe = new NamedPipeClientStream(".", COMPANION_PIPE_NAME, PipeDirection.InOut, PipeOptions.Asynchronous);
-                Log("companion_connecting " + COMPANION_PIPE_NAME);
+                _pipe = new NamedPipeClientStream(".", CompanionPipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                Log("companion_connecting " + CompanionPipeName);
                 if (!_pipe.ConnectAsync(10000).Wait(11000))
                     throw new TimeoutException("timeout ao conectar no pipe");
 
@@ -812,7 +881,7 @@ namespace MonitorTI
                     _registered = true;
                     _ready = true;
                     Log("register_ok recebido");
-                    if (!_heartbeatTimer.Enabled) _heartbeatTimer.Start();
+                    _heartbeatTimer.Change(_heartbeatIntervalMs, _heartbeatIntervalMs);
                     SendHeartbeat();
                     return;
                 }
@@ -1005,7 +1074,7 @@ namespace MonitorTI
 
             private void CleanupPipe()
             {
-                try { _heartbeatTimer.Stop(); } catch { }
+                try { _heartbeatTimer.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
                 try { if (_reader != null) _reader.Dispose(); } catch { }
                 try { if (_writer != null) _writer.Dispose(); } catch { }
                 try { if (_pipe != null) _pipe.Dispose(); } catch { }

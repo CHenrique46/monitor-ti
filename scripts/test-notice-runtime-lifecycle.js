@@ -166,7 +166,7 @@ async function occupyPipe(name) {
   const server = net.createServer();
   await new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(pipePath(name), { readableAll: true, writableAll: true }, resolve);
+    server.listen({ path: pipePath(name), readableAll: true, writableAll: true }, resolve);
   });
   return server;
 }

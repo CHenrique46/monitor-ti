@@ -70,6 +70,13 @@ function defaultProcessInfoLookup(pid) {
   }
 }
 
+function normalizeWindowsUsername(value) {
+  const raw = normalizeUsername(value);
+  if (!raw) return "";
+  const shortName = raw.includes("\\") ? raw.split("\\").pop() : raw;
+  return normalizeUsername(shortName).toLowerCase();
+}
+
 function createNoticeRuntime(opts) {
   const {
     configDir,
@@ -264,7 +271,7 @@ function createNoticeRuntime(opts) {
     server.on("error", (err) => handleServerError(server, err));
 
     try {
-      server.listen(pipePath, { readableAll: true, writableAll: true });
+      server.listen({ path: pipePath, readableAll: true, writableAll: true });
       return true;
     } catch (err) {
       handleServerError(server, err);
@@ -359,9 +366,9 @@ function createNoticeRuntime(opts) {
   }
 
   function sessionEligible(connection) {
-    const user = typeof getInteractiveUser === "function" ? normalizeUsername(getInteractiveUser() || "") : "";
+    const user = typeof getInteractiveUser === "function" ? normalizeWindowsUsername(getInteractiveUser() || "") : "";
     if (!user) return true;
-    return normalizeUsername(connection.username).toLowerCase() === user.toLowerCase();
+    return normalizeWindowsUsername(connection.username) === user;
   }
 
   function connectionKey(sessionId, pid) {
@@ -886,4 +893,4 @@ function createNoticeRuntime(opts) {
   };
 }
 
-module.exports = { createNoticeRuntime, DEFAULT_PIPE_PATH, normalizePipePath };
+module.exports = { createNoticeRuntime, DEFAULT_PIPE_PATH, normalizePipePath, normalizeWindowsUsername };

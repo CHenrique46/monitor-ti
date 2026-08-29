@@ -21,6 +21,18 @@ function setCapabilities(deviceId, caps) {
   agentCaps.set(deviceId, new Set(Array.isArray(caps) ? caps : []));
 }
 
+function applyRegisterCapabilities(deviceId, caps) {
+  if (!deviceId) return;
+  if (Array.isArray(caps) && caps.length > 0) {
+    setCapabilities(deviceId, caps);
+  }
+}
+
+function clearCapabilities(deviceId) {
+  if (!deviceId) return;
+  agentCaps.delete(deviceId);
+}
+
 function getCapabilities(deviceId) {
   const s = agentCaps.get(deviceId);
   return s ? Array.from(s) : [];
@@ -127,6 +139,7 @@ function markOffline(deviceId, exceptWs) {
     });
     if (live) return;
   }
+  clearCapabilities(deviceId);
   prisma.computador
     .updateMany({
       where: { deviceId },
@@ -310,7 +323,7 @@ function setupWebSocket(server) {
             }
           });
           ws.deviceId = d.deviceId;
-          setCapabilities(d.deviceId, d.capabilities);
+          applyRegisterCapabilities(d.deviceId, d.capabilities);
           console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
 
           // Entrega avisos pendentes (envio imediato que ocorreu com o Agent
@@ -389,6 +402,8 @@ module.exports = {
   setUpdateState,
   clearUpdateState,
   resetUpdateStatesForTests,
+  applyRegisterCapabilities,
+  clearCapabilities,
   applyUpdateStatusMessage,
   shouldMarkUpdateSuccess,
   applyRegisterUpdateSuccess,
