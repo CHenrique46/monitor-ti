@@ -67,7 +67,9 @@ function sanitizeJsonValue(value, stack = new Set()) {
     let sanitized = "";
     for (let i = 0; i < value.length; i += 1) {
       const code = value.charCodeAt(i);
-      if (code >= 0xD800 && code <= 0xDBFF) {
+      if (code === 0) {
+        sanitized += String.fromCharCode(0xFFFD);
+      } else if (code >= 0xD800 && code <= 0xDBFF) {
         const next = value.charCodeAt(i + 1);
         if (next >= 0xDC00 && next <= 0xDFFF) {
           sanitized += value[i] + value[i + 1];
@@ -95,6 +97,38 @@ function sanitizeJsonValue(value, stack = new Set()) {
   } finally {
     stack.delete(value);
   }
+}
+
+function findProblematicJsonCharacters(value, path = "$", findings = [], stack = new Set()) {
+  if (typeof value === "string") {
+    for (let i = 0; i < value.length; i += 1) {
+      const code = value.charCodeAt(i);
+      if (code === 0 || (code >= 0xD800 && code <= 0xDFFF &&
+        !(code >= 0xDC00 && code <= 0xDFFF && i > 0 &&
+          value.charCodeAt(i - 1) >= 0xD800 && value.charCodeAt(i - 1) <= 0xDBFF) &&
+        !(code >= 0xD800 && code <= 0xDBFF && i + 1 < value.length &&
+          value.charCodeAt(i + 1) >= 0xDC00 && value.charCodeAt(i + 1) <= 0xDFFF))) {
+        findings.push({ path, codePoint: `U+${code.toString(16).toUpperCase().padStart(4, "0")}`, index: i, length: value.length });
+      }
+    }
+    return findings;
+  }
+  if (value === null || typeof value !== "object" || stack.has(value)) return findings;
+  stack.add(value);
+  try {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => findProblematicJsonCharacters(item, `${path}[${index}]`, findings, stack));
+    } else {
+      Object.keys(value).forEach((key) => {
+        const keyPath = `${path}.${key.replace(/[^a-zA-Z0-9_$]/g, "_")}`;
+        findProblematicJsonCharacters(key, `${path}.__key`, findings, stack);
+        findProblematicJsonCharacters(value[key], keyPath, findings, stack);
+      });
+    }
+  } finally {
+    stack.delete(value);
+  }
+  return findings;
 }
 
 function validateResult(result) {
@@ -320,6 +354,7 @@ module.exports = {
   recoverOrphanedExecutions,
   validateResult,
   sanitizeJsonValue,
+  findProblematicJsonCharacters,
   MAX_RESULT_BYTES,
   TRANSIENT_STATUSES,
   ORPHAN_MESSAGE,

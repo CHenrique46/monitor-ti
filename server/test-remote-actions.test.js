@@ -6,7 +6,8 @@ const {
   recoverOrphanedExecutions,
   ORPHAN_MESSAGE,
   MAX_RESULT_BYTES,
-  sanitizeJsonValue
+  sanitizeJsonValue,
+  findProblematicJsonCharacters
 } = require("./src/services/remoteActions.service");
 const { createRemoteActionsController } = require("./src/controllers/remoteActions.controller");
 
@@ -512,6 +513,11 @@ test("sanitiza Unicode inválido recursivamente e preserva Unicode válido", () 
   assert.equal(sanitized.notification.message, "concluído ✅");
   assert.equal(sanitized.rebootRecommended, true);
   assert.deepEqual(JSON.parse(JSON.stringify(sanitized)), sanitized);
+  assert.deepEqual(findProblematicJsonCharacters(value).map(({ path, codePoint, index, length }) => ({ path, codePoint, index, length })), [
+    { path: "$.steps[0].output", codePoint: "U+D800", index: 5, length: 35 },
+    { path: "$.steps[0].output", codePoint: "U+DC00", index: 13, length: 35 },
+    { path: "$.blockedFiles[0]", codePoint: "U+D800", index: 8, length: 9 }
+  ]);
 });
 
 test("resultado reconciliado com surrogate inválido persiste sanitizado", async () => {
