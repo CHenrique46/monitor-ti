@@ -389,6 +389,7 @@ test("server reconcilia terminal real, valida identidade e preserva FAILED legí
     result: { overallStatus: "SUCCESS" }
   });
   assert.equal(lateSuccess.accepted, false);
+  assert.equal(lateSuccess.reason, "terminal_conflict");
   assert.equal(base.status, "FAILED");
 });
 
@@ -454,4 +455,38 @@ test("server rejeita reconciliacao inexistente, deviceId e action incompatíveis
     assert.equal(result.accepted, false);
     assert.equal(result.error, item.error);
   }
+});
+
+test("server rejeita resultado inválido na reconciliação sem alterar a execução", async () => {
+  const record = {
+    id: 13,
+    actionExecutionId: "invalid-reconcile-result",
+    computadorId: 15,
+    action: "system_maintenance",
+    status: "FAILED",
+    mensagem: ORPHAN_MESSAGE,
+    erro: ORPHAN_MESSAGE,
+    resultado: null,
+    computador: { deviceId: "dev-15" }
+  };
+  const db = {
+    acaoRemotaExecucao: {
+      findUnique: async () => record,
+      update: async ({ data }) => Object.assign(record, data)
+    }
+  };
+  const circular = {};
+  circular.self = circular;
+  const result = await createRemoteActionsService(db).reconcileAgentStatusMessage({
+    actionExecutionId: record.actionExecutionId,
+    deviceId: "dev-15",
+    action: "system_maintenance",
+    status: "SUCCESS",
+    result: circular
+  });
+
+  assert.equal(result.accepted, false);
+  assert.equal(result.reason, "invalid_result");
+  assert.equal(record.status, "FAILED");
+  assert.equal(record.resultado, null);
 });

@@ -212,26 +212,56 @@ function createRemoteActionsService(db = prisma) {
 
   async function reconcileAgentStatusMessage(msg) {
     if (!msg || !msg.actionExecutionId || !msg.deviceId || !msg.action) {
-      return { accepted: false, execution: null, error: "Reconciliação inválida." };
+      return { accepted: false, reason: "invalid_message", execution: null, error: "Reconciliação inválida." };
     }
     const execution = await db.acaoRemotaExecucao.findUnique({
       where: { actionExecutionId: String(msg.actionExecutionId) },
       include: { computador: { select: { deviceId: true } } }
     });
-    if (!execution) return { accepted: false, execution: null, error: "Execução não encontrada." };
+    if (!execution) return { accepted: false, reason: "execution_not_found", execution: null, error: "Execução não encontrada." };
     if (!execution.computador || execution.computador.deviceId !== msg.deviceId) {
-      return { accepted: false, execution: mapExecution(execution), error: "deviceId incompatível." };
+      return {
+        accepted: false,
+        reason: execution.computador ? "device_mismatch" : "computer_mismatch",
+        execution: mapExecution(execution),
+        error: execution.computador ? "deviceId incompatível." : "Computador não associado."
+      };
     }
     if (normalizeAction(msg.action) !== normalizeAction(execution.action)) {
-      return { accepted: false, execution: mapExecution(execution), error: "action incompatível." };
+      return { accepted: false, reason: "action_mismatch", execution: mapExecution(execution), error: "action incompatível." };
     }
     const status = String(msg.status || "").trim().toUpperCase();
     if (! ["RUNNING", "SUCCESS", "FAILED", "REJECTED"].includes(status)) {
-      return { accepted: false, execution: mapExecution(execution), error: "status inválido." };
+      return { accepted: false, reason: "invalid_status", execution: mapExecution(execution), error: "status inválido." };
+    }
+    const orphanRecovery = execution.status === "FAILED" && execution.erro === ORPHAN_MESSAGE;
+    if (FINAL_STATUSES.has(execution.status) && !orphanRecovery) {
+      return {
+        accepted: false,
+        reason: "terminal_conflict",
+        execution: mapExecution(execution),
+        error: "Estado terminal existente não foi sobrescrito."
+      };
+    }
+    if (["SUCCESS", "FAILED", "REJECTED"].includes(status) && msg.result !== undefined) {
+      const checkedResult = validateResult(msg.result);
+      if (!checkedResult.ok) {
+        return {
+          accepted: false,
+          reason: "invalid_result",
+          execution: mapExecution(execution),
+          error: `Resultado rejeitado: ${checkedResult.error}.`
+        };
+      }
     }
     const updated = await applyAgentStatusMessage(msg, { allowOrphanRecovery: true });
     const accepted = !!updated && updated.status === status;
-    return { accepted, execution: updated, error: accepted ? null : "Estado terminal existente não foi sobrescrito." };
+    return {
+      accepted,
+      reason: accepted ? null : "transition_rejected",
+      execution: updated,
+      error: accepted ? null : "Estado terminal existente não foi sobrescrito."
+    };
   }
 
   return {

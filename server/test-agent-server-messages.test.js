@@ -7,6 +7,7 @@ const { setupWebSocket } = require("./src/ws/agentServer");
 const remoteActionsService = require("./src/services/remoteActions.service");
 const logger = require("./src/logger");
 const { createRemoteActionsService } = remoteActionsService;
+const { recoverOrphanedExecutions, ORPHAN_MESSAGE } = remoteActionsService;
 
 function waitFor(predicate, timeoutMs = 1000) {
   const startedAt = Date.now();
@@ -97,12 +98,20 @@ test("Server solicita reconciliacao e envia ACK somente depois da persistencia",
     },
     acaoRemotaExecucao: {
       findUnique: async ({ where }) => where.actionExecutionId === record.actionExecutionId ? record : null,
-      update: async ({ data }) => Object.assign(record, data)
+      update: async ({ data }) => Object.assign(record, data),
+      updateMany: async ({ where, data }) => {
+        if (!where.status.in.includes(record.status)) return { count: 0 };
+        Object.assign(record, data);
+        return { count: 1 };
+      }
     },
     $transaction: async (callback) => callback({
       discoFisico: { deleteMany: async () => {}, createMany: async () => {} }
     })
   };
+  assert.equal(await recoverOrphanedExecutions(db), 1);
+  assert.equal(record.status, "FAILED");
+  assert.equal(record.erro, ORPHAN_MESSAGE);
   const service = createRemoteActionsService(db);
   const originalLog = logger.logEvent;
   const logs = [];

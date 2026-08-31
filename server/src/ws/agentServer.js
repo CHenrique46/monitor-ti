@@ -325,9 +325,15 @@ function setupWebSocket(server, dependencies = {}) {
               }
             } else {
               rejected.push({ actionExecutionId: item.actionExecutionId || null, error: result.error });
+              logger.logEvent(
+                `[Monitor TI] remote_action_reconcile_item_rejected actionExecutionId=${item.actionExecutionId || "-"} status=${String(item.status || "-").toUpperCase()} currentStatus=${result.execution && result.execution.status || "-"} reason=${result.reason || "unknown"}`
+              );
             }
           } catch (err) {
             rejected.push({ actionExecutionId: item.actionExecutionId || null, error: err.message });
+            logger.logEvent(
+              `[Monitor TI] remote_action_reconcile_item_rejected actionExecutionId=${item.actionExecutionId || "-"} status=${String(item.status || "-").toUpperCase()} currentStatus=- reason=exception`
+            );
           }
         }
         ws.send(JSON.stringify({
