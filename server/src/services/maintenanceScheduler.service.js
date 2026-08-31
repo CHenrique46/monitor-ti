@@ -132,6 +132,15 @@ function getDueExecution(schedule, now = new Date()) {
   return diff >= 0 && diff <= DUE_WINDOW_MS ? occurrence : null;
 }
 
+function parseScheduledFor(value) {
+  if (!(value instanceof Date) && typeof value !== "string") {
+    throw new Error("scheduledFor obrigatório.");
+  }
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error("scheduledFor inválido.");
+  return date;
+}
+
 function parseVersion(value) {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(String(value || ""));
   return match ? match.slice(1).map(Number) : null;
@@ -333,16 +342,36 @@ function createMaintenanceScheduler({ db = prisma, remoteActions = remoteActions
     return { duplicate: false, dispatched, failed, skipped };
   }
 
+  async function runScheduleCycle({ scheduleId, scheduledFor, dryRun: cycleDryRun, requireEnabled = true } = {}) {
+    if (!Number.isInteger(Number(scheduleId)) || Number(scheduleId) <= 0) {
+      throw new Error("scheduleId inválido.");
+    }
+    if (typeof cycleDryRun !== "boolean") throw new Error("dryRun obrigatório.");
+    const occurrence = parseScheduledFor(scheduledFor);
+    const schedule = await getSchedule(Number(scheduleId));
+    if (!schedule) throw new Error("Agendamento não encontrado.");
+    if (requireEnabled && !schedule.enabled) return { ignored: true, reason: "disabled", scheduleId: schedule.id };
+
+    if (cycleDryRun) {
+      const plan = await buildPlan(schedule, occurrence);
+      return { ...plan, scheduledFor: occurrence.toISOString() };
+    }
+
+    return {
+      mode: "REAL",
+      scheduleId: schedule.id,
+      scheduledFor: occurrence.toISOString(),
+      ...(await dispatchSchedule(schedule, occurrence))
+    };
+  }
+
   async function tick(now = new Date()) {
     const schedules = await db.maintenanceSchedule.findMany({ where: { enabled: true }, include: { targets: true, runs: { orderBy: { scheduledFor: "desc" }, take: 1 } } });
     for (const schedule of schedules) {
       const due = getDueExecution(schedule, now);
       if (!due) continue;
-      if (dryRun) {
-        log(`[Monitor TI] scheduler dry-run scheduleId=${schedule.id} scheduledFor=${due.toISOString()}`);
-        continue;
-      }
-      await dispatchSchedule(schedule, due);
+      const result = await runScheduleCycle({ scheduleId: schedule.id, scheduledFor: due, dryRun, requireEnabled: true });
+      if (result.mode === "DRY_RUN") log(`[Monitor TI] scheduler dry-run scheduleId=${schedule.id} scheduledFor=${due.toISOString()}`);
     }
   }
 
@@ -358,7 +387,7 @@ function createMaintenanceScheduler({ db = prisma, remoteActions = remoteActions
     timer = null;
   }
 
-  return { listSchedules, getSchedule, createSchedule, updateSchedule, listRuns, dryRunSchedule, ensureDefaultSchedule, tick, start, stop, calculateNextExecution, buildPlan };
+  return { listSchedules, getSchedule, createSchedule, updateSchedule, listRuns, dryRunSchedule, runScheduleCycle, ensureDefaultSchedule, tick, start, stop, calculateNextExecution, buildPlan };
 }
 
 const defaultScheduler = createMaintenanceScheduler();

@@ -34,6 +34,56 @@ function makeDb(computers, busyIds = []) {
   };
 }
 
+function makeCycleScheduler({ schedule = { ...baseSchedule, enabled: false, targetMode: "SELECTED", targets: [{ computadorId: 15 }] }, computers = [{ id: 15, hostname: "Anderson", deviceId: "anderson", status: "online", agentVersion: "1.1.14-dev" }], busyIds = [] } = {}) {
+  const state = { runs: [], actions: [], dispatches: [] };
+  const db = {
+    maintenanceSchedule: {
+      findUnique: async ({ where }) => Number(where.id) === schedule.id ? schedule : null,
+      findMany: async ({ where }) => where && where.enabled === true && schedule.enabled ? [schedule] : []
+    },
+    computador: {
+      findMany: async ({ where }) => {
+        const ids = where && where.id && where.id.in;
+        return computers.filter((computer) => !ids || ids.includes(computer.id));
+      }
+    },
+    acaoRemotaExecucao: {
+      findMany: async () => busyIds.map((computadorId) => ({ computadorId }))
+    },
+    maintenanceScheduleRun: {
+      create: async ({ data }) => {
+        if (state.runs.some((run) => run.scheduleId === data.scheduleId && run.scheduledFor.getTime() === data.scheduledFor.getTime())) {
+          const error = new Error("ciclo duplicado");
+          error.code = "P2002";
+          throw error;
+        }
+        const run = { id: state.runs.length + 1, ...data };
+        state.runs.push(run);
+        return run;
+      },
+      update: async ({ data }) => Object.assign(state.runs[0], data)
+    }
+  };
+  const scheduler = createMaintenanceScheduler({
+    db,
+    remoteActions: {
+      createExecution: async (data) => {
+        const action = { id: state.actions.length + 1, actionExecutionId: `scheduled-${state.actions.length + 1}`, status: "PENDING", ...data };
+        state.actions.push(action);
+        return action;
+      },
+      markDispatched: async (actionExecutionId) => {
+        state.actions.find((action) => action.actionExecutionId === actionExecutionId).status = "DISPATCHED";
+        return true;
+      },
+      markRejected: async () => true
+    },
+    ws: { sendToAgent: (deviceId, payload) => { state.dispatches.push({ deviceId, payload }); return true; } },
+    log: () => {}
+  });
+  return { scheduler, state };
+}
+
 test("calcula a próxima quinta-feira às 20:00 em America/Sao_Paulo", () => {
   const next = calculateNextExecution(baseSchedule, new Date("2026-09-03T18:00:00-03:00"));
   assert.equal(next.toISOString(), "2026-09-03T23:00:00.000Z");
@@ -120,6 +170,57 @@ test("dry-run calcula sem criar ciclo nem chamar dispatch", async () => {
   assert.equal(dispatched, 0);
 });
 
+test("ciclo controlado aceita schedule disabled sem alterar a policy", async () => {
+  const { scheduler, state } = makeCycleScheduler();
+  const result = await scheduler.runScheduleCycle({
+    scheduleId: 1,
+    scheduledFor: "2026-09-03T23:00:00.000Z",
+    dryRun: true,
+    requireEnabled: false
+  });
+  assert.equal(result.mode, "DRY_RUN");
+  assert.equal(result.targetCount, 1);
+  assert.equal(result.eligibleCount, 1);
+  assert.equal(state.runs.length, 0);
+  assert.equal(state.actions.length, 0);
+  assert.equal(state.dispatches.length, 0);
+});
+
+test("ciclo controlado real cria run e ação idempotentes", async () => {
+  const { scheduler, state } = makeCycleScheduler();
+  const input = { scheduleId: 1, scheduledFor: new Date("2026-09-03T23:00:00.000Z"), dryRun: false, requireEnabled: false };
+  const first = await scheduler.runScheduleCycle(input);
+  const second = await scheduler.runScheduleCycle(input);
+  assert.equal(first.mode, "REAL");
+  assert.equal(first.dispatched, 1);
+  assert.equal(first.skipped, 0);
+  assert.equal(second.duplicate, true);
+  assert.equal(state.runs.length, 1);
+  assert.equal(state.actions.length, 1);
+  assert.equal(state.actions[0].action, "system_maintenance");
+  assert.equal(state.actions[0].scheduleRunId, state.runs[0].id);
+  assert.equal(state.dispatches.length, 1);
+});
+
+test("ciclo controlado valida identificador e scheduledFor", async () => {
+  const { scheduler } = makeCycleScheduler();
+  await assert.rejects(() => scheduler.runScheduleCycle({ scheduleId: 999, scheduledFor: "2026-09-03T23:00:00Z", dryRun: true, requireEnabled: false }), /Agendamento não encontrado/);
+  await assert.rejects(() => scheduler.runScheduleCycle({ scheduleId: 1, scheduledFor: "invalido", dryRun: true, requireEnabled: false }), /scheduledFor inválido/);
+});
+
+test("ciclo controlado SELECTED não inclui outros computadores", async () => {
+  const { scheduler, state } = makeCycleScheduler({
+    computers: [
+      { id: 15, hostname: "Anderson", deviceId: "anderson", status: "online", agentVersion: "1.1.14-dev" },
+      { id: 107, hostname: "DESKTOP-1CD8JTL", deviceId: "desktop", status: "online", agentVersion: "1.1.15-dev" },
+      { id: 1, hostname: "henrique", deviceId: "henrique", status: "online", agentVersion: "1.1.10" }
+    ]
+  });
+  const result = await scheduler.runScheduleCycle({ scheduleId: 1, scheduledFor: "2026-09-03T23:00:00Z", dryRun: true, requireEnabled: false });
+  assert.deepEqual(result.machines.map((machine) => machine.id), [15]);
+  assert.deepEqual(state.actions, []);
+});
+
 test("unicidade do ciclo impede segundo dispatch após reinício do scheduler", async () => {
   const previous = process.env.MAINTENANCE_SCHEDULER_DRY_RUN;
   process.env.MAINTENANCE_SCHEDULER_DRY_RUN = "false";
@@ -127,7 +228,10 @@ test("unicidade do ciclo impede segundo dispatch após reinício do scheduler", 
   let dispatches = 0;
   const schedule = { ...baseSchedule, targets: [] };
   const db = {
-    maintenanceSchedule: { findMany: async () => [schedule] },
+    maintenanceSchedule: {
+      findMany: async () => [schedule],
+      findUnique: async () => schedule
+    },
     computador: { findMany: async () => [{ id: 1, hostname: "PC-1", deviceId: "d1", status: "online", agentVersion: "1.1.14-dev" }] },
     acaoRemotaExecucao: { findMany: async () => [] },
     maintenanceScheduleRun: {
