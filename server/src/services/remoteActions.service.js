@@ -21,6 +21,9 @@ const SERVICE_ALLOWLIST = Object.freeze({
 });
 
 const FINAL_STATUSES = new Set(["SUCCESS", "FAILED", "REJECTED"]);
+const TRANSIENT_STATUSES = ["PENDING", "DISPATCHED", "RUNNING"];
+const MAX_RESULT_BYTES = 512 * 1024;
+const ORPHAN_MESSAGE = "A execução foi interrompida porque o servidor foi reiniciado antes de receber a confirmação final.";
 
 function normalizeAction(action) {
   return String(action || "").trim().toLowerCase();
@@ -57,6 +60,38 @@ function mapExecution(record) {
     concluidaEm: record.concluidaEm,
     atualizadoEm: record.atualizadoEm
   };
+}
+
+function validateResult(result) {
+  if (result === undefined) return { ok: true, value: undefined };
+  try {
+    const serialized = JSON.stringify(result);
+    if (serialized === undefined) return { ok: false, error: "resultado não serializável" };
+    const bytes = Buffer.byteLength(serialized, "utf8");
+    if (bytes > MAX_RESULT_BYTES) {
+      return { ok: false, error: `resultado excede o limite de ${MAX_RESULT_BYTES} bytes` };
+    }
+    const value = JSON.parse(serialized);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { ok: false, error: "resultado deve ser um objeto JSON" };
+    }
+    return { ok: true, value };
+  } catch (err) {
+    return { ok: false, error: "resultado contém dados inválidos" };
+  }
+}
+
+async function recoverOrphanedExecutions(db = prisma) {
+  const result = await db.acaoRemotaExecucao.updateMany({
+    where: { status: { in: TRANSIENT_STATUSES } },
+    data: {
+      status: "FAILED",
+      concluidaEm: new Date(),
+      mensagem: ORPHAN_MESSAGE,
+      erro: ORPHAN_MESSAGE
+    }
+  });
+  return result.count || 0;
 }
 
 function createRemoteActionsService(db = prisma) {
@@ -150,7 +185,16 @@ function createRemoteActionsService(db = prisma) {
     }
     if (status === "SUCCESS" || status === "FAILED" || status === "REJECTED") {
       data.concluidaEm = new Date();
-      if (msg.result !== undefined) data.resultado = msg.result;
+      if (msg.result !== undefined) {
+        const checkedResult = validateResult(msg.result);
+        if (checkedResult.ok) {
+          data.resultado = checkedResult.value;
+        } else {
+          data.erro = [msg.error, `Detalhes do resultado descartados: ${checkedResult.error}.`]
+            .filter(Boolean)
+            .join(" ");
+        }
+      }
     }
 
     const updated = await db.acaoRemotaExecucao.update({
@@ -176,6 +220,11 @@ module.exports = {
   ACTIONS,
   SERVICE_ALLOWLIST,
   createRemoteActionsService,
+  recoverOrphanedExecutions,
+  validateResult,
+  MAX_RESULT_BYTES,
+  TRANSIENT_STATUSES,
+  ORPHAN_MESSAGE,
   ...defaultService,
   isAllowedAction,
   normalizeAction

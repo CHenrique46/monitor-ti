@@ -4,6 +4,7 @@ const historicoService = require("../services/historico.service");
 const alertasService = require("../services/alertas.service");
 const avisosService = require("../services/avisos.service");
 const remoteActionsService = require("../services/remoteActions.service");
+const logger = require("../logger");
 
 const HEARTBEAT_INTERVAL = 30000;
 
@@ -242,7 +243,8 @@ function setupWebSocket(server) {
       ws.isAlive = true;
     });
 
-    ws.on("message", async (raw) => {
+    ws.on("message", (raw) => {
+      Promise.resolve().then(async () => {
       let msg;
       try {
         msg = JSON.parse(raw.toString());
@@ -391,6 +393,28 @@ function setupWebSocket(server) {
       } else if (msg && msg.type === "metrics" && msg.data && msg.data.deviceId) {
         await handleMetrics(msg.data);
       }
+      }).catch((err) => {
+        let context = {};
+        try {
+          const msg = JSON.parse(raw.toString());
+          context = {
+            actionExecutionId: msg && msg.actionExecutionId,
+            deviceId: msg && msg.deviceId,
+            action: msg && msg.action,
+            status: msg && msg.status
+          };
+        } catch (parseErr) {
+          context = {};
+        }
+        const summary = String(err && err.message ? err.message : err).replace(/[\r\n]+/g, " ").slice(0, 1000);
+        const stack = String(err && err.stack ? err.stack : "").replace(/[\r\n]+/g, " ").slice(0, 2000);
+        logger.logEvent(
+          `[Monitor TI] erro ao processar mensagem Agent actionExecutionId=${context.actionExecutionId || "-"}` +
+          ` deviceId=${context.deviceId || ws.deviceId || "-"} action=${context.action || "-"}` +
+          ` status=${context.status || "-"} erro=${summary}` +
+          (stack ? ` stack=${stack}` : "")
+        );
+      });
     });
 
     ws.on("close", () => {

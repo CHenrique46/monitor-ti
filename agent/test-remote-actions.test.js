@@ -5,7 +5,9 @@ const {
   createRemoteActionRuntime,
   createSpoolerResetExecutor,
   createServiceRestartExecutor,
-  createSystemMaintenanceExecutor
+  createSystemMaintenanceExecutor,
+  limitSystemMaintenanceResult,
+  MAX_MAINTENANCE_RESULT_BYTES
 } = require("./src/remoteActions");
 
 function makeWs() {
@@ -268,6 +270,21 @@ test("system_maintenance registra limpeza parcial por arquivo bloqueado", async 
   assert.match(result.steps[0].message, /ignorados/);
 });
 
+test("system_maintenance limita listas de bloqueados e erros com contadores totais", async () => {
+  const blocked = Array.from({ length: 75 }, (_, i) => ({ path: `locked-${i}`, message: "em uso" }));
+  const errors = Array.from({ length: 63 }, (_, i) => ({ path: `error-${i}`, message: "acesso negado" }));
+  const result = await createSystemMaintenanceExecutor(maintenanceSuccessDeps({
+    cleanupTemp: async () => ({ roots: [], blocked, errors })
+  }))();
+  const details = result.steps[0].details;
+
+  assert.equal(result.steps[0].blockedCount, 75);
+  assert.equal(result.steps[0].errorsCount, 63);
+  assert.equal(details.blocked.length, 50);
+  assert.equal(details.errors.length, 50);
+  assert.equal(result.steps[0].truncated, true);
+});
+
 test("system_maintenance continua após falha do SFC e marca resultado global", async () => {
   const calls = [];
   const result = await createSystemMaintenanceExecutor(maintenanceSuccessDeps({
@@ -357,4 +374,25 @@ test("system_maintenance nao falha globalmente se o Notifier estiver indisponive
   assert.equal(result.overallStatus, "SUCCESS");
   assert.equal(result.notification.status, "SKIPPED");
   assert.match(result.notification.message, /Notifier/);
+});
+
+test("system_maintenance marca result.truncated e preserva etapas quando resultado excede o limite", () => {
+  const result = limitSystemMaintenanceResult({
+    overallStatus: "FAILED",
+    steps: [{
+      key: "sfc",
+      status: "FAILED",
+      durationMs: 100,
+      message: "falhou",
+      output: { stdout: "x".repeat(MAX_MAINTENANCE_RESULT_BYTES) },
+      details: { blocked: [], errors: [] }
+    }],
+    notification: { status: "SKIPPED", message: "indisponível" },
+    rebootRecommended: true
+  });
+
+  assert.equal(result.truncated, true);
+  assert.equal(result.overallStatus, "FAILED");
+  assert.equal(result.steps[0].status, "FAILED");
+  assert.equal(Buffer.byteLength(JSON.stringify(result), "utf8") <= MAX_MAINTENANCE_RESULT_BYTES, true);
 });

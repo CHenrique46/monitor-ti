@@ -1,7 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { createRemoteActionsService } = require("./src/services/remoteActions.service");
+const {
+  createRemoteActionsService,
+  recoverOrphanedExecutions,
+  ORPHAN_MESSAGE,
+  MAX_RESULT_BYTES
+} = require("./src/services/remoteActions.service");
 const { createRemoteActionsController } = require("./src/controllers/remoteActions.controller");
 
 function createMockDb() {
@@ -258,4 +263,85 @@ test("server system_maintenance usa acao fixa e rejeita computador offline", asy
   assert.equal(online.body.execution.payload, null);
   assert.equal(sent[0].payload.action, "system_maintenance");
   assert.deepEqual(sent[0].payload.payload, {});
+});
+
+test("server persiste status terminal quando result e invalido ou grande", async () => {
+  const updates = [];
+  const record = {
+    id: 1,
+    actionExecutionId: "result-invalid",
+    computadorId: 1,
+    action: "system_maintenance",
+    payload: null,
+    status: "RUNNING",
+    mensagem: null,
+    erro: null,
+    resultado: null,
+    iniciadaEm: new Date()
+  };
+  const db = {
+    acaoRemotaExecucao: {
+      findUnique: async () => record,
+      update: async ({ data }) => {
+        updates.push(data);
+        Object.assign(record, data);
+        return record;
+      }
+    }
+  };
+  const service = createRemoteActionsService(db);
+  const circular = {};
+  circular.self = circular;
+  const invalid = await service.applyAgentStatusMessage({
+    actionExecutionId: "result-invalid",
+    status: "SUCCESS",
+    message: "concluido",
+    result: circular
+  });
+
+  assert.equal(invalid.status, "SUCCESS");
+  assert.equal(invalid.resultado, null);
+  assert.match(invalid.erro, /resultado descartados/);
+  assert.ok(updates[0].concluidaEm);
+
+  record.status = "RUNNING";
+  const large = await service.applyAgentStatusMessage({
+    actionExecutionId: "result-invalid",
+    status: "SUCCESS",
+    result: { steps: [{ key: "sfc", output: "x".repeat(MAX_RESULT_BYTES) }] }
+  });
+  assert.equal(large.status, "SUCCESS");
+  assert.match(large.erro, /excede o limite/);
+});
+
+test("server recupera PENDING DISPATCHED e RUNNING sem alterar estados terminais", async () => {
+  const records = [
+    { actionExecutionId: "pending", status: "PENDING" },
+    { actionExecutionId: "dispatched", status: "DISPATCHED" },
+    { actionExecutionId: "running", status: "RUNNING" },
+    { actionExecutionId: "success", status: "SUCCESS" },
+    { actionExecutionId: "failed", status: "FAILED" },
+    { actionExecutionId: "rejected", status: "REJECTED" }
+  ];
+  const db = {
+    acaoRemotaExecucao: {
+      updateMany: async ({ where, data }) => {
+        assert.deepEqual(where.status.in, ["PENDING", "DISPATCHED", "RUNNING"]);
+        let count = 0;
+        for (const record of records) {
+          if (!where.status.in.includes(record.status)) continue;
+          Object.assign(record, data);
+          count += 1;
+        }
+        return { count };
+      }
+    }
+  };
+  const count = await recoverOrphanedExecutions(db);
+
+  assert.equal(count, 3);
+  assert.equal(records.filter((record) => record.status === "FAILED").length, 4);
+  assert.equal(records.find((record) => record.actionExecutionId === "success").status, "SUCCESS");
+  assert.equal(records.find((record) => record.actionExecutionId === "rejected").status, "REJECTED");
+  assert.equal(records.find((record) => record.actionExecutionId === "running").mensagem, ORPHAN_MESSAGE);
 });

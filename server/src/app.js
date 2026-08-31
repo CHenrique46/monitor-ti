@@ -14,6 +14,7 @@ const { setupWebSocket } = require("./ws/agentServer");
 const prisma = require("./prisma");
 const { logEvent } = require("./logger");
 const { normalizeComputersOfflineOnStartup } = require("./services/presence.service");
+const { recoverOrphanedExecutions } = require("./services/remoteActions.service");
 const historicoService = require("./services/historico.service");
 const avisosService = require("./services/avisos.service");
 
@@ -73,6 +74,12 @@ if (require.main === module) {
   (async () => {
     await waitForDatabase();
     await normalizeComputersOfflineOnStartup();
+    try {
+      const recovered = await recoverOrphanedExecutions();
+      logEvent(`[Monitor TI] execuções remotas órfãs recuperadas: ${recovered}`);
+    } catch (err) {
+      logEvent(`[Monitor TI] erro ao recuperar execuções remotas órfãs: ${err.message}`);
+    }
 
     const server = http.createServer(app);
     setupWebSocket(server);

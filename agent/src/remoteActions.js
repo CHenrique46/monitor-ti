@@ -23,6 +23,8 @@ const SYSTEM_MAINTENANCE_TIMEOUTS = Object.freeze({
   dnsFlushMs: 30000,
   notificationMs: 10000
 });
+const MAINTENANCE_DETAIL_LIMIT = 50;
+const MAX_MAINTENANCE_RESULT_BYTES = 512 * 1024;
 
 const MAINTENANCE_NOTIFICATION = Object.freeze({
   title: "Manutenção do computador concluída",
@@ -175,8 +177,21 @@ async function removeDirectoryContents(root) {
     filesRemoved: 0,
     directoriesRemoved: 0,
     blocked: [],
-    errors: []
+    errors: [],
+    blockedCount: 0,
+    errorsCount: 0,
+    truncated: false
   };
+
+  function addDetail(kind, entry) {
+    const countKey = `${kind}Count`;
+    result[countKey] += 1;
+    if (result[kind].length < MAINTENANCE_DETAIL_LIMIT) {
+      result[kind].push(entry);
+    } else {
+      result.truncated = true;
+    }
+  }
 
   async function visit(dir) {
     let entries;
@@ -184,7 +199,7 @@ async function removeDirectoryContents(root) {
       entries = await fs.promises.readdir(dir, { withFileTypes: true });
     } catch (err) {
       if (err.code === "ENOENT") return;
-      result.errors.push({ path: dir, message: err.message });
+      addDetail("errors", { path: dir, message: err.message });
       return;
     }
 
@@ -196,9 +211,7 @@ async function removeDirectoryContents(root) {
           await fs.promises.rmdir(target);
           result.directoriesRemoved += 1;
         } catch (err) {
-          if (err.code !== "ENOENT" && err.code !== "ENOTEMPTY") {
-            result.blocked.push({ path: target, message: err.message });
-          }
+          if (err.code !== "ENOENT") addDetail("blocked", { path: target, message: err.message });
         }
         continue;
       }
@@ -207,13 +220,76 @@ async function removeDirectoryContents(root) {
         await fs.promises.rm(target, { force: true, recursive: false });
         result.filesRemoved += 1;
       } catch (err) {
-        result.blocked.push({ path: target, message: err.message });
+        addDetail("blocked", { path: target, message: err.message });
       }
     }
   }
 
   await visit(root);
   return result;
+}
+
+function limitSystemMaintenanceResult(result) {
+  const fallback = {
+    overallStatus: "FAILED",
+    steps: [],
+    notification: { status: "SKIPPED", message: "Resultado da manutenção não pôde ser serializado." },
+    rebootRecommended: true,
+    truncated: true,
+    truncationMessage: "Resultado da manutenção foi reduzido por segurança."
+  };
+  try {
+    const serialized = JSON.stringify(result);
+    if (serialized !== undefined && Buffer.byteLength(serialized, "utf8") <= MAX_MAINTENANCE_RESULT_BYTES) {
+      return result;
+    }
+  } catch (err) {
+    return fallback;
+  }
+
+  const compact = {
+    overallStatus: result && result.overallStatus === "FAILED" ? "FAILED" : "SUCCESS",
+    steps: Array.isArray(result && result.steps)
+      ? result.steps.map((step) => ({
+        key: step.key,
+        status: step.status,
+        durationMs: step.durationMs,
+        exitCode: step.exitCode,
+        message: step.message,
+        foundCorruption: step.foundCorruption,
+        repaired: step.repaired,
+        blockedCount: step.blockedCount,
+        errorsCount: step.details && step.details.errorsCount
+      }))
+      : [],
+    notification: result && result.notification
+      ? { status: result.notification.status, message: result.notification.message }
+      : { status: "SKIPPED", message: "Notificação não disponível." },
+    rebootRecommended: true,
+    truncated: true,
+    truncationMessage: "Detalhes do resultado foram reduzidos por segurança."
+  };
+  try {
+    if (Buffer.byteLength(JSON.stringify(compact), "utf8") <= MAX_MAINTENANCE_RESULT_BYTES) return compact;
+  } catch (err) {
+    return fallback;
+  }
+  return fallback;
+}
+
+function normalizeCleanupResult(result) {
+  const blocked = Array.isArray(result && result.blocked) ? result.blocked : [];
+  const errors = Array.isArray(result && result.errors) ? result.errors : [];
+  const blockedCount = result && result.blockedCount != null ? result.blockedCount : blocked.length;
+  const errorsCount = result && result.errorsCount != null ? result.errorsCount : errors.length;
+  return {
+    ...(result || {}),
+    blocked: blocked.slice(0, MAINTENANCE_DETAIL_LIMIT),
+    errors: errors.slice(0, MAINTENANCE_DETAIL_LIMIT),
+    blockedCount,
+    errorsCount,
+    truncated: !!(result && result.truncated) || blockedCount > MAINTENANCE_DETAIL_LIMIT || errorsCount > MAINTENANCE_DETAIL_LIMIT
+  };
 }
 
 function maintenanceCommandResult(result, startedAt) {
@@ -290,7 +366,16 @@ function createSystemMaintenanceExecutor(deps = {}) {
     const windowsTemp = deps.windowsTempPath || path.join(process.env.WINDIR || "C:\\Windows", "Temp");
     const user = await removeDirectoryContents(userTemp);
     const windows = await removeDirectoryContents(windowsTemp);
-    return { roots: [user, windows], blocked: [...user.blocked, ...windows.blocked], errors: [...user.errors, ...windows.errors] };
+    const blockedCount = user.blockedCount + windows.blockedCount;
+    const errorsCount = user.errorsCount + windows.errorsCount;
+    return {
+      roots: [user, windows],
+      blocked: [...user.blocked, ...windows.blocked].slice(0, MAINTENANCE_DETAIL_LIMIT),
+      errors: [...user.errors, ...windows.errors].slice(0, MAINTENANCE_DETAIL_LIMIT),
+      blockedCount,
+      errorsCount,
+      truncated: blockedCount > MAINTENANCE_DETAIL_LIMIT || errorsCount > MAINTENANCE_DETAIL_LIMIT || user.truncated || windows.truncated
+    };
   });
   const runSfc = deps.runSfc || (() => runTool("sfc.exe", ["/scannow"], timeouts.sfcMs));
   const runDism = deps.runDism || (() => runTool("dism.exe", ["/Online", "/Cleanup-Image", "/RestoreHealth"], timeouts.dismMs));
@@ -303,9 +388,9 @@ function createSystemMaintenanceExecutor(deps = {}) {
 
     try {
       const startedAt = Date.now();
-      const cleanupResult = await withTimeout(cleanup(), timeouts.tempCleanupMs, "timeout ao limpar temporarios");
-      const blockedCount = cleanupResult.blocked ? cleanupResult.blocked.length : 0;
-      const errorCount = cleanupResult.errors ? cleanupResult.errors.length : 0;
+      const cleanupResult = normalizeCleanupResult(await withTimeout(cleanup(), timeouts.tempCleanupMs, "timeout ao limpar temporarios"));
+      const blockedCount = cleanupResult.blockedCount;
+      const errorCount = cleanupResult.errorsCount;
       const failed = errorCount > 0;
       hasFailure = hasFailure || failed;
       steps.push({
@@ -318,6 +403,8 @@ function createSystemMaintenanceExecutor(deps = {}) {
           ? `Limpeza concluída; ${blockedCount} arquivo(s)/diretório(s) em uso foram ignorados.`
           : "Temporários do usuário e do Windows limpos.",
         blockedCount,
+        errorsCount: errorCount,
+        truncated: !!cleanupResult.truncated,
         details: cleanupResult
       });
     } catch (err) {
@@ -483,14 +570,15 @@ function createRemoteActionRuntime(deps = {}) {
         : action === "system_maintenance"
         ? await executeSystemMaintenance()
         : await executeSpoolerReset();
-      if (action === "system_maintenance" && result && result.overallStatus === "FAILED") {
+      const safeResult = action === "system_maintenance" ? limitSystemMaintenanceResult(result) : result;
+      if (action === "system_maintenance" && safeResult && safeResult.overallStatus === "FAILED") {
         const failed = {
           actionExecutionId,
           action,
           status: "FAILED",
           message: "Manutenção concluída com falhas em uma ou mais etapas.",
           error: null,
-          result
+          result: safeResult
         };
         state.set(actionExecutionId, failed);
         send(ws, failed);
@@ -506,7 +594,7 @@ function createRemoteActionRuntime(deps = {}) {
           ? "Manutenção preventiva concluída. Reinicialização recomendada."
           : "Spooler reiniciado com sucesso.",
         error: null,
-        result: result || { spooler: "restarted" }
+        result: safeResult || { spooler: "restarted" }
       };
       state.set(actionExecutionId, success);
       send(ws, success);
@@ -558,6 +646,8 @@ module.exports = {
   createSpoolerResetExecutor,
   createServiceRestartExecutor,
   createSystemMaintenanceExecutor,
+  limitSystemMaintenanceResult,
+  MAX_MAINTENANCE_RESULT_BYTES,
   createRemoteActionRuntime,
   ...defaultRuntime
 };
