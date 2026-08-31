@@ -45,6 +45,7 @@ export default function ComputerDetails() {
   const [remoteActions, setRemoteActions] = useState([])
   const [spoolerConfirm, setSpoolerConfirm] = useState(false)
   const [serviceRestartConfirm, setServiceRestartConfirm] = useState(false)
+  const [serviceRestartError, setServiceRestartError] = useState(null)
 
   useEffect(() => {
     let active = true
@@ -258,6 +259,7 @@ export default function ComputerDetails() {
 
   const triggerServiceRestart = async () => {
     setServiceRestartConfirm(false)
+    setServiceRestartError(null)
     try {
       const r = await fetch(`${API_URL}/api/computadores/${id}/actions/service-restart`, {
         method: 'POST',
@@ -265,10 +267,16 @@ export default function ComputerDetails() {
         body: JSON.stringify({ serviceKey: 'spooler' })
       })
       const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        setServiceRestartError(body.erro || 'Não foi possível reiniciar o serviço.')
+        return
+      }
       if (body.execution) {
         setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
       }
-    } catch (e) {}
+    } catch (e) {
+      setServiceRestartError('Não foi possível reiniciar o serviço.')
+    }
   }
 
   if (notFound) {
@@ -513,6 +521,7 @@ export default function ComputerDetails() {
                 {serviceRestartActions[0].erro ? ` — ${serviceRestartActions[0].erro}` : ''}
               </div>
             )}
+            {serviceRestartError && <div className="update-status failed">{serviceRestartError}</div>}
             {online && !serviceRestartInProgress && (
               <button type="button" className="btn-update" onClick={() => setServiceRestartConfirm(true)}>
                 Reiniciar serviço
