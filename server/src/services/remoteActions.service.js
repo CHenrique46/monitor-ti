@@ -62,10 +62,46 @@ function mapExecution(record) {
   };
 }
 
+function sanitizeJsonValue(value, stack = new Set()) {
+  if (typeof value === "string") {
+    let sanitized = "";
+    for (let i = 0; i < value.length; i += 1) {
+      const code = value.charCodeAt(i);
+      if (code >= 0xD800 && code <= 0xDBFF) {
+        const next = value.charCodeAt(i + 1);
+        if (next >= 0xDC00 && next <= 0xDFFF) {
+          sanitized += value[i] + value[i + 1];
+          i += 1;
+        } else {
+          sanitized += String.fromCharCode(0xFFFD);
+        }
+      } else if (code >= 0xDC00 && code <= 0xDFFF) {
+        sanitized += String.fromCharCode(0xFFFD);
+      } else {
+        sanitized += value[i];
+      }
+    }
+    return sanitized;
+  }
+  if (value === null || typeof value !== "object") return value;
+  if (stack.has(value)) throw new TypeError("resultado contém referência circular");
+  stack.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((item) => sanitizeJsonValue(item, stack));
+    return Object.keys(value).reduce((result, key) => {
+      result[sanitizeJsonValue(key)] = sanitizeJsonValue(value[key], stack);
+      return result;
+    }, {});
+  } finally {
+    stack.delete(value);
+  }
+}
+
 function validateResult(result) {
   if (result === undefined) return { ok: true, value: undefined };
   try {
-    const serialized = JSON.stringify(result);
+    const sanitized = sanitizeJsonValue(result);
+    const serialized = JSON.stringify(sanitized);
     if (serialized === undefined) return { ok: false, error: "resultado não serializável" };
     const bytes = Buffer.byteLength(serialized, "utf8");
     if (bytes > MAX_RESULT_BYTES) {
@@ -283,6 +319,7 @@ module.exports = {
   createRemoteActionsService,
   recoverOrphanedExecutions,
   validateResult,
+  sanitizeJsonValue,
   MAX_RESULT_BYTES,
   TRANSIENT_STATUSES,
   ORPHAN_MESSAGE,

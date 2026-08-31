@@ -5,7 +5,8 @@ const {
   createRemoteActionsService,
   recoverOrphanedExecutions,
   ORPHAN_MESSAGE,
-  MAX_RESULT_BYTES
+  MAX_RESULT_BYTES,
+  sanitizeJsonValue
 } = require("./src/services/remoteActions.service");
 const { createRemoteActionsController } = require("./src/controllers/remoteActions.controller");
 
@@ -489,4 +490,103 @@ test("server rejeita resultado inválido na reconciliação sem alterar a execu�
   assert.equal(result.reason, "invalid_result");
   assert.equal(record.status, "FAILED");
   assert.equal(record.resultado, null);
+});
+
+test("sanitiza Unicode inválido recursivamente e preserva Unicode válido", () => {
+  const value = {
+    overallStatus: "SUCCESS",
+    steps: [{
+      name: "etapa á 😀",
+      status: "SUCCESS",
+      message: "linha 1\r\nlinha 2",
+      output: "alto:\uD800 baixo:\uDC00 válido:\uD83D\uDE00 controle:\u0001"
+    }],
+    blockedFiles: ["arquivo:\uD800", "normal"],
+    notification: { message: "concluído ✅" },
+    rebootRecommended: true
+  };
+  const sanitized = sanitizeJsonValue(value);
+  assert.equal(sanitized.steps[0].name, "etapa á 😀");
+  assert.equal(sanitized.steps[0].output, "alto:\uFFFD baixo:\uFFFD válido:\uD83D\uDE00 controle:\u0001");
+  assert.equal(sanitized.blockedFiles[0], "arquivo:\uFFFD");
+  assert.equal(sanitized.notification.message, "concluído ✅");
+  assert.equal(sanitized.rebootRecommended, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(sanitized)), sanitized);
+});
+
+test("resultado reconciliado com surrogate inválido persiste sanitizado", async () => {
+  const record = {
+    id: 14,
+    actionExecutionId: "orphan-unicode-success",
+    computadorId: 15,
+    action: "system_maintenance",
+    status: "FAILED",
+    mensagem: ORPHAN_MESSAGE,
+    erro: ORPHAN_MESSAGE,
+    resultado: null,
+    computador: { deviceId: "dev-15" }
+  };
+  const updates = [];
+  const db = {
+    acaoRemotaExecucao: {
+      findUnique: async () => record,
+      update: async ({ data }) => {
+        updates.push(data);
+        Object.assign(record, data);
+        return record;
+      }
+    }
+  };
+  const result = await createRemoteActionsService(db).reconcileAgentStatusMessage({
+    actionExecutionId: record.actionExecutionId,
+    deviceId: "dev-15",
+    action: "system_maintenance",
+    status: "SUCCESS",
+    message: "Manutenção concluída 😀",
+    result: {
+      overallStatus: "SUCCESS",
+      steps: [{ name: "SFC", status: "SUCCESS", output: "corrompido:\uD800" }],
+      rebootRecommended: true
+    },
+    finishedAt: "2026-08-31T18:00:00.000Z"
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(record.status, "SUCCESS");
+  assert.equal(record.resultado.steps[0].output, "corrompido:\uFFFD");
+  assert.equal(updates.length, 1);
+});
+
+test("orphan FAILED reconciliado com FAILED real preserva resultado sanitizado", async () => {
+  const record = {
+    id: 15,
+    actionExecutionId: "orphan-unicode-failed",
+    computadorId: 15,
+    action: "system_maintenance",
+    status: "FAILED",
+    mensagem: ORPHAN_MESSAGE,
+    erro: ORPHAN_MESSAGE,
+    resultado: null,
+    computador: { deviceId: "dev-15" }
+  };
+  const db = {
+    acaoRemotaExecucao: {
+      findUnique: async () => record,
+      update: async ({ data }) => Object.assign(record, data)
+    }
+  };
+  const result = await createRemoteActionsService(db).reconcileAgentStatusMessage({
+    actionExecutionId: record.actionExecutionId,
+    deviceId: "dev-15",
+    action: "system_maintenance",
+    status: "FAILED",
+    message: "Falha real na etapa DISM:\uD800",
+    result: { overallStatus: "FAILED", steps: [{ name: "DISM", status: "FAILED", message: "erro:\uDC00" }] }
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(record.status, "FAILED");
+  assert.equal(record.mensagem, "Falha real na etapa DISM:\uD800");
+  assert.equal(record.resultado.steps[0].message, "erro:\uFFFD");
+  assert.notEqual(record.erro, ORPHAN_MESSAGE);
 });
