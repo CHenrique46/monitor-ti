@@ -477,8 +477,16 @@ function createRemoteActionRuntime(deps = {}) {
     return executor();
   });
   const executeSystemMaintenance = deps.executeSystemMaintenance || createSystemMaintenanceExecutor(deps);
+  const store = deps.store || null;
   const state = new Map();
   let maintenanceRunning = false;
+
+  function persist(execution) {
+    if (!store) return true;
+    const ok = store.upsert(execution);
+    if (!ok) logEvent("remote_action_storage_unavailable " + execution.actionExecutionId);
+    return ok;
+  }
 
   function send(ws, payload) {
     if (!ws || ws.readyState !== 1 || typeof ws.send !== "function") return false;
@@ -513,6 +521,7 @@ function createRemoteActionRuntime(deps = {}) {
         error: null
       };
       state.set(actionExecutionId || `invalid:${Date.now()}`, rejected);
+      persist(rejected);
       send(ws, rejected);
       return snapshot(rejected);
     }
@@ -527,12 +536,25 @@ function createRemoteActionRuntime(deps = {}) {
         error: null
       };
       state.set(actionExecutionId, rejected);
+      persist(rejected);
       send(ws, rejected);
       return snapshot(rejected);
     }
 
-    const existing = state.get(actionExecutionId);
+    const existing = state.get(actionExecutionId) || (store && store.get(actionExecutionId));
     if (existing && ["RUNNING", "SUCCESS", "FAILED", "REJECTED"].includes(existing.status)) {
+      if (existing.action && existing.action !== action) {
+        const rejected = {
+          actionExecutionId,
+          action,
+          status: "REJECTED",
+          message: "O actionExecutionId já pertence a outra ação.",
+          error: "actionExecutionId duplicado com action diferente."
+        };
+        send(ws, rejected);
+        return snapshot(rejected);
+      }
+      state.set(actionExecutionId, existing);
       send(ws, existing);
       return snapshot(existing);
     }
@@ -545,6 +567,7 @@ function createRemoteActionRuntime(deps = {}) {
         error: "system_maintenance em execução"
       };
       state.set(actionExecutionId, rejected);
+      persist(rejected);
       send(ws, rejected);
       return snapshot(rejected);
     }
@@ -559,9 +582,26 @@ function createRemoteActionRuntime(deps = {}) {
         : action === "system_maintenance"
         ? "Executando manutenção preventiva do Windows."
         : "Executando reset do spooler.",
-      error: null
+      error: null,
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      updatedAt: new Date().toISOString()
     };
     state.set(actionExecutionId, running);
+    if (!persist(running)) {
+      const failed = {
+        ...running,
+        status: "FAILED",
+        message: "Não foi possível persistir o estado local antes da execução.",
+        error: "remote action storage unavailable",
+        finishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      state.set(actionExecutionId, failed);
+      send(ws, failed);
+      if (action === "system_maintenance") maintenanceRunning = false;
+      return snapshot(failed);
+    }
     send(ws, running);
 
     try {
@@ -578,9 +618,13 @@ function createRemoteActionRuntime(deps = {}) {
           status: "FAILED",
           message: "Manutenção concluída com falhas em uma ou mais etapas.",
           error: null,
-          result: safeResult
+          result: safeResult,
+          startedAt: running.startedAt,
+          finishedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         };
         state.set(actionExecutionId, failed);
+        persist(failed);
         send(ws, failed);
         return snapshot(failed);
       }
@@ -594,9 +638,13 @@ function createRemoteActionRuntime(deps = {}) {
           ? "Manutenção preventiva concluída. Reinicialização recomendada."
           : "Spooler reiniciado com sucesso.",
         error: null,
-        result: safeResult || { spooler: "restarted" }
+        result: safeResult || { spooler: "restarted" },
+        startedAt: running.startedAt,
+        finishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
       state.set(actionExecutionId, success);
+      persist(success);
       send(ws, success);
       return snapshot(success);
     } catch (e) {
@@ -609,9 +657,13 @@ function createRemoteActionRuntime(deps = {}) {
           : action === "system_maintenance"
           ? "Falha na manutenção preventiva."
           : "Falha ao reiniciar spooler.",
-        error: e && e.message ? e.message : String(e)
+        error: e && e.message ? e.message : String(e),
+        startedAt: running.startedAt,
+        finishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
       state.set(actionExecutionId, failed);
+      persist(failed);
       send(ws, failed);
       logEvent("remote_action_failed " + actionExecutionId + ": " + failed.message);
       return snapshot(failed);
@@ -628,10 +680,20 @@ function createRemoteActionRuntime(deps = {}) {
     state.clear();
   }
 
+  function getReconciliationRecords() {
+    return store ? store.reconciliationRecords() : [];
+  }
+
+  function markConfirmed(actionExecutionId, status) {
+    return !!store && store.markConfirmed(actionExecutionId, status);
+  }
+
   return {
     handleRemoteAction,
     getExecution,
     resetForTests,
+    getReconciliationRecords,
+    markConfirmed,
     executeSpoolerReset,
     executeSystemMaintenance
   };

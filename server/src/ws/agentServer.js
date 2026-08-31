@@ -220,7 +220,10 @@ function handleMetrics(d) {
   });
 }
 
-function setupWebSocket(server) {
+function setupWebSocket(server, dependencies = {}) {
+  const db = dependencies.prisma || prisma;
+  const actionsService = dependencies.remoteActionsService || remoteActionsService;
+  const noticesService = dependencies.avisosService || avisosService;
   const wss = new WebSocketServer({ server });
   wssRef = wss;
 
@@ -278,13 +281,70 @@ function setupWebSocket(server) {
         return;
       }
 
+      if (msg && msg.type === "remote_action_reconcile" && Array.isArray(msg.executions)) {
+        const accepted = [];
+        const rejected = [];
+        if (!ws.deviceId || msg.deviceId !== ws.deviceId) {
+          ws.send(JSON.stringify({
+            type: "remote_action_reconcile_result",
+            protocolVersion: 1,
+            deviceId: msg.deviceId || null,
+            accepted,
+            rejected: [{ actionExecutionId: null, error: "deviceId não corresponde à conexão registrada." }]
+          }));
+          return;
+        }
+        for (const item of msg.executions.slice(0, 100)) {
+          try {
+            const result = await actionsService.reconcileAgentStatusMessage({
+              ...item,
+              deviceId: msg.deviceId,
+              reconcile: true
+            });
+            if (result.accepted) {
+              accepted.push(item.actionExecutionId);
+              if (["SUCCESS", "FAILED", "REJECTED"].includes(String(item.status).toUpperCase())) {
+                ws.send(JSON.stringify({
+                  type: "remote_action_status_ack",
+                  protocolVersion: 1,
+                  deviceId: msg.deviceId,
+                  actionExecutionId: item.actionExecutionId,
+                  status: String(item.status).toUpperCase()
+                }));
+              }
+            } else {
+              rejected.push({ actionExecutionId: item.actionExecutionId || null, error: result.error });
+            }
+          } catch (err) {
+            rejected.push({ actionExecutionId: item.actionExecutionId || null, error: err.message });
+          }
+        }
+        ws.send(JSON.stringify({
+          type: "remote_action_reconcile_result",
+          protocolVersion: 1,
+          deviceId: msg.deviceId,
+          accepted,
+          rejected
+        }));
+        return;
+      }
+
       if (msg && msg.type === "remote_action_status" && msg.actionExecutionId) {
-        const state = await remoteActionsService.applyAgentStatusMessage(msg);
+        const state = await actionsService.applyAgentStatusMessage(msg);
         if (state) {
           console.log(
             `[Monitor TI] remote_action_status ${msg.actionExecutionId}: ${state.status}` +
               (state.mensagem || state.erro ? ` (${state.mensagem || state.erro})` : "")
           );
+          if (["SUCCESS", "FAILED", "REJECTED"].includes(state.status)) {
+            ws.send(JSON.stringify({
+              type: "remote_action_status_ack",
+              protocolVersion: 1,
+              deviceId: msg.deviceId || ws.deviceId,
+              actionExecutionId: msg.actionExecutionId,
+              status: state.status
+            }));
+          }
         }
         return;
       }
@@ -292,7 +352,7 @@ function setupWebSocket(server) {
       if (msg && msg.type === "register" && msg.data && msg.data.deviceId) {
         const d = msg.data;
         try {
-          const computador = await prisma.computador.upsert({
+          const computador = await db.computador.upsert({
             where: { deviceId: d.deviceId },
             create: {
               deviceId: d.deviceId,
@@ -339,10 +399,15 @@ function setupWebSocket(server) {
           ws.deviceId = d.deviceId;
           applyRegisterCapabilities(d.deviceId, d.capabilities);
           console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
+          ws.send(JSON.stringify({
+            type: "remote_action_reconcile_request",
+            protocolVersion: 1,
+            deviceId: d.deviceId
+          }));
 
           // Entrega avisos pendentes (envio imediato que ocorreu com o Agent
           // offline, ou reenvio apos reconexao dentro da validade).
-          avisosService
+          noticesService
             .obterPendentesDoDispositivo(d.deviceId)
             .catch((err) =>
               console.error("[Monitor TI] erro ao enviar avisos pendentes:", err.message)
@@ -369,7 +434,7 @@ function setupWebSocket(server) {
             const discoData = Array.isArray(d.discosFisicos)
               ? d.discosFisicos.filter(Boolean)
               : [];
-            await prisma.$transaction(async (tx) => {
+            await db.$transaction(async (tx) => {
               await tx.discoFisico.deleteMany({
                 where: { computadorId: computador.id }
               });

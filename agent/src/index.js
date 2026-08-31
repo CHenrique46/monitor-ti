@@ -7,6 +7,7 @@ const checkDiskSpace = require("check-disk-space").default;
 const { execFile, spawn } = require("child_process");
 const { createNoticeBridge } = require("./notices/bridge");
 const remoteActions = require("./remoteActions");
+const { createRemoteActionStore } = require("./remoteActionStore");
 
 // Atualizador: se iniciado com --apply-update (arquivo unico) ou
 // --apply-update-package (pacote Agent+Notifier), executa apenas a troca e
@@ -88,6 +89,7 @@ function getConfigDir() {
 
 const CONFIG_DIR = getConfigDir();
 const CONFIG_FILE = path.join(CONFIG_DIR, "agent-config.json");
+const REMOTE_ACTIONS_DIR = path.join(CONFIG_DIR, "agent");
 const LOG_FILE = isPackaged()
   ? path.join(CONFIG_DIR, "logs", "agent.log")
   : null;
@@ -129,6 +131,7 @@ let activeWs = null;
 let noticesBridge = null;
 
 const remoteActionRuntime = remoteActions.createRemoteActionRuntime({
+  store: createRemoteActionStore({ dir: REMOTE_ACTIONS_DIR, logEvent }),
   notifyUser: async (notice) => {
     if (!noticesBridge || !activeWs || activeWs.readyState !== WebSocket.OPEN) {
       return { ok: false, message: "Notifier indisponível ou Agent desconectado." };
@@ -149,6 +152,19 @@ const remoteActionRuntime = remoteActions.createRemoteActionRuntime({
       : { ok: false, message: "Notifier não aceitou a notificação." };
   }
 });
+
+function sendRemoteActionReconciliation(ws) {
+  try {
+    ws.send(JSON.stringify({
+      type: "remote_action_reconcile",
+      deviceId,
+      protocolVersion: 1,
+      executions: remoteActionRuntime.getReconciliationRecords()
+    }));
+  } catch (e) {
+    logEvent("Falha ao enviar reconciliação de ações remotas: " + e.message);
+  }
+}
 
 function getDeviceId() {
   try {
@@ -672,6 +688,10 @@ function connect(machine) {
       handleUpdateCommand(ws, msg).catch(() => {});
     } else if (msg && msg.type === "remote_action") {
       remoteActionRuntime.handleRemoteAction(ws, msg).catch(() => {});
+    } else if (msg && msg.type === "remote_action_reconcile_request") {
+      sendRemoteActionReconciliation(ws);
+    } else if (msg && msg.type === "remote_action_status_ack") {
+      remoteActionRuntime.markConfirmed(msg.actionExecutionId, msg.status);
     } else if (msg && msg.type === "notice_show") {
       if (noticesBridge) {
         noticesBridge.handleServerMessage(ws, msg);

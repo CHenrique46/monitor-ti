@@ -6,6 +6,7 @@ const WebSocket = require("ws");
 const { setupWebSocket } = require("./src/ws/agentServer");
 const remoteActionsService = require("./src/services/remoteActions.service");
 const logger = require("./src/logger");
+const { createRemoteActionsService } = remoteActionsService;
 
 function waitFor(predicate, timeoutMs = 1000) {
   const startedAt = Date.now();
@@ -71,6 +72,79 @@ test("handler WebSocket isola erro de status e processa a próxima mensagem", as
     remoteActionsService.applyAgentStatusMessage = originalApply;
     logger.logEvent = originalLog;
     if (client) client.close();
+    await new Promise((resolve) => wss.close(resolve));
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("Server solicita reconciliacao e envia ACK somente depois da persistencia", async () => {
+  const server = http.createServer();
+  const record = {
+    id: 1,
+    actionExecutionId: "ack-1",
+    computadorId: 15,
+    action: "system_maintenance",
+    status: "RUNNING",
+    mensagem: null,
+    erro: null,
+    resultado: null,
+    iniciadaEm: new Date(),
+    computador: { deviceId: "dev-1" }
+  };
+  const db = {
+    computador: {
+      upsert: async ({ create }) => ({ id: 15, ...create })
+    },
+    acaoRemotaExecucao: {
+      findUnique: async ({ where }) => where.actionExecutionId === record.actionExecutionId ? record : null,
+      update: async ({ data }) => Object.assign(record, data)
+    },
+    $transaction: async (callback) => callback({
+      discoFisico: { deleteMany: async () => {}, createMany: async () => {} }
+    })
+  };
+  const service = createRemoteActionsService(db);
+  const wss = setupWebSocket(server, {
+    prisma: db,
+    remoteActionsService: service,
+    avisosService: { obterPendentesDoDispositivo: async () => [] }
+  });
+  let socket;
+
+  try {
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    socket = new WebSocket(`ws://127.0.0.1:${server.address().port}`);
+    const messages = [];
+    socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    await new Promise((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    socket.send(JSON.stringify({
+      type: "register",
+      data: { deviceId: "dev-1", hostname: "PC-1", discosFisicos: [], capabilities: [] }
+    }));
+    await waitFor(() => messages.some((message) => message.type === "remote_action_reconcile_request"));
+    socket.send(JSON.stringify({
+      type: "remote_action_reconcile",
+      deviceId: "dev-1",
+      executions: [{
+        actionExecutionId: "ack-1",
+        action: "system_maintenance",
+        status: "SUCCESS",
+        message: "concluido",
+        result: { overallStatus: "SUCCESS" }
+      }]
+    }));
+    await waitFor(() => messages.some((message) => message.type === "remote_action_status_ack"));
+
+    const ack = messages.find((message) => message.type === "remote_action_status_ack");
+    const reconciliation = messages.find((message) => message.type === "remote_action_reconcile_result");
+    assert.equal(record.status, "SUCCESS");
+    assert.equal(ack.actionExecutionId, "ack-1");
+    assert.deepEqual(reconciliation.accepted, ["ack-1"]);
+  } finally {
+    if (socket) socket.close();
     await new Promise((resolve) => wss.close(resolve));
     await new Promise((resolve) => server.close(resolve));
   }

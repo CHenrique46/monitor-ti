@@ -345,3 +345,113 @@ test("server recupera PENDING DISPATCHED e RUNNING sem alterar estados terminais
   assert.equal(records.find((record) => record.actionExecutionId === "rejected").status, "REJECTED");
   assert.equal(records.find((record) => record.actionExecutionId === "running").mensagem, ORPHAN_MESSAGE);
 });
+
+test("server reconcilia terminal real, valida identidade e preserva FAILED legítimo", async () => {
+  const base = {
+    id: 10,
+    actionExecutionId: "reconcile-1",
+    computadorId: 15,
+    action: "system_maintenance",
+    status: "RUNNING",
+    mensagem: null,
+    erro: null,
+    resultado: null,
+    iniciadaEm: new Date(),
+    computador: { deviceId: "dev-15" }
+  };
+  const db = {
+    acaoRemotaExecucao: {
+      findUnique: async () => base,
+      update: async ({ data }) => Object.assign(base, data)
+    }
+  };
+  const service = createRemoteActionsService(db);
+  const success = await service.reconcileAgentStatusMessage({
+    actionExecutionId: "reconcile-1",
+    deviceId: "dev-15",
+    action: "system_maintenance",
+    status: "SUCCESS",
+    message: "concluido",
+    result: { overallStatus: "SUCCESS" }
+  });
+
+  assert.equal(success.accepted, true);
+  assert.equal(success.execution.status, "SUCCESS");
+  assert.ok(success.execution.concluidaEm);
+
+  base.status = "FAILED";
+  base.erro = "falha real";
+  const lateSuccess = await service.reconcileAgentStatusMessage({
+    actionExecutionId: "reconcile-1",
+    deviceId: "dev-15",
+    action: "system_maintenance",
+    status: "SUCCESS",
+    result: { overallStatus: "SUCCESS" }
+  });
+  assert.equal(lateSuccess.accepted, false);
+  assert.equal(base.status, "FAILED");
+});
+
+test("server permite terminal real substituir FAILED criado pelo orphan recovery", async () => {
+  const record = {
+    id: 12,
+    actionExecutionId: "orphan-reconcile-1",
+    computadorId: 15,
+    action: "system_maintenance",
+    status: "FAILED",
+    mensagem: ORPHAN_MESSAGE,
+    erro: ORPHAN_MESSAGE,
+    resultado: null,
+    computador: { deviceId: "dev-15" }
+  };
+  const db = {
+    acaoRemotaExecucao: {
+      findUnique: async () => record,
+      update: async ({ data }) => Object.assign(record, data)
+    }
+  };
+  const service = createRemoteActionsService(db);
+  const result = await service.reconcileAgentStatusMessage({
+    actionExecutionId: "orphan-reconcile-1",
+    deviceId: "dev-15",
+    action: "system_maintenance",
+    status: "SUCCESS",
+    result: { overallStatus: "SUCCESS", steps: [] }
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(record.status, "SUCCESS");
+  assert.deepEqual(record.resultado, { overallStatus: "SUCCESS", steps: [] });
+});
+
+test("server rejeita reconciliacao inexistente, deviceId e action incompatíveis", async () => {
+  const records = {
+    "known-1": {
+      id: 11,
+      actionExecutionId: "known-1",
+      computadorId: 15,
+      action: "system_maintenance",
+      status: "RUNNING",
+      erro: null,
+      computador: { deviceId: "dev-15" }
+    }
+  };
+  const db = {
+    acaoRemotaExecucao: {
+      findUnique: async ({ where }) => records[where.actionExecutionId] || null,
+      update: async ({ data }) => Object.assign(records["known-1"], data)
+    }
+  };
+  const service = createRemoteActionsService(db);
+  const cases = [
+    { actionExecutionId: "missing", deviceId: "dev-15", action: "system_maintenance", status: "SUCCESS", error: "Execução não encontrada." },
+    { actionExecutionId: "known-1", deviceId: "dev-other", action: "system_maintenance", status: "SUCCESS", error: "deviceId incompatível." },
+    { actionExecutionId: "known-1", deviceId: "dev-15", action: "spooler_reset", status: "SUCCESS", error: "action incompatível." },
+    { actionExecutionId: "known-1", deviceId: "dev-15", action: "system_maintenance", status: "INVALID", error: "status inválido." }
+  ];
+  for (const item of cases) {
+    const result = await service.reconcileAgentStatusMessage(item);
+    assert.equal(result.accepted, false);
+    assert.equal(result.error, item.error);
+  }
+});
