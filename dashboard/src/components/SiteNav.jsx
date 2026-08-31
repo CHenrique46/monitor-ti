@@ -13,6 +13,9 @@ export default function SiteNav() {
         <NavLink to="/avisos" className={({ isActive }) => (isActive ? 'site-nav-link active' : 'site-nav-link')}>
           Avisos
         </NavLink>
+        <NavLink to="/manutencao-programada" className={({ isActive }) => (isActive ? 'site-nav-link active' : 'site-nav-link')}>
+          Manutenção programada
+        </NavLink>
       </nav>
     </header>
   )

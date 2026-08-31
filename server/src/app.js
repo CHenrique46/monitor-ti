@@ -10,6 +10,7 @@ const alertasRoutes = require("./routes/alertas.routes");
 const agentRoutes = require("./routes/agent.routes");
 const avisosRoutes = require("./routes/avisos.routes");
 const remoteActionsRoutes = require("./routes/remoteActions.routes");
+const maintenanceSchedulerRoutes = require("./routes/maintenanceScheduler.routes");
 const { setupWebSocket } = require("./ws/agentServer");
 const prisma = require("./prisma");
 const { logEvent } = require("./logger");
@@ -17,6 +18,7 @@ const { normalizeComputersOfflineOnStartup } = require("./services/presence.serv
 const { recoverOrphanedExecutions } = require("./services/remoteActions.service");
 const historicoService = require("./services/historico.service");
 const avisosService = require("./services/avisos.service");
+const maintenanceScheduler = require("./services/maintenanceScheduler.service");
 
 const app = express();
 
@@ -30,6 +32,7 @@ app.use("/api/computadores", alertasRoutes);
 app.use("/api/agent", agentRoutes);
 app.use("/api/avisos", avisosRoutes);
 app.use("/api/computadores", remoteActionsRoutes);
+app.use("/api/maintenance-schedules", maintenanceSchedulerRoutes);
 
 const DIST_DIR = path.join(__dirname, "..", "..", "dashboard", "dist");
 
@@ -81,6 +84,8 @@ if (require.main === module) {
       logEvent(`[Monitor TI] erro ao recuperar execuções remotas órfãs: ${err.message}`);
     }
 
+    await maintenanceScheduler.ensureDefaultSchedule();
+
     const server = http.createServer(app);
     setupWebSocket(server);
 
@@ -90,6 +95,7 @@ if (require.main === module) {
 
     historicoService.iniciarRetencao();
     avisosService.iniciarAgendador();
+    maintenanceScheduler.start();
   })().catch((err) => {
     console.error("[Monitor TI] erro no startup:", err.message);
     process.exitCode = 1;

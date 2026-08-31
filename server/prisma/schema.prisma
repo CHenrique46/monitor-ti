@@ -45,6 +45,7 @@ model Computador {
   alertas      Alerta[]
   entregasAviso EntregaAviso[]
   acoesRemotas  AcaoRemotaExecucao[]
+  maintenanceScheduleTargets MaintenanceScheduleTarget[]
 }
 
 model DiscoFisico {
@@ -220,6 +221,8 @@ model AcaoRemotaExecucao {
   mensagem          String?
   erro              String?
   resultado         Json?
+  scheduleRunId     Int?
+  scheduleRun       MaintenanceScheduleRun? @relation(fields: [scheduleRunId], references: [id], onDelete: SetNull)
 
   solicitadaEm      DateTime @default(now())
   enviadaEm         DateTime?
@@ -229,4 +232,50 @@ model AcaoRemotaExecucao {
 
   @@index([computadorId, solicitadaEm])
   @@index([computadorId, action, status])
+  @@unique([scheduleRunId, computadorId])
+}
+
+model MaintenanceSchedule {
+  id          Int      @id @default(autoincrement())
+  enabled     Boolean  @default(false)
+  name        String
+  dayOfWeek   Int
+  time        String
+  timezone    String   @default("America/Sao_Paulo")
+  targetMode  String   @default("ALL")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  targets     MaintenanceScheduleTarget[]
+  runs        MaintenanceScheduleRun[]
+
+  @@index([enabled])
+}
+
+model MaintenanceScheduleTarget {
+  scheduleId  Int
+  computadorId Int
+  schedule    MaintenanceSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  computador  Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+
+  @@id([scheduleId, computadorId])
+  @@index([computadorId])
+}
+
+model MaintenanceScheduleRun {
+  id             Int      @id @default(autoincrement())
+  scheduleId     Int
+  scheduledFor   DateTime
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  status         String   @default("PLANNED")
+  targetCount    Int      @default(0)
+  dispatchedCount Int     @default(0)
+  skippedCount   Int      @default(0)
+  failedCount    Int      @default(0)
+  schedule       MaintenanceSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  executions     AcaoRemotaExecucao[]
+
+  @@unique([scheduleId, scheduledFor])
+  @@index([scheduleId, scheduledFor])
 }

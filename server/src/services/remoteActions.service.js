@@ -54,6 +54,7 @@ function mapExecution(record) {
     mensagem: record.mensagem,
     erro: record.erro,
     resultado: record.resultado,
+    scheduleRunId: record.scheduleRunId || null,
     solicitadaEm: record.solicitadaEm,
     enviadaEm: record.enviadaEm,
     iniciadaEm: record.iniciadaEm,
@@ -165,7 +166,7 @@ async function recoverOrphanedExecutions(db = prisma) {
 }
 
 function createRemoteActionsService(db = prisma) {
-  async function createExecution({ computadorId, action, payload = null }) {
+  async function createExecution({ computadorId, action, payload = null, scheduleRunId = null }) {
     const normalizedAction = assertAllowedAction(action);
     if (normalizedAction === "service_restart") {
       const serviceKey = String(payload && payload.serviceKey || "").trim().toLowerCase();
@@ -180,6 +181,7 @@ function createRemoteActionsService(db = prisma) {
         computadorId: Number(computadorId),
         action: normalizedAction,
         payload,
+        scheduleRunId: scheduleRunId ? Number(scheduleRunId) : null,
         status: "PENDING"
       }
     });
