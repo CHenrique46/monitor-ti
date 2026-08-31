@@ -128,6 +128,28 @@ let activeWs = null;
 // Módulo de avisos: legado por padrão, companion quando MTI_NOTICES_COMPANION=1.
 let noticesBridge = null;
 
+const remoteActionRuntime = remoteActions.createRemoteActionRuntime({
+  notifyUser: async (notice) => {
+    if (!noticesBridge || !activeWs || activeWs.readyState !== WebSocket.OPEN) {
+      return { ok: false, message: "Notifier indisponível ou Agent desconectado." };
+    }
+    if (!noticesBridge.isNotifierReady()) {
+      return { ok: false, message: "Notifier indisponível." };
+    }
+    const accepted = noticesBridge.handleServerMessage(activeWs, {
+      type: "notice_show",
+      noticeDeliveryId: crypto.randomUUID(),
+      title: notice.title,
+      message: notice.message,
+      level: notice.level,
+      timestamp: new Date().toISOString()
+    });
+    return accepted
+      ? { ok: true }
+      : { ok: false, message: "Notifier não aceitou a notificação." };
+  }
+});
+
 function getDeviceId() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
@@ -649,7 +671,7 @@ function connect(machine) {
     if (msg && msg.type === "update_agent") {
       handleUpdateCommand(ws, msg).catch(() => {});
     } else if (msg && msg.type === "remote_action") {
-      remoteActions.handleRemoteAction(ws, msg).catch(() => {});
+      remoteActionRuntime.handleRemoteAction(ws, msg).catch(() => {});
     } else if (msg && msg.type === "notice_show") {
       if (noticesBridge) {
         noticesBridge.handleServerMessage(ws, msg);

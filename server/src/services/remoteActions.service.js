@@ -7,6 +7,9 @@ const ACTIONS = {
   },
   service_restart: {
     label: "Reiniciar serviço do Windows"
+  },
+  system_maintenance: {
+    label: "Manutenção preventiva do Windows"
   }
 };
 

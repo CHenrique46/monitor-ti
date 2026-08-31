@@ -46,6 +46,8 @@ export default function ComputerDetails() {
   const [spoolerConfirm, setSpoolerConfirm] = useState(false)
   const [serviceRestartConfirm, setServiceRestartConfirm] = useState(false)
   const [serviceRestartError, setServiceRestartError] = useState(null)
+  const [systemMaintenanceConfirm, setSystemMaintenanceConfirm] = useState(false)
+  const [systemMaintenanceError, setSystemMaintenanceError] = useState(null)
 
   useEffect(() => {
     let active = true
@@ -181,6 +183,10 @@ export default function ComputerDetails() {
   const serviceRestartInProgress = serviceRestartActions.some((a) =>
     ["PENDING", "DISPATCHED", "RUNNING"].includes(a.status)
   )
+  const systemMaintenanceActions = remoteActions.filter((a) => a.action === "system_maintenance")
+  const systemMaintenanceInProgress = systemMaintenanceActions.some((a) =>
+    ["PENDING", "DISPATCHED", "RUNNING"].includes(a.status)
+  )
 
   const statusLabel = (s) => {
     switch (s) {
@@ -215,6 +221,8 @@ export default function ComputerDetails() {
         return "Falhou"
       case "REJECTED":
         return "Rejeitado"
+      case "SKIPPED":
+        return "Ignorado"
       default:
         return s || ""
     }
@@ -276,6 +284,26 @@ export default function ComputerDetails() {
       }
     } catch (e) {
       setServiceRestartError('Não foi possível reiniciar o serviço.')
+    }
+  }
+
+  const triggerSystemMaintenance = async () => {
+    setSystemMaintenanceConfirm(false)
+    setSystemMaintenanceError(null)
+    try {
+      const r = await fetch(`${API_URL}/api/computadores/${id}/actions/system-maintenance`, {
+        method: 'POST'
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        setSystemMaintenanceError(body.erro || 'Não foi possível iniciar a manutenção.')
+        return
+      }
+      if (body.execution) {
+        setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
+      }
+    } catch (e) {
+      setSystemMaintenanceError('Não foi possível iniciar a manutenção.')
     }
   }
 
@@ -567,6 +595,65 @@ export default function ComputerDetails() {
                 ))
               )}
             </div>
+          </Section>
+
+          <Section title="Manutenção do sistema">
+            {systemMaintenanceActions[0] && (
+              <div className={`update-status ${systemMaintenanceActions[0].status === 'FAILED' || systemMaintenanceActions[0].status === 'REJECTED' ? 'failed' : systemMaintenanceActions[0].status === 'SUCCESS' ? 'ok' : 'running'}`}>
+                Manutenção: {actionStatusLabel(systemMaintenanceActions[0].status)}
+                {systemMaintenanceActions[0].mensagem ? ` — ${systemMaintenanceActions[0].mensagem}` : ''}
+                {systemMaintenanceActions[0].erro ? ` — ${systemMaintenanceActions[0].erro}` : ''}
+              </div>
+            )}
+            {systemMaintenanceError && <div className="update-status failed">{systemMaintenanceError}</div>}
+            {online && !systemMaintenanceInProgress && (
+              <button type="button" className="btn-update" onClick={() => setSystemMaintenanceConfirm(true)}>
+                Executar manutenção
+              </button>
+            )}
+            {online && systemMaintenanceInProgress && (
+              <div className="muted">Manutenção do sistema em andamento.</div>
+            )}
+            {!online && (
+              <div className="muted">Computador offline: ação remota indisponível.</div>
+            )}
+            {systemMaintenanceConfirm && (
+              <div className="confirm-box">
+                <p>
+                  Executar a manutenção preventiva do Windows na máquina <strong>{c.hostname}</strong>?
+                  <br />
+                  O processo poderá levar vários minutos e executará verificações SFC e DISM.
+                </p>
+                <div className="confirm-actions">
+                  <button type="button" className="btn-cancel" onClick={() => setSystemMaintenanceConfirm(false)}>
+                    Cancelar
+                  </button>
+                  <button type="button" className="btn-update" onClick={triggerSystemMaintenance}>
+                    Executar manutenção
+                  </button>
+                </div>
+              </div>
+            )}
+            {systemMaintenanceActions[0]?.resultado?.steps?.length > 0 && (
+              <div className="alert-history">
+                {systemMaintenanceActions[0].resultado.steps.map((step) => (
+                  <div key={step.key} className={`alert-history-item ${step.status === 'SUCCESS' ? 'resolvido' : step.status === 'FAILED' ? 'ativo' : ''}`}>
+                    <div className="ah-top">
+                      <span className="alert info">{{ temp_cleanup: 'Temporários', sfc: 'SFC', dism: 'DISM', dns_flush: 'DNS' }[step.key] || step.key}</span>
+                      <span className="ah-badge">{actionStatusLabel(step.status)}</span>
+                    </div>
+                    <div className="ah-meta">
+                      {step.durationMs != null ? `${step.durationMs} ms` : ''}
+                      {step.exitCode != null ? ` · exit code ${step.exitCode}` : ''}
+                    </div>
+                    {step.message && <div className="muted">{step.message}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {systemMaintenanceActions.length === 0 && (
+              <div className="muted">Nenhuma execução registrada.</div>
+            )}
           </Section>
 
           <Section title="Sistema">

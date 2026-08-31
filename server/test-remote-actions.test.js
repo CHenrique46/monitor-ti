@@ -228,3 +228,34 @@ test("server service rejects unknown actions", async () => {
     /Ação remota não suportada/
   );
 });
+
+test("server system_maintenance usa acao fixa e rejeita computador offline", async () => {
+  const db = createMockDb();
+  const service = createRemoteActionsService(db);
+  const sent = [];
+  const controller = createRemoteActionsController({
+    prisma: db,
+    agentServer: {
+      sendToAgent: (deviceId, payload) => {
+        sent.push({ deviceId, payload });
+        return true;
+      }
+    },
+    remoteActionsService: service
+  });
+
+  const offline = makeRes();
+  await controller.systemMaintenance({ params: { id: 2 }, body: {} }, offline);
+  assert.equal(offline.statusCode, 409);
+  assert.equal(offline.body.execution.action, "system_maintenance");
+  assert.equal(offline.body.execution.status, "REJECTED");
+  assert.equal(sent.length, 0);
+
+  const online = makeRes();
+  await controller.systemMaintenance({ params: { id: 1 }, body: {} }, online);
+  assert.equal(online.statusCode, 202);
+  assert.equal(online.body.execution.action, "system_maintenance");
+  assert.equal(online.body.execution.payload, null);
+  assert.equal(sent[0].payload.action, "system_maintenance");
+  assert.deepEqual(sent[0].payload.payload, {});
+});

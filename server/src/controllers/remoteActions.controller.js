@@ -137,6 +137,68 @@ async function serviceRestart(req, res) {
   }
 }
 
+async function systemMaintenance(req, res) {
+  try {
+    const computadorId = Number(req.params.id);
+    const computador = await db.computador.findUnique({
+      where: { id: computadorId },
+      select: { id: true, deviceId: true, hostname: true, status: true }
+    });
+    if (!computador) {
+      return res.status(404).json({ erro: "Computador nao encontrado." });
+    }
+
+    const execution = await remoteActionsService.createExecution({
+      computadorId: computador.id,
+      action: "system_maintenance"
+    });
+
+    if (computador.status !== "online") {
+      await remoteActionsService.markRejected(
+        execution.actionExecutionId,
+        "Computador offline.",
+        "Computador offline."
+      );
+      const finalExecution = await remoteActionsService.getByActionExecutionId(
+        execution.actionExecutionId
+      );
+      return res.status(409).json({ erro: "Computador offline.", execution: finalExecution });
+    }
+
+    const ok = ws.sendToAgent(computador.deviceId, {
+      type: "remote_action",
+      protocolVersion: 1,
+      deviceId: computador.deviceId,
+      actionExecutionId: execution.actionExecutionId,
+      action: execution.action,
+      payload: {}
+    });
+    if (!ok) {
+      await remoteActionsService.markRejected(
+        execution.actionExecutionId,
+        "Agent nao conectado no momento.",
+        "Agent nao conectado no momento."
+      );
+      const finalExecution = await remoteActionsService.getByActionExecutionId(
+        execution.actionExecutionId
+      );
+      return res.status(409).json({
+        erro: "Agent nao conectado no momento.",
+        execution: finalExecution
+      });
+    }
+
+    await remoteActionsService.markDispatched(execution.actionExecutionId);
+    const dispatched = await remoteActionsService.getByActionExecutionId(execution.actionExecutionId);
+    console.log(
+      `[Monitor TI] system_maintenance solicitado: ${computador.hostname} -> ${execution.actionExecutionId}`
+    );
+    return res.status(202).json({ ok: true, execution: dispatched });
+  } catch (err) {
+    return res.status(400).json({ erro: err.message });
+  }
+}
+
 async function list(req, res) {
   try {
     const computadorId = Number(req.params.id);
@@ -158,6 +220,7 @@ async function list(req, res) {
   return {
     spoolerReset,
     serviceRestart,
+    systemMaintenance,
     list
   };
 }
