@@ -142,7 +142,7 @@ function sendToAgent(deviceId, obj) {
   return found;
 }
 
-function markOffline(deviceId, exceptWs) {
+function markOffline(deviceId, exceptWs, db = prisma) {
   if (!deviceId) return;
   // Não marca offline se ainda houver outra conexão WebSocket viva (OPEN)
   // para o mesmo deviceId. O próprio socket que está fechando (exceptWs) é
@@ -156,7 +156,7 @@ function markOffline(deviceId, exceptWs) {
     if (live) return;
   }
   clearCapabilities(deviceId);
-  prisma.computador
+  db.computador
     .updateMany({
       where: { deviceId },
       data: { status: "offline" }
@@ -235,6 +235,9 @@ function handleMetrics(d) {
 }
 
 function setupWebSocket(server, dependencies = {}) {
+  if (process.env.NODE_ENV === "test" && !dependencies.prisma) {
+    throw new Error("setupWebSocket em NODE_ENV=test exige prisma explicitamente injetado");
+  }
   const db = dependencies.prisma || prisma;
   const actionsService = dependencies.remoteActionsService || remoteActionsService;
   const noticesService = dependencies.avisosService || avisosService;
@@ -244,7 +247,7 @@ function setupWebSocket(server, dependencies = {}) {
   const heartbeat = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        markOffline(ws.deviceId, ws);
+        markOffline(ws.deviceId, ws, db);
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -524,7 +527,7 @@ function setupWebSocket(server, dependencies = {}) {
     });
 
     ws.on("close", () => {
-      markOffline(ws.deviceId, ws);
+      markOffline(ws.deviceId, ws, db);
     });
 
     ws.on("error", () => {});

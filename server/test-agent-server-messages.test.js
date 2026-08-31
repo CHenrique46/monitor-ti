@@ -21,9 +21,40 @@ function waitFor(predicate, timeoutMs = 1000) {
   });
 }
 
+function createPrismaMock() {
+  const calls = { upsert: 0 };
+  return {
+    calls,
+    computador: {
+      upsert: async ({ create }) => {
+        calls.upsert += 1;
+        return { id: 999, ...create };
+      },
+      updateMany: async () => ({ count: 0 })
+    },
+    $transaction: async (callback) => callback({
+      discoFisico: { deleteMany: async () => {}, createMany: async () => {} }
+    })
+  };
+}
+
+test("setupWebSocket exige Prisma injetado em testes", () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "test";
+  try {
+    assert.throws(
+      () => setupWebSocket(http.createServer()),
+      /prisma explicitamente injetado/
+    );
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+  }
+});
+
 test("handler WebSocket isola erro de status e processa a próxima mensagem", async () => {
   const server = http.createServer();
-  const wss = setupWebSocket(server);
+  const wss = setupWebSocket(server, { prisma: createPrismaMock() });
   const originalApply = remoteActionsService.applyAgentStatusMessage;
   const originalLog = logger.logEvent;
   const logs = [];
@@ -93,9 +124,6 @@ test("Server solicita reconciliacao e envia ACK somente depois da persistencia",
     computador: { deviceId: "dev-1" }
   };
   const db = {
-    computador: {
-      upsert: async ({ create }) => ({ id: 15, ...create })
-    },
     acaoRemotaExecucao: {
       findUnique: async ({ where }) => where.actionExecutionId === record.actionExecutionId ? record : null,
       update: async ({ data }) => Object.assign(record, data),
@@ -107,7 +135,11 @@ test("Server solicita reconciliacao e envia ACK somente depois da persistencia",
     },
     $transaction: async (callback) => callback({
       discoFisico: { deleteMany: async () => {}, createMany: async () => {} }
-    })
+    }),
+    computador: {
+      upsert: async ({ create }) => ({ id: 15, ...create }),
+      updateMany: async () => ({ count: 0 })
+    }
   };
   assert.equal(await recoverOrphanedExecutions(db), 1);
   assert.equal(record.status, "FAILED");
@@ -173,7 +205,9 @@ test("reconciliacao registra excecao compacta sem expor resultado", async () => 
   const originalLog = logger.logEvent;
   const logs = [];
   logger.logEvent = (message) => logs.push(message);
+  const prismaMock = createPrismaMock();
   const wss = setupWebSocket(server, {
+    prisma: prismaMock,
     remoteActionsService: {
       reconcileAgentStatusMessage: async () => {
         const error = new Error("falha de persistencia simulada");
@@ -200,6 +234,7 @@ test("reconciliacao registra excecao compacta sem expor resultado", async () => 
       data: { deviceId: "dev-1", hostname: "PC-1", discosFisicos: [], capabilities: [] }
     }));
     await waitFor(() => messages.some((message) => message.type === "remote_action_reconcile_request"));
+    assert.equal(prismaMock.calls.upsert, 1);
     socket.send(JSON.stringify({
       type: "remote_action_reconcile",
       deviceId: "dev-1",
