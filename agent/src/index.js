@@ -155,12 +155,16 @@ const remoteActionRuntime = remoteActions.createRemoteActionRuntime({
 
 function sendRemoteActionReconciliation(ws) {
   try {
+    const executions = remoteActionRuntime.getReconciliationRecords();
+    logEvent(`remote_action_reconcile_request_received deviceId=${deviceId}`);
+    logEvent(`remote_action_reconcile_selected count=${executions.length}`);
     ws.send(JSON.stringify({
       type: "remote_action_reconcile",
       deviceId,
       protocolVersion: 1,
-      executions: remoteActionRuntime.getReconciliationRecords()
+      executions
     }));
+    logEvent(`remote_action_reconcile_sent deviceId=${deviceId} count=${executions.length}`);
   } catch (e) {
     logEvent("Falha ao enviar reconciliação de ações remotas: " + e.message);
   }
@@ -691,7 +695,10 @@ function connect(machine) {
     } else if (msg && msg.type === "remote_action_reconcile_request") {
       sendRemoteActionReconciliation(ws);
     } else if (msg && msg.type === "remote_action_status_ack") {
-      remoteActionRuntime.markConfirmed(msg.actionExecutionId, msg.status);
+      logEvent(`remote_action_status_ack_received actionExecutionId=${msg.actionExecutionId || "-"} status=${msg.status || "-"}`);
+      if (remoteActionRuntime.markConfirmed(msg.actionExecutionId, msg.status)) {
+        logEvent(`remote_action_confirmed_by_server actionExecutionId=${msg.actionExecutionId} status=${msg.status}`);
+      }
     } else if (msg && msg.type === "notice_show") {
       if (noticesBridge) {
         noticesBridge.handleServerMessage(ws, msg);

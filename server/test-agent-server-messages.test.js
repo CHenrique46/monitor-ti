@@ -104,6 +104,9 @@ test("Server solicita reconciliacao e envia ACK somente depois da persistencia",
     })
   };
   const service = createRemoteActionsService(db);
+  const originalLog = logger.logEvent;
+  const logs = [];
+  logger.logEvent = (message) => logs.push(message);
   const wss = setupWebSocket(server, {
     prisma: db,
     remoteActionsService: service,
@@ -143,7 +146,13 @@ test("Server solicita reconciliacao e envia ACK somente depois da persistencia",
     assert.equal(record.status, "SUCCESS");
     assert.equal(ack.actionExecutionId, "ack-1");
     assert.deepEqual(reconciliation.accepted, ["ack-1"]);
+    assert.ok(logs.some((message) => message.includes("remote_action_reconcile_request_sent") && message.includes("computadorId=15")));
+    assert.ok(logs.some((message) => message.includes("remote_action_reconcile_received") && message.includes("count=1")));
+    assert.ok(logs.some((message) => message.includes("remote_action_reconcile_processed") && message.includes("accepted=1") && message.includes("acked=1")));
+    assert.ok(logs.some((message) => message.includes("remote_action_status_ack_sent") && message.includes("ack-1") && message.includes("SUCCESS")));
+    assert.equal(logs.some((message) => message.includes("overallStatus")), false);
   } finally {
+    logger.logEvent = originalLog;
     if (socket) socket.close();
     await new Promise((resolve) => wss.close(resolve));
     await new Promise((resolve) => server.close(resolve));

@@ -284,6 +284,9 @@ function setupWebSocket(server, dependencies = {}) {
       if (msg && msg.type === "remote_action_reconcile" && Array.isArray(msg.executions)) {
         const accepted = [];
         const rejected = [];
+        logger.logEvent(
+          `[Monitor TI] remote_action_reconcile_received deviceId=${msg.deviceId || "-"} count=${msg.executions.length}`
+        );
         if (!ws.deviceId || msg.deviceId !== ws.deviceId) {
           ws.send(JSON.stringify({
             type: "remote_action_reconcile_result",
@@ -292,8 +295,12 @@ function setupWebSocket(server, dependencies = {}) {
             accepted,
             rejected: [{ actionExecutionId: null, error: "deviceId não corresponde à conexão registrada." }]
           }));
+          logger.logEvent(
+            `[Monitor TI] remote_action_reconcile_processed received=${msg.executions.length} accepted=0 ignored=0 rejected=1 acked=0`
+          );
           return;
         }
+        let acked = 0;
         for (const item of msg.executions.slice(0, 100)) {
           try {
             const result = await actionsService.reconcileAgentStatusMessage({
@@ -311,6 +318,10 @@ function setupWebSocket(server, dependencies = {}) {
                   actionExecutionId: item.actionExecutionId,
                   status: String(item.status).toUpperCase()
                 }));
+                acked += 1;
+                logger.logEvent(
+                  `[Monitor TI] remote_action_status_ack_sent actionExecutionId=${item.actionExecutionId} status=${String(item.status).toUpperCase()}`
+                );
               }
             } else {
               rejected.push({ actionExecutionId: item.actionExecutionId || null, error: result.error });
@@ -326,6 +337,9 @@ function setupWebSocket(server, dependencies = {}) {
           accepted,
           rejected
         }));
+        logger.logEvent(
+          `[Monitor TI] remote_action_reconcile_processed received=${msg.executions.length} accepted=${accepted.length} ignored=0 rejected=${rejected.length} acked=${acked}`
+        );
         return;
       }
 
@@ -344,6 +358,9 @@ function setupWebSocket(server, dependencies = {}) {
               actionExecutionId: msg.actionExecutionId,
               status: state.status
             }));
+            logger.logEvent(
+              `[Monitor TI] remote_action_status_ack_sent actionExecutionId=${msg.actionExecutionId} status=${state.status}`
+            );
           }
         }
         return;
@@ -404,6 +421,9 @@ function setupWebSocket(server, dependencies = {}) {
             protocolVersion: 1,
             deviceId: d.deviceId
           }));
+          logger.logEvent(
+            `[Monitor TI] remote_action_reconcile_request_sent deviceId=${d.deviceId} computadorId=${computador.id}`
+          );
 
           // Entrega avisos pendentes (envio imediato que ocorreu com o Agent
           // offline, ou reenvio apos reconexao dentro da validade).
