@@ -215,6 +215,7 @@ model AcaoRemotaExecucao {
   computador        Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
 
   action            String
+  payload           Json?
   status            String   @default("PENDING") // PENDING|DISPATCHED|RUNNING|SUCCESS|FAILED|REJECTED
   mensagem          String?
   erro              String?

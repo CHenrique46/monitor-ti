@@ -1,8 +1,16 @@
 const { execFile: defaultExecFile } = require("child_process");
 
 const ALLOWED_ACTIONS = {
-  spooler_reset: true
+  spooler_reset: true,
+  service_restart: true
 };
+
+const SERVICE_ALLOWLIST = Object.freeze({
+  spooler: Object.freeze({
+    serviceName: "Spooler",
+    displayName: "Spooler de Impressão"
+  })
+});
 
 function withTimeout(promise, timeoutMs, timeoutMessage) {
   return new Promise((resolve, reject) => {
@@ -72,10 +80,85 @@ function createSpoolerResetExecutor(deps = {}) {
   };
 }
 
+function createServiceRestartExecutor(serviceKey, deps = {}) {
+  const service = SERVICE_ALLOWLIST[serviceKey];
+  if (!service) throw new Error("Serviço não permitido.");
+
+  const execFile = deps.execFile || defaultExecFile;
+  const timeoutMs = deps.timeoutMs || 30000;
+  const runCommand = deps.runCommand || ((file, args, options) => new Promise((resolve, reject) => {
+    execFile(file, args, options, (err, stdout, stderr) => {
+      if (err) {
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  }));
+  const command = (script) => runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { windowsHide: true, timeout: timeoutMs });
+  const stopService = deps.stopService || (() => command(`Stop-Service -Name ${service.serviceName} -Force -ErrorAction Stop`));
+  const startService = deps.startService || (() => command(`Start-Service -Name ${service.serviceName} -ErrorAction Stop`));
+  const getServiceStatus = deps.getServiceStatus || (async () => {
+    const result = await command(`(Get-Service -Name ${service.serviceName} -ErrorAction Stop).Status.ToString()`);
+    return result && result.stdout;
+  });
+
+  return async function executeServiceRestart() {
+    let stopErr = null;
+    let startErr = null;
+    let status = null;
+
+    const run = (async () => {
+      try {
+        await stopService();
+      } catch (e) {
+        stopErr = e;
+      }
+
+      try {
+        await startService();
+      } catch (e) {
+        startErr = e;
+      }
+
+      try {
+        status = String(await getServiceStatus()).trim();
+      } catch (e) {
+        status = null;
+        if (!startErr) startErr = e;
+      }
+
+      if (stopErr || startErr || status !== "Running") {
+        const err = new Error(
+          stopErr
+            ? `falha ao parar ${service.displayName}: ${stopErr.message}`
+            : startErr
+            ? `falha ao iniciar ${service.displayName}: ${startErr.message}`
+            : `${service.displayName} não está Running após a reinicialização`
+        );
+        err.stopErr = stopErr;
+        err.startErr = startErr;
+        err.status = status;
+        throw err;
+      }
+
+      return { serviceKey, serviceName: service.serviceName, displayName: service.displayName, status };
+    })();
+
+    return withTimeout(run, timeoutMs, "timeout ao executar service_restart");
+  };
+}
+
 function createRemoteActionRuntime(deps = {}) {
   const getDeviceId = deps.getDeviceId || (() => null);
   const logEvent = deps.logEvent || (() => {});
   const executeSpoolerReset = deps.executeSpoolerReset || createSpoolerResetExecutor(deps);
+  const executeServiceRestart = deps.executeServiceRestart || ((serviceKey) => {
+    const executor = createServiceRestartExecutor(serviceKey, deps);
+    return executor();
+  });
   const state = new Map();
 
   function send(ws, payload) {
@@ -115,6 +198,20 @@ function createRemoteActionRuntime(deps = {}) {
       return snapshot(rejected);
     }
 
+    const serviceKey = String(msg && msg.payload && msg.payload.serviceKey || "").trim().toLowerCase();
+    if (action === "service_restart" && !SERVICE_ALLOWLIST[serviceKey]) {
+      const rejected = {
+        actionExecutionId,
+        action,
+        status: "REJECTED",
+        message: "Serviço não permitido.",
+        error: null
+      };
+      state.set(actionExecutionId, rejected);
+      send(ws, rejected);
+      return snapshot(rejected);
+    }
+
     const existing = state.get(actionExecutionId);
     if (existing && ["RUNNING", "SUCCESS", "FAILED", "REJECTED"].includes(existing.status)) {
       send(ws, existing);
@@ -125,19 +222,25 @@ function createRemoteActionRuntime(deps = {}) {
       actionExecutionId,
       action,
       status: "RUNNING",
-      message: "Executando reset do spooler.",
+      message: action === "service_restart"
+        ? `Reiniciando ${SERVICE_ALLOWLIST[serviceKey].displayName}.`
+        : "Executando reset do spooler.",
       error: null
     };
     state.set(actionExecutionId, running);
     send(ws, running);
 
     try {
-      const result = await executeSpoolerReset();
+      const result = action === "service_restart"
+        ? await executeServiceRestart(serviceKey)
+        : await executeSpoolerReset();
       const success = {
         actionExecutionId,
         action,
         status: "SUCCESS",
-        message: "Spooler reiniciado com sucesso.",
+        message: action === "service_restart"
+          ? `${SERVICE_ALLOWLIST[serviceKey].displayName} reiniciado com sucesso.`
+          : "Spooler reiniciado com sucesso.",
         error: null,
         result: result || { spooler: "restarted" }
       };
@@ -179,8 +282,10 @@ const defaultRuntime = createRemoteActionRuntime();
 
 module.exports = {
   ALLOWED_ACTIONS,
+  SERVICE_ALLOWLIST,
   withTimeout,
   createSpoolerResetExecutor,
+  createServiceRestartExecutor,
   createRemoteActionRuntime,
   ...defaultRuntime
 };

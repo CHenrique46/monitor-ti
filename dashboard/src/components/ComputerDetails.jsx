@@ -44,6 +44,7 @@ export default function ComputerDetails() {
   const [confirm, setConfirm] = useState(false)
   const [remoteActions, setRemoteActions] = useState([])
   const [spoolerConfirm, setSpoolerConfirm] = useState(false)
+  const [serviceRestartConfirm, setServiceRestartConfirm] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -173,6 +174,12 @@ export default function ComputerDetails() {
   const remoteInProgress = remoteActions.some((a) =>
     ["PENDING", "DISPATCHED", "RUNNING"].includes(a.status)
   )
+  const serviceRestartActions = remoteActions.filter(
+    (a) => a.action === "service_restart" && a.payload && a.payload.serviceKey === "spooler"
+  )
+  const serviceRestartInProgress = serviceRestartActions.some((a) =>
+    ["PENDING", "DISPATCHED", "RUNNING"].includes(a.status)
+  )
 
   const statusLabel = (s) => {
     switch (s) {
@@ -243,6 +250,21 @@ export default function ComputerDetails() {
         }
         return
       }
+      if (body.execution) {
+        setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
+      }
+    } catch (e) {}
+  }
+
+  const triggerServiceRestart = async () => {
+    setServiceRestartConfirm(false)
+    try {
+      const r = await fetch(`${API_URL}/api/computadores/${id}/actions/service-restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceKey: 'spooler' })
+      })
+      const body = await r.json().catch(() => ({}))
       if (body.execution) {
         setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
       }
@@ -473,6 +495,65 @@ export default function ComputerDetails() {
                     {(a.mensagem || a.erro) && (
                       <div className="muted">{a.mensagem || a.erro}</div>
                     )}
+                  </div>
+                ))
+              )}
+            </div>
+          </Section>
+
+          <Section title="Serviços do Windows">
+            <div>
+              <span className="detail-key">Serviço</span>
+              <span className="detail-val">Spooler de Impressão</span>
+            </div>
+            {serviceRestartActions[0] && (
+              <div className={`update-status ${serviceRestartActions[0].status === 'FAILED' || serviceRestartActions[0].status === 'REJECTED' ? 'failed' : serviceRestartActions[0].status === 'SUCCESS' ? 'ok' : 'running'}`}>
+                Reiniciar serviço: {actionStatusLabel(serviceRestartActions[0].status)}
+                {serviceRestartActions[0].mensagem ? ` — ${serviceRestartActions[0].mensagem}` : ''}
+                {serviceRestartActions[0].erro ? ` — ${serviceRestartActions[0].erro}` : ''}
+              </div>
+            )}
+            {online && !serviceRestartInProgress && (
+              <button type="button" className="btn-update" onClick={() => setServiceRestartConfirm(true)}>
+                Reiniciar serviço
+              </button>
+            )}
+            {online && serviceRestartInProgress && (
+              <div className="muted">Reinício de serviço em andamento.</div>
+            )}
+            {!online && (
+              <div className="muted">Computador offline: ação remota indisponível.</div>
+            )}
+            {serviceRestartConfirm && (
+              <div className="confirm-box">
+                <p>
+                  Reiniciar o serviço Spooler de Impressão na máquina <strong>{c.hostname}</strong>?
+                </p>
+                <div className="confirm-actions">
+                  <button type="button" className="btn-cancel" onClick={() => setServiceRestartConfirm(false)}>
+                    Cancelar
+                  </button>
+                  <button type="button" className="btn-update" onClick={triggerServiceRestart}>
+                    Reiniciar serviço
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="alert-history">
+              {serviceRestartActions.length === 0 ? (
+                <div className="muted">Nenhuma execução registrada.</div>
+              ) : (
+                serviceRestartActions.map((a) => (
+                  <div key={a.actionExecutionId} className={`alert-history-item ${a.status === 'SUCCESS' ? 'resolvido' : a.status === 'FAILED' || a.status === 'REJECTED' ? 'ativo' : ''}`}>
+                    <div className="ah-top">
+                      <span className="alert info">Spooler de Impressão</span>
+                      <span className="ah-badge">{actionStatusLabel(a.status)}</span>
+                    </div>
+                    <div className="ah-meta">
+                      {a.actionExecutionId} · {fmtDate(a.solicitadaEm)}
+                      {a.concluidaEm ? ` · Concluída: ${fmtDate(a.concluidaEm)}` : ''}
+                    </div>
+                    {(a.mensagem || a.erro) && <div className="muted">{a.mensagem || a.erro}</div>}
                   </div>
                 ))
               )}

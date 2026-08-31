@@ -4,8 +4,18 @@ const prisma = require("../prisma");
 const ACTIONS = {
   spooler_reset: {
     label: "Reiniciar spooler de impressão"
+  },
+  service_restart: {
+    label: "Reiniciar serviço do Windows"
   }
 };
+
+const SERVICE_ALLOWLIST = Object.freeze({
+  spooler: Object.freeze({
+    serviceName: "Spooler",
+    displayName: "Spooler de Impressão"
+  })
+});
 
 const FINAL_STATUSES = new Set(["SUCCESS", "FAILED", "REJECTED"]);
 
@@ -33,6 +43,7 @@ function mapExecution(record) {
     computadorId: record.computadorId,
     action: record.action,
     label: ACTIONS[record.action] ? ACTIONS[record.action].label : record.action,
+    payload: record.payload || null,
     status: record.status,
     mensagem: record.mensagem,
     erro: record.erro,
@@ -46,13 +57,21 @@ function mapExecution(record) {
 }
 
 function createRemoteActionsService(db = prisma) {
-  async function createExecution({ computadorId, action }) {
+  async function createExecution({ computadorId, action, payload = null }) {
     const normalizedAction = assertAllowedAction(action);
+    if (normalizedAction === "service_restart") {
+      const serviceKey = String(payload && payload.serviceKey || "").trim().toLowerCase();
+      if (!SERVICE_ALLOWLIST[serviceKey]) {
+        throw new Error("Serviço não permitido.");
+      }
+      payload = { serviceKey };
+    }
     const record = await db.acaoRemotaExecucao.create({
       data: {
         actionExecutionId: crypto.randomUUID(),
         computadorId: Number(computadorId),
         action: normalizedAction,
+        payload,
         status: "PENDING"
       }
     });
@@ -152,6 +171,7 @@ const defaultService = createRemoteActionsService();
 
 module.exports = {
   ACTIONS,
+  SERVICE_ALLOWLIST,
   createRemoteActionsService,
   ...defaultService,
   isAllowedAction,

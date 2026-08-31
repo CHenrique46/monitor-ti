@@ -177,6 +177,49 @@ test("server remote actions workflow and history", async () => {
   assert.equal(historyRes.body[0].action, "spooler_reset");
 });
 
+test("server service_restart valida chave, offline e payload persistido", async () => {
+  const db = createMockDb();
+  const service = createRemoteActionsService(db);
+  const sent = [];
+  const controller = createRemoteActionsController({
+    prisma: db,
+    agentServer: {
+      sendToAgent: (deviceId, payload) => {
+        sent.push({ deviceId, payload });
+        return true;
+      }
+    },
+    remoteActionsService: service
+  });
+
+  const invalid = makeRes();
+  await controller.serviceRestart(
+    { params: { id: 1 }, body: { serviceKey: "arbitrary" } },
+    invalid
+  );
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(db.executions.length, 0);
+
+  const offline = makeRes();
+  await controller.serviceRestart(
+    { params: { id: 2 }, body: { serviceKey: "spooler" } },
+    offline
+  );
+  assert.equal(offline.statusCode, 409);
+  assert.equal(offline.body.execution.status, "REJECTED");
+  assert.deepEqual(db.executions[0].payload, { serviceKey: "spooler" });
+
+  const valid = makeRes();
+  await controller.serviceRestart(
+    { params: { id: 1 }, body: { serviceKey: "spooler" } },
+    valid
+  );
+  assert.equal(valid.statusCode, 202);
+  assert.equal(valid.body.execution.action, "service_restart");
+  assert.deepEqual(valid.body.execution.payload, { serviceKey: "spooler" });
+  assert.equal(sent[0].payload.payload.serviceKey, "spooler");
+});
+
 test("server service rejects unknown actions", async () => {
   const db = createMockDb();
   const service = createRemoteActionsService(db);
