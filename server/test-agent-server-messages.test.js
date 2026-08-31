@@ -167,3 +167,61 @@ test("Server solicita reconciliacao e envia ACK somente depois da persistencia",
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("reconciliacao registra excecao compacta sem expor resultado", async () => {
+  const server = http.createServer();
+  const originalLog = logger.logEvent;
+  const logs = [];
+  logger.logEvent = (message) => logs.push(message);
+  const wss = setupWebSocket(server, {
+    remoteActionsService: {
+      reconcileAgentStatusMessage: async () => {
+        const error = new Error("falha de persistencia simulada");
+        error.name = "PrismaClientKnownRequestError";
+        error.stack = "PrismaClientKnownRequestError: falha de persistencia simulada\n    at fakeUpdate (service.js:10:2)\n    at reconcile (service.js:20:3)";
+        throw error;
+      }
+    },
+    avisosService: { obterPendentesDoDispositivo: async () => [] }
+  });
+  let socket;
+
+  try {
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    socket = new WebSocket(`ws://127.0.0.1:${server.address().port}`);
+    const messages = [];
+    socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    await new Promise((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    socket.send(JSON.stringify({
+      type: "register",
+      data: { deviceId: "dev-1", hostname: "PC-1", discosFisicos: [], capabilities: [] }
+    }));
+    await waitFor(() => messages.some((message) => message.type === "remote_action_reconcile_request"));
+    socket.send(JSON.stringify({
+      type: "remote_action_reconcile",
+      deviceId: "dev-1",
+      executions: [{
+        actionExecutionId: "reconcile-exception-1",
+        action: "system_maintenance",
+        status: "SUCCESS",
+        result: { overallStatus: "SUCCESS", sensitiveOutput: "nao deve ir para o log" }
+      }]
+    }));
+    await waitFor(() => logs.some((message) => message.includes("reconcile-exception-1")));
+    const log = logs.find((message) => message.includes("reconcile-exception-1"));
+    assert.match(log, /reason=exception/);
+    assert.match(log, /stage=reconcileAgentStatusMessage/);
+    assert.match(log, /errorName=PrismaClientKnownRequestError/);
+    assert.match(log, /errorMessage=falha de persistencia simulada/);
+    assert.match(log, /service\.js:10:2/);
+    assert.doesNotMatch(log, /sensitiveOutput|nao deve ir para o log/);
+  } finally {
+    logger.logEvent = originalLog;
+    if (socket) socket.close();
+    await new Promise((resolve) => wss.close(resolve));
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

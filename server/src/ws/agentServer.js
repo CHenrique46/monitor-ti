@@ -8,6 +8,20 @@ const logger = require("../logger");
 
 const HEARTBEAT_INTERVAL = 30000;
 
+function summarizeReconciliationError(error) {
+  const stack = String(error && error.stack || "")
+    .split("\n")
+    .slice(0, 3)
+    .join(" | ")
+    .replace(/[\r\n]+/g, " ")
+    .slice(0, 600);
+  return {
+    name: String(error && error.name || "Error"),
+    message: String(error && error.message || error || "Erro desconhecido").replace(/[\r\n]+/g, " ").slice(0, 400),
+    stack: stack || "-"
+  };
+}
+
 // Estados de atualização por deviceId (em memória)
 const updateStates = new Map();
 
@@ -331,8 +345,9 @@ function setupWebSocket(server, dependencies = {}) {
             }
           } catch (err) {
             rejected.push({ actionExecutionId: item.actionExecutionId || null, error: err.message });
+            const details = summarizeReconciliationError(err);
             logger.logEvent(
-              `[Monitor TI] remote_action_reconcile_item_rejected actionExecutionId=${item.actionExecutionId || "-"} status=${String(item.status || "-").toUpperCase()} currentStatus=- reason=exception`
+              `[Monitor TI] remote_action_reconcile_item_rejected actionExecutionId=${item.actionExecutionId || "-"} status=${String(item.status || "-").toUpperCase()} currentStatus=- reason=exception stage=reconcileAgentStatusMessage errorName=${details.name} errorMessage=${details.message} stack=${details.stack}`
             );
           }
         }
