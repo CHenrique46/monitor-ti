@@ -8,7 +8,7 @@ MonitorTI-Agent.exe já contém tudo (Node 24 + Agent).
 COMO TESTAR NA SEGUNDA MÁQUINA:
 1. Copie esta pasta inteira para a segunda máquina (área de trabalho, C:\Temp, etc).
 2. (Opcional) Edite config.json se o endereço do servidor mudar:
-      "serverUrl": "ws://192.168.40.70:4000"
+      "serverUrl": "ws://192.168.40.133:4000"
 3. Dê duplo clique em MonitorTI-Agent.exe.
 4. Aguarde alguns segundos (ele conecta sozinho e aparece no Dashboard).
 5. No Dashboard do TI, confirme que a nova máquina apareceu.

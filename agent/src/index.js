@@ -23,7 +23,7 @@ const AGENT_SERVICE_NAME = "MonitorTIAgent";
 const RECONNECT_DELAY = 5000;
 const METRICS_INTERVAL = 10000;
 const DISK_PATH = "C:";
-const DEFAULT_SERVER_URL = "ws://192.168.40.70:4000";
+const DEFAULT_SERVER_URL = "ws://192.168.40.133:4000";
 const PS_TIMEOUT = 10000;
 
 function runPsJson(script) {
