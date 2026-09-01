@@ -74,10 +74,6 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   }, [id])
 
   useEffect(() => {
-    if (drawer) {
-      setRelease(latestVersion ? { version: latestVersion } : null)
-      return undefined
-    }
     let active = true
     const loadM = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/metricas?periodo=${periodo}`); if (active && r.ok) setMetricas(await r.json()) } catch {} }
     loadM(); const interval = setInterval(loadM, 60000)
@@ -89,14 +85,18 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
     const loadA = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/alertas`); if (active && r.ok) setAlertas(await r.json()) } catch {} }
     loadA(); const interval = setInterval(loadA, 10000)
     return () => { active = false; clearInterval(interval) }
-  }, [id, drawer, latestVersion])
+  }, [id])
 
   useEffect(() => {
+    if (drawer) {
+      setRelease(latestVersion ? { version: latestVersion } : null)
+      return undefined
+    }
     let active = true
     const loadRelease = async () => { try { const r = await fetch(`${API_URL}/api/agent/releases/latest`); if (active) setRelease(r.ok ? await r.json() : null) } catch { if (active) setRelease(null) } }
     loadRelease(); const interval = setInterval(loadRelease, 30000)
     return () => { active = false; clearInterval(interval) }
-  }, [id])
+  }, [id, drawer, latestVersion])
 
   useEffect(() => {
     if (!release) return undefined
