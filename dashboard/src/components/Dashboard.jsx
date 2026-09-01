@@ -7,6 +7,7 @@ import { computeAlerts, sortComputadores } from '../utils/alerts'
 import { fmtDate } from '../utils/formatters'
 import { API_URL } from '../config'
 import ComputerDetails from './ComputerDetails'
+import { computerRequiresAttention, sortComputadoresByPriority } from '../utils/computerAttention'
 
 export default function Dashboard() {
   const [serverOk, setServerOk] = useState(true)
@@ -15,6 +16,8 @@ export default function Dashboard() {
   const [alertasAtivos, setAlertasAtivos] = useState([])
   const [latestVersion, setLatestVersion] = useState(null)
   const [selectedComputerId, setSelectedComputerId] = useState(null)
+  const [attentionFilter, setAttentionFilter] = useState('all')
+  const [sortMode, setSortMode] = useState('default')
 
   useEffect(() => {
     let active = true
@@ -84,7 +87,7 @@ export default function Dashboard() {
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
-    const list = term
+    let list = term
       ? computadores.filter(
           (c) =>
             (c.hostname || '').toLowerCase().includes(term) ||
@@ -92,8 +95,20 @@ export default function Dashboard() {
             (c.ip || '').toLowerCase().includes(term)
         )
       : computadores
-    return sortComputadores(list)
-  }, [computadores, search])
+    if (attentionFilter === 'attention') {
+      list = list.filter((computer) => computerRequiresAttention(computer, alertasAtivos))
+    } else if (attentionFilter === 'normal') {
+      list = list.filter((computer) => !computerRequiresAttention(computer, alertasAtivos))
+    }
+    return sortMode === 'priority'
+      ? sortComputadoresByPriority(list, alertasAtivos)
+      : sortComputadores(list)
+  }, [computadores, search, attentionFilter, sortMode, alertasAtivos])
+
+  const attentionCount = useMemo(
+    () => computadores.filter((computer) => computerRequiresAttention(computer, alertasAtivos)).length,
+    [computadores, alertasAtivos]
+  )
 
   const summary = useMemo(() => {
     const total = computadores.length
@@ -134,7 +149,24 @@ export default function Dashboard() {
         </div>
       )}
 
-      <SearchBar value={search} onChange={setSearch} />
+       <div className="computer-toolbar">
+         <SearchBar value={search} onChange={setSearch} />
+         <label className="toolbar-field">
+           <span>Mostrar</span>
+           <select value={attentionFilter} onChange={(event) => setAttentionFilter(event.target.value)}>
+             <option value="all">Todos</option>
+             <option value="attention">Requer atenção ({attentionCount})</option>
+             <option value="normal">Normais</option>
+           </select>
+         </label>
+         <label className="toolbar-field">
+           <span>Ordenar</span>
+           <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
+             <option value="default">Padrão</option>
+             <option value="priority">Prioridade</option>
+           </select>
+         </label>
+       </div>
 
       <h2>Computadores</h2>
       <hr />
@@ -151,7 +183,7 @@ export default function Dashboard() {
       ) : (
         <div className="grid">
            {filtered.map((c) => (
-             <ComputerCard key={c.id} c={c} latestVersion={latestVersion} onOpen={setSelectedComputerId} />
+             <ComputerCard key={c.id} c={c} latestVersion={latestVersion} onOpen={setSelectedComputerId} hasActiveAlert={alertasAtivos.some((alert) => alert.computadorId === c.id)} />
            ))}
          </div>
        )}

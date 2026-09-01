@@ -18,11 +18,11 @@ function MetricBar({ value }) {
   );
 }
 
-export default function ComputerCard({ c, latestVersion, onOpen }) {
+export default function ComputerCard({ c, latestVersion, onOpen, hasActiveAlert = false }) {
   const online = c.status === "online";
   const { alerts } = computeAlerts(c);
   const uptimeStatus = getUptimeStatus(c.uptime);
-  const requiresAttention = alerts.length > 0 || [UPTIME_STATUS.ATTENTION, UPTIME_STATUS.REBOOT_RECOMMENDED].includes(uptimeStatus);
+  const requiresAttention = hasActiveAlert || alerts.length > 0 || [UPTIME_STATUS.ATTENTION, UPTIME_STATUS.REBOOT_RECOMMENDED].includes(uptimeStatus);
   const updateAvailable =
     latestVersion && c.agentVersion && latestVersion !== c.agentVersion;
 

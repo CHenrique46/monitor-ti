@@ -126,6 +126,50 @@ p {
   color: #64748b;
 }
 
+.computer-toolbar {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0 12px;
+}
+
+.computer-toolbar .search {
+  flex: 1 1 300px;
+  margin: 0;
+}
+
+.toolbar-field {
+  display: grid;
+  gap: 5px;
+  min-width: 170px;
+}
+
+.toolbar-field span {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.toolbar-field select {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font: inherit;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.toolbar-field select:focus,
+.search input:focus {
+  border-color: #38bdf8;
+  outline: 2px solid rgba(56, 189, 248, 0.18);
+  outline-offset: 1px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
