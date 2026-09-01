@@ -6,6 +6,7 @@ import SiteNav from './SiteNav'
 import { computeAlerts, sortComputadores } from '../utils/alerts'
 import { fmtDate } from '../utils/formatters'
 import { API_URL } from '../config'
+import ComputerDetails from './ComputerDetails'
 
 export default function Dashboard() {
   const [serverOk, setServerOk] = useState(true)
@@ -13,6 +14,7 @@ export default function Dashboard() {
   const [search, setSearch] = useState('')
   const [alertasAtivos, setAlertasAtivos] = useState([])
   const [latestVersion, setLatestVersion] = useState(null)
+  const [selectedComputerId, setSelectedComputerId] = useState(null)
 
   useEffect(() => {
     let active = true
@@ -148,10 +150,13 @@ export default function Dashboard() {
         <p className="muted">Nenhum computador corresponde à busca.</p>
       ) : (
         <div className="grid">
-          {filtered.map((c) => (
-            <ComputerCard key={c.id} c={c} latestVersion={latestVersion} />
-          ))}
-        </div>
+           {filtered.map((c) => (
+             <ComputerCard key={c.id} c={c} latestVersion={latestVersion} onOpen={setSelectedComputerId} />
+           ))}
+         </div>
+       )}
+      {selectedComputerId && (
+        <ComputerDetails computerId={selectedComputerId} latestVersion={latestVersion} onClose={() => setSelectedComputerId(null)} />
       )}
     </div>
   )

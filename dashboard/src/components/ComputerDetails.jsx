@@ -1,42 +1,50 @@
-import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import SiteNav from './SiteNav'
-import { computeAlerts } from '../utils/alerts'
-import {
-  bytesToGB,
-  formatUptime,
-  formatPercent,
-  sistemaLabel,
-  fmtDate
-} from '../utils/formatters'
-import { API_URL } from '../config'
 import MetricChart from './MetricChart'
+import { computeAlerts } from '../utils/alerts'
+import { API_URL } from '../config'
+import { bytesToGB, formatUptime, formatPercent, sistemaLabel, fmtDate } from '../utils/formatters'
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
   const cls = pct >= 90 ? 'crit' : pct >= 80 ? 'warn' : ''
-  return (
-    <div className="bar">
-      <div className={`bar-fill ${cls}`} style={{ width: pct + '%' }}></div>
-    </div>
-  )
+  return <div className="bar"><div className={`bar-fill ${cls}`} style={{ width: `${pct}%` }} /></div>
+}
+
+function Field({ label, children }) {
+  return <div className="detail-field"><span className="detail-key">{label}</span><span className="detail-val">{children ?? 'Não informado'}</span></div>
 }
 
 function Section({ title, children }) {
-  return (
-    <div className="detail-section">
-      <h3>{title}</h3>
-      <div className="detail-grid">{children}</div>
-    </div>
-  )
+  return <section className="detail-section"><h3>{title}</h3><div className="detail-grid">{children}</div></section>
 }
 
-export default function ComputerDetails() {
-  const { id } = useParams()
+function StatusTag({ status }) {
+  const labels = { PENDING: 'Pendente', DISPATCHED: 'Enviado', RUNNING: 'Executando', SUCCESS: 'Concluído', FAILED: 'Falhou', REJECTED: 'Rejeitado', SKIPPED: 'Ignorado' }
+  const tone = ['FAILED', 'REJECTED'].includes(status) ? 'failed' : status === 'SUCCESS' ? 'ok' : 'running'
+  return <span className={`action-status ${tone}`}>{labels[status] || status || 'Desconhecido'}</span>
+}
+
+function ActionItem({ action }) {
+  return <details className="action-item">
+    <summary><span><strong>{action.label || action.action}</strong><small>{fmtDate(action.solicitadaEm)}</small></span><StatusTag status={action.status} /></summary>
+    {(action.mensagem || action.erro || action.concluidaEm) && <div className="action-detail">{action.mensagem || action.erro || 'Concluída'}{action.concluidaEm && <small>Concluída em {fmtDate(action.concluidaEm)}</small>}</div>}
+  </details>
+}
+
+function ConfirmBox({ children, onCancel, onConfirm, confirmLabel }) {
+  return <div className="confirm-box"><p>{children}</p><div className="confirm-actions"><button type="button" className="btn-cancel" onClick={onCancel}>Cancelar</button><button type="button" className="btn-update" onClick={onConfirm}>{confirmLabel}</button></div></div>
+}
+
+export default function ComputerDetails({ computerId, latestVersion, onClose }) {
+  const routeId = useParams().id
+  const id = computerId || routeId
+  const drawer = Boolean(computerId)
   const [serverOk, setServerOk] = useState(true)
   const [c, setC] = useState(null)
   const [notFound, setNotFound] = useState(false)
-  const [periodo, setPeriodo] = useState("24h")
+  const [periodo, setPeriodo] = useState('24h')
   const [metricas, setMetricas] = useState(null)
   const [alertas, setAlertas] = useState([])
   const [release, setRelease] = useState(null)
@@ -48,811 +56,131 @@ export default function ComputerDetails() {
   const [serviceRestartError, setServiceRestartError] = useState(null)
   const [systemMaintenanceConfirm, setSystemMaintenanceConfirm] = useState(false)
   const [systemMaintenanceError, setSystemMaintenanceError] = useState(null)
+  const [tab, setTab] = useState('summary')
 
   useEffect(() => {
     let active = true
-
     const load = async () => {
       try {
         const r = await fetch(`${API_URL}/api/computadores/${id}`)
         if (!active) return
-        if (r.status === 404) {
-          setNotFound(true)
-          setServerOk(true)
-          return
-        }
-        if (!r.ok) {
-          setServerOk(false)
-          return
-        }
-        setNotFound(false)
-        setServerOk(true)
-        setC(await r.json())
-      } catch (e) {
-        if (active) setServerOk(false) // mantem ultimo estado em memoria
-      }
+        if (r.status === 404) { setNotFound(true); return }
+        if (!r.ok) { setServerOk(false); return }
+        setNotFound(false); setServerOk(true); setC(await r.json())
+      } catch { if (active) setServerOk(false) }
     }
-
-    load()
-    const interval = setInterval(load, 5000)
-    return () => {
-      active = false
-      clearInterval(interval)
-    }
+    load(); const interval = setInterval(load, 5000)
+    return () => { active = false; clearInterval(interval) }
   }, [id])
 
   useEffect(() => {
+    if (drawer) {
+      setRelease(latestVersion ? { version: latestVersion } : null)
+      return undefined
+    }
     let active = true
-    const loadM = async () => {
-      try {
-        const r = await fetch(
-          `${API_URL}/api/computadores/${id}/metricas?periodo=${periodo}`
-        )
-        if (active && r.ok) setMetricas(await r.json())
-      } catch (e) {}
-    }
-    loadM()
-    const t = setInterval(loadM, 60000)
-    return () => {
-      active = false
-      clearInterval(t)
-    }
+    const loadM = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/metricas?periodo=${periodo}`); if (active && r.ok) setMetricas(await r.json()) } catch {} }
+    loadM(); const interval = setInterval(loadM, 60000)
+    return () => { active = false; clearInterval(interval) }
   }, [id, periodo])
 
   useEffect(() => {
     let active = true
-    const loadA = async () => {
-      try {
-        const r = await fetch(`${API_URL}/api/computadores/${id}/alertas`)
-        if (active && r.ok) setAlertas(await r.json())
-      } catch (e) {}
-    }
-    loadA()
-    const t = setInterval(loadA, 10000)
-    return () => {
-      active = false
-      clearInterval(t)
-    }
-  }, [id])
+    const loadA = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/alertas`); if (active && r.ok) setAlertas(await r.json()) } catch {} }
+    loadA(); const interval = setInterval(loadA, 10000)
+    return () => { active = false; clearInterval(interval) }
+  }, [id, drawer, latestVersion])
 
   useEffect(() => {
     let active = true
-    const loadRelease = async () => {
-      try {
-        const r = await fetch(`${API_URL}/api/agent/releases/latest`)
-        if (active && r.ok) setRelease(await r.json())
-        else if (active) setRelease(null)
-      } catch (e) {
-        if (active) setRelease(null)
-      }
-    }
-    loadRelease()
-    const t = setInterval(loadRelease, 30000)
-    return () => {
-      active = false
-      clearInterval(t)
-    }
+    const loadRelease = async () => { try { const r = await fetch(`${API_URL}/api/agent/releases/latest`); if (active) setRelease(r.ok ? await r.json() : null) } catch { if (active) setRelease(null) } }
+    loadRelease(); const interval = setInterval(loadRelease, 30000)
+    return () => { active = false; clearInterval(interval) }
   }, [id])
 
   useEffect(() => {
-    if (!release) return
+    if (!release) return undefined
     let active = true
-    const loadStatus = async () => {
-      try {
-        const r = await fetch(`${API_URL}/api/computadores/${id}/agent-update`)
-        if (active && r.ok) setUpdateStatus(await r.json())
-      } catch (e) {}
-    }
-    loadStatus()
-    const t = setInterval(loadStatus, 3000)
-    return () => {
-      active = false
-      clearInterval(t)
-    }
+    const loadStatus = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/agent-update`); if (active && r.ok) setUpdateStatus(await r.json()) } catch {} }
+    loadStatus(); const interval = setInterval(loadStatus, 3000)
+    return () => { active = false; clearInterval(interval) }
   }, [id, release])
 
   useEffect(() => {
     let active = true
-    const loadActions = async () => {
-      try {
-        const r = await fetch(`${API_URL}/api/computadores/${id}/actions?take=10`)
-        if (active && r.ok) setRemoteActions(await r.json())
-      } catch (e) {}
-    }
-    loadActions()
-    const t = setInterval(loadActions, 5000)
-    return () => {
-      active = false
-      clearInterval(t)
-    }
+    const loadActions = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/actions?take=10`); if (active && r.ok) setRemoteActions(await r.json()) } catch {} }
+    loadActions(); const interval = setInterval(loadActions, 5000)
+    return () => { active = false; clearInterval(interval) }
   }, [id])
 
-  const updateAvailable =
-    release && c && c.agentVersion && release.version !== c.agentVersion
-  const inProgress =
-    updateStatus &&
-    ["update_pending", "update_downloading", "update_validating", "update_installing"].includes(
-      updateStatus.status
-    )
-  const remoteInProgress = remoteActions.some((a) =>
-    ["PENDING", "DISPATCHED", "RUNNING"].includes(a.status)
-  )
-  const serviceRestartActions = remoteActions.filter(
-    (a) => a.action === "service_restart" && a.payload && a.payload.serviceKey === "spooler"
-  )
-  const serviceRestartInProgress = serviceRestartActions.some((a) =>
-    ["PENDING", "DISPATCHED", "RUNNING"].includes(a.status)
-  )
-  const systemMaintenanceActions = remoteActions.filter((a) => a.action === "system_maintenance")
-  const systemMaintenanceInProgress = systemMaintenanceActions.some((a) =>
-    ["PENDING", "DISPATCHED", "RUNNING"].includes(a.status)
-  )
+  useEffect(() => {
+    if (!drawer) return undefined
+    const closeOnEscape = (event) => event.key === 'Escape' && onClose?.()
+    document.addEventListener('keydown', closeOnEscape)
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.removeEventListener('keydown', closeOnEscape); document.body.style.overflow = previousOverflow }
+  }, [drawer, onClose])
 
-  const statusLabel = (s) => {
-    switch (s) {
-      case "update_pending":
-        return "Preparando..."
-      case "update_downloading":
-        return "Baixando..."
-      case "update_validating":
-        return "Validando..."
-      case "update_installing":
-        return "Instalando..."
-      case "update_success":
-        return "Atualizado ✓"
-      case "update_failed":
-        return "Falha na atualização"
-      default:
-        return s || ""
-    }
-  }
-
-  const actionStatusLabel = (s) => {
-    switch (s) {
-      case "PENDING":
-        return "Pendente"
-      case "DISPATCHED":
-        return "Enviado"
-      case "RUNNING":
-        return "Executando"
-      case "SUCCESS":
-        return "Concluído"
-      case "FAILED":
-        return "Falhou"
-      case "REJECTED":
-        return "Rejeitado"
-      case "SKIPPED":
-        return "Ignorado"
-      default:
-        return s || ""
-    }
-  }
-
-  const triggerUpdate = async () => {
-    setConfirm(false)
+  const request = async (path, options, onError) => {
     try {
-      const r = await fetch(`${API_URL}/api/computadores/${id}/agent-update`, {
-        method: "POST"
-      })
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}))
-        setUpdateStatus({
-          status: "update_failed",
-          message: e.erro || "Falha ao iniciar atualização"
-        })
-      }
-    } catch (e) {
-      setUpdateStatus({ status: "update_failed", message: e.message })
-    }
-  }
-
-  const triggerSpoolerReset = async () => {
-    setSpoolerConfirm(false)
-    try {
-      const r = await fetch(`${API_URL}/api/computadores/${id}/actions/spooler-reset`, {
-        method: 'POST'
-      })
+      const r = await fetch(`${API_URL}/api/computadores/${id}${path}`, options)
       const body = await r.json().catch(() => ({}))
-      if (!r.ok) {
-        if (body.execution) {
-          setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
-        }
-        return
-      }
-      if (body.execution) {
-        setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
-      }
-    } catch (e) {}
+      if (!r.ok) { onError(body.erro || 'Não foi possível concluir a ação.'); return }
+      if (body.execution) setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
+    } catch { onError('Não foi possível concluir a ação.') }
   }
+  const triggerUpdate = async () => { setConfirm(false); await request('/agent-update', { method: 'POST' }, (message) => setUpdateStatus({ status: 'update_failed', message })) }
+  const triggerSpoolerReset = async () => { setSpoolerConfirm(false); await request('/actions/spooler-reset', { method: 'POST' }, () => {}) }
+  const triggerServiceRestart = async () => { setServiceRestartConfirm(false); setServiceRestartError(null); await request('/actions/service-restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceKey: 'spooler' }) }, setServiceRestartError) }
+  const triggerSystemMaintenance = async () => { setSystemMaintenanceConfirm(false); setSystemMaintenanceError(null); await request('/actions/system-maintenance', { method: 'POST' }, setSystemMaintenanceError) }
 
-  const triggerServiceRestart = async () => {
-    setServiceRestartConfirm(false)
-    setServiceRestartError(null)
-    try {
-      const r = await fetch(`${API_URL}/api/computadores/${id}/actions/service-restart`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceKey: 'spooler' })
-      })
-      const body = await r.json().catch(() => ({}))
-      if (!r.ok) {
-        setServiceRestartError(body.erro || 'Não foi possível reiniciar o serviço.')
-        return
-      }
-      if (body.execution) {
-        setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
-      }
-    } catch (e) {
-      setServiceRestartError('Não foi possível reiniciar o serviço.')
-    }
-  }
+  if (notFound) return drawer ? <div className="drawer-backdrop" onClick={onClose}><aside className="details-drawer" onClick={(event) => event.stopPropagation()}><div className="drawer-empty">Computador não encontrado.</div></aside></div> : <div className="container"><Link className="back-link" to="/">← Voltar ao Dashboard</Link><div className="empty">Computador não encontrado.</div></div>
+  if (!c) return drawer ? <div className="drawer-backdrop"><aside className="details-drawer"><div className="drawer-empty">Carregando dados do computador...</div></aside></div> : <div className="container"><SiteNav /><p className="muted">Carregando dados do computador...</p></div>
 
-  const triggerSystemMaintenance = async () => {
-    setSystemMaintenanceConfirm(false)
-    setSystemMaintenanceError(null)
-    try {
-      const r = await fetch(`${API_URL}/api/computadores/${id}/actions/system-maintenance`, {
-        method: 'POST'
-      })
-      const body = await r.json().catch(() => ({}))
-      if (!r.ok) {
-        setSystemMaintenanceError(body.erro || 'Não foi possível iniciar a manutenção.')
-        return
-      }
-      if (body.execution) {
-        setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
-      }
-    } catch (e) {
-      setSystemMaintenanceError('Não foi possível iniciar a manutenção.')
-    }
-  }
-
-  if (notFound) {
-    return (
-      <div className="container">
-        <Link className="back-link" to="/">
-          ← Voltar ao Dashboard
-        </Link>
-        <div className="empty">
-          Computador não encontrado.
-          <br />
-          <Link className="details-link" to="/">
-            Voltar ao Dashboard
-          </Link>
-        </div>
-      </div>
-    )
-  }
-
-  const online = c && c.status === 'online'
-  const val = (x) => (x != null && x !== '' ? x : 'Não informado')
-  const { alerts } = c ? computeAlerts(c) : { alerts: [] }
-  const ramPct =
-    c && c.ramTotal && c.ramUsada != null
-      ? Math.round((c.ramUsada / c.ramTotal) * 100)
-      : null
-  const discoPct =
-    c && c.discoTotal && c.discoLivre != null
-      ? Math.round(((c.discoTotal - c.discoLivre) / c.discoTotal) * 100)
-      : null
-
+  const online = c.status === 'online'
+  const { alerts } = computeAlerts(c)
+  const ramPct = c.ramTotal && c.ramUsada != null ? Math.round((c.ramUsada / c.ramTotal) * 100) : null
+  const discoPct = c.discoTotal && c.discoLivre != null ? Math.round(((c.discoTotal - c.discoLivre) / c.discoTotal) * 100) : null
   const hasCritical = alerts.some((a) => a.severity === 'critical')
   const hasWarn = alerts.some((a) => a.severity === 'warn')
-  const cardClass = !c
-    ? ''
-    : !online
-    ? 'offline-card'
-    : hasCritical
-    ? 'critical-card'
-    : hasWarn
-    ? 'warn-card'
-    : 'online-card'
-
-  return (
-    <div className="container">
-      <SiteNav />
-      <Link className="back-link" to="/">
-        ← Voltar ao Dashboard
-      </Link>
-
-      <h1>{c ? c.hostname || '(sem nome)' : 'Carregando...'}</h1>
-      <p>
-        Servidor:{' '}
-        <span className={serverOk ? 'online' : 'offline'}>
-          {serverOk ? 'Online' : 'Offline'}
-        </span>
-        {c && (
-          <>
-            {' | '}Status:{' '}
-            <span className={online ? 'online' : 'offline'}>
-              {online ? 'Online' : 'Offline'}
-            </span>
-          </>
-        )}
-      </p>
-      {!serverOk && (
-        <p className="server-warn">Não foi possível atualizar os dados.</p>
-      )}
-
-      {alerts.length > 0 && (
-        <div className="alerts">
-          {alerts.map((a, i) => (
-            <div key={i} className={`alert ${a.severity}`}>
-              ⚠ {a.msg}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!c && <p className="muted">Carregando dados do computador...</p>}
-
-      {c && (
-        <>
-          <Section title="Informações gerais">
-            <div>
-              <span className="detail-key">Usuário</span>
-              <span className="detail-val">{c.usuario || '-'}</span>
-            </div>
-            <div>
-              <span className="detail-key">IP</span>
-              <span className="detail-val">{c.ip || '-'}</span>
-            </div>
-            <div>
-              <span className="detail-key">Device ID</span>
-              <span className="detail-val">{c.deviceId || '-'}</span>
-            </div>
-            <div>
-              <span className="detail-key">Última conexão</span>
-              <span className="detail-val">{fmtDate(c.ultimaConexao)}</span>
-            </div>
-          </Section>
-
-          <Section title="Agent">
-            <div>
-              <span className="detail-key">Versão instalada</span>
-              <span className="detail-val">v{c.agentVersion || 'desconhecida'}</span>
-            </div>
-            {release && updateAvailable && (
-              <div>
-                <span className="detail-key">Versão disponível</span>
-                <span className="detail-val">v{release.version}</span>
-              </div>
-            )}
-            {release && !updateAvailable && (
-              <div className="update-ok">✓ Agent atualizado (v{release.version})</div>
-            )}
-
-            {updateStatus && (
-              <div
-                className={`update-status ${
-                  updateStatus.status === "update_failed"
-                    ? "failed"
-                    : updateStatus.status === "update_success"
-                    ? "ok"
-                    : "running"
-                }`}
-              >
-                {statusLabel(updateStatus.status)}
-                {updateStatus.message ? ` — ${updateStatus.message}` : ""}
-              </div>
-            )}
-
-            {release && updateAvailable && online && !inProgress && (
-              <button type="button" className="btn-update" onClick={() => setConfirm(true)}>
-                Atualizar Agent
-              </button>
-            )}
-            {release && updateAvailable && !online && (
-              <div className="muted">Computador offline: não é possível atualizar agora.</div>
-            )}
-
-            {confirm && (
-              <div className="confirm-box">
-                <p>
-                  Atualizar o Agent da máquina <strong>{c.hostname}</strong> de v
-                  {c.agentVersion} para v{release.version}?
-                </p>
-                <div className="confirm-actions">
-                  <button
-                    type="button"
-                    className="btn-cancel"
-                    onClick={() => setConfirm(false)}
-                  >
-                    Cancelar
-                  </button>
-                  <button type="button" className="btn-update" onClick={triggerUpdate}>
-                    Atualizar
-                  </button>
-                </div>
-              </div>
-            )}
-          </Section>
-
-          <Section title="Ações remotas">
-            <div>
-              <span className="detail-key">Spooler</span>
-              <span className="detail-val">Reset da fila de impressão</span>
-            </div>
-            {remoteActions[0] && (
-              <div className={`update-status ${remoteActions[0].status === 'FAILED' || remoteActions[0].status === 'REJECTED' ? 'failed' : remoteActions[0].status === 'SUCCESS' ? 'ok' : 'running'}`}>
-                {remoteActions[0].label || 'Reiniciar spooler'}: {actionStatusLabel(remoteActions[0].status)}
-                {remoteActions[0].mensagem ? ` — ${remoteActions[0].mensagem}` : ''}
-                {remoteActions[0].erro ? ` — ${remoteActions[0].erro}` : ''}
-              </div>
-            )}
-
-            {online && !remoteInProgress && (
-              <button type="button" className="btn-update" onClick={() => setSpoolerConfirm(true)}>
-                Reiniciar spooler
-              </button>
-            )}
-            {online && remoteInProgress && (
-              <div className="muted">Uma ação remota já está em andamento.</div>
-            )}
-            {!online && (
-              <div className="muted">Computador offline: ação remota indisponível.</div>
-            )}
-
-            {spoolerConfirm && (
-              <div className="confirm-box">
-                <p>
-                  Reiniciar o spooler de impressão de <strong>{c.hostname}</strong>?
-                </p>
-                <div className="confirm-actions">
-                  <button
-                    type="button"
-                    className="btn-cancel"
-                    onClick={() => setSpoolerConfirm(false)}
-                  >
-                    Cancelar
-                  </button>
-                  <button type="button" className="btn-update" onClick={triggerSpoolerReset}>
-                    Reiniciar
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="alert-history">
-              {remoteActions.length === 0 ? (
-                <div className="muted">Nenhuma execução registrada.</div>
-              ) : (
-                remoteActions.map((a) => (
-                  <div key={a.actionExecutionId} className={`alert-history-item ${a.status === 'SUCCESS' ? 'resolvido' : a.status === 'FAILED' || a.status === 'REJECTED' ? 'ativo' : ''}`}>
-                    <div className="ah-top">
-                      <span className="alert info">{a.label || a.action}</span>
-                      <span className="ah-badge">{actionStatusLabel(a.status)}</span>
-                    </div>
-                    <div className="ah-meta">
-                      {a.actionExecutionId}
-                      {` · ${fmtDate(a.solicitadaEm)}`}
-                      {a.concluidaEm ? ` · Concluída: ${fmtDate(a.concluidaEm)}` : ''}
-                    </div>
-                    {(a.mensagem || a.erro) && (
-                      <div className="muted">{a.mensagem || a.erro}</div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </Section>
-
-          <Section title="Serviços do Windows">
-            <div>
-              <span className="detail-key">Serviço</span>
-              <span className="detail-val">Spooler de Impressão</span>
-            </div>
-            {serviceRestartActions[0] && (
-              <div className={`update-status ${serviceRestartActions[0].status === 'FAILED' || serviceRestartActions[0].status === 'REJECTED' ? 'failed' : serviceRestartActions[0].status === 'SUCCESS' ? 'ok' : 'running'}`}>
-                Reiniciar serviço: {actionStatusLabel(serviceRestartActions[0].status)}
-                {serviceRestartActions[0].mensagem ? ` — ${serviceRestartActions[0].mensagem}` : ''}
-                {serviceRestartActions[0].erro ? ` — ${serviceRestartActions[0].erro}` : ''}
-              </div>
-            )}
-            {serviceRestartError && <div className="update-status failed">{serviceRestartError}</div>}
-            {online && !serviceRestartInProgress && (
-              <button type="button" className="btn-update" onClick={() => setServiceRestartConfirm(true)}>
-                Reiniciar serviço
-              </button>
-            )}
-            {online && serviceRestartInProgress && (
-              <div className="muted">Reinício de serviço em andamento.</div>
-            )}
-            {!online && (
-              <div className="muted">Computador offline: ação remota indisponível.</div>
-            )}
-            {serviceRestartConfirm && (
-              <div className="confirm-box">
-                <p>
-                  Reiniciar o serviço Spooler de Impressão na máquina <strong>{c.hostname}</strong>?
-                </p>
-                <div className="confirm-actions">
-                  <button type="button" className="btn-cancel" onClick={() => setServiceRestartConfirm(false)}>
-                    Cancelar
-                  </button>
-                  <button type="button" className="btn-update" onClick={triggerServiceRestart}>
-                    Reiniciar serviço
-                  </button>
-                </div>
-              </div>
-            )}
-            <div className="alert-history">
-              {serviceRestartActions.length === 0 ? (
-                <div className="muted">Nenhuma execução registrada.</div>
-              ) : (
-                serviceRestartActions.map((a) => (
-                  <div key={a.actionExecutionId} className={`alert-history-item ${a.status === 'SUCCESS' ? 'resolvido' : a.status === 'FAILED' || a.status === 'REJECTED' ? 'ativo' : ''}`}>
-                    <div className="ah-top">
-                      <span className="alert info">Spooler de Impressão</span>
-                      <span className="ah-badge">{actionStatusLabel(a.status)}</span>
-                    </div>
-                    <div className="ah-meta">
-                      {a.actionExecutionId} · {fmtDate(a.solicitadaEm)}
-                      {a.concluidaEm ? ` · Concluída: ${fmtDate(a.concluidaEm)}` : ''}
-                    </div>
-                    {(a.mensagem || a.erro) && <div className="muted">{a.mensagem || a.erro}</div>}
-                  </div>
-                ))
-              )}
-            </div>
-          </Section>
-
-          <Section title="Manutenção do sistema">
-            {systemMaintenanceActions[0] && (
-              <div className={`update-status ${systemMaintenanceActions[0].status === 'FAILED' || systemMaintenanceActions[0].status === 'REJECTED' ? 'failed' : systemMaintenanceActions[0].status === 'SUCCESS' ? 'ok' : 'running'}`}>
-                Manutenção: {actionStatusLabel(systemMaintenanceActions[0].status)}
-                {systemMaintenanceActions[0].mensagem ? ` — ${systemMaintenanceActions[0].mensagem}` : ''}
-                {systemMaintenanceActions[0].erro ? ` — ${systemMaintenanceActions[0].erro}` : ''}
-              </div>
-            )}
-            {systemMaintenanceError && <div className="update-status failed">{systemMaintenanceError}</div>}
-            {online && !systemMaintenanceInProgress && (
-              <button type="button" className="btn-update" onClick={() => setSystemMaintenanceConfirm(true)}>
-                Executar manutenção
-              </button>
-            )}
-            {online && systemMaintenanceInProgress && (
-              <div className="muted">Manutenção do sistema em andamento.</div>
-            )}
-            {!online && (
-              <div className="muted">Computador offline: ação remota indisponível.</div>
-            )}
-            {systemMaintenanceConfirm && (
-              <div className="confirm-box">
-                <p>
-                  Executar a manutenção preventiva do Windows na máquina <strong>{c.hostname}</strong>?
-                  <br />
-                  O processo poderá levar vários minutos e executará verificações SFC e DISM.
-                </p>
-                <div className="confirm-actions">
-                  <button type="button" className="btn-cancel" onClick={() => setSystemMaintenanceConfirm(false)}>
-                    Cancelar
-                  </button>
-                  <button type="button" className="btn-update" onClick={triggerSystemMaintenance}>
-                    Executar manutenção
-                  </button>
-                </div>
-              </div>
-            )}
-            {systemMaintenanceActions[0]?.resultado?.steps?.length > 0 && (
-              <div className="alert-history">
-                {systemMaintenanceActions[0].resultado.steps.map((step) => (
-                  <div key={step.key} className={`alert-history-item ${step.status === 'SUCCESS' ? 'resolvido' : step.status === 'FAILED' ? 'ativo' : ''}`}>
-                    <div className="ah-top">
-                      <span className="alert info">{{ temp_cleanup: 'Temporários', sfc: 'SFC', dism: 'DISM', dns_flush: 'DNS' }[step.key] || step.key}</span>
-                      <span className="ah-badge">{actionStatusLabel(step.status)}</span>
-                    </div>
-                    <div className="ah-meta">
-                      {step.durationMs != null ? `${step.durationMs} ms` : ''}
-                      {step.exitCode != null ? ` · exit code ${step.exitCode}` : ''}
-                    </div>
-                    {step.message && <div className="muted">{step.message}</div>}
-                  </div>
-                ))}
-              </div>
-            )}
-            {systemMaintenanceActions.length === 0 && (
-              <div className="muted">Nenhuma execução registrada.</div>
-            )}
-          </Section>
-
-          <Section title="Sistema">
-            <div>
-              <span className="detail-key">Sistema</span>
-              <span className="detail-val">{sistemaLabel(c.sistema)}</span>
-            </div>
-            <div>
-              <span className="detail-key">Release</span>
-              <span className="detail-val">{c.sistemaRelease || '-'}</span>
-            </div>
-            <div>
-              <span className="detail-key">Arquitetura</span>
-              <span className="detail-val">{c.arquitetura || '-'}</span>
-            </div>
-            <div>
-              <span className="detail-key">Uptime</span>
-              <span className="detail-val">{formatUptime(c.uptime)}</span>
-            </div>
-          </Section>
-
-          <Section title="Processador">
-            <div>
-              <span className="detail-key">Modelo</span>
-              <span className="detail-val">{c.processador || '-'}</span>
-            </div>
-            <div>
-              <span className="detail-key">CPUs lógicas</span>
-              <span className="detail-val">
-                {c.cpusLogicas != null ? c.cpusLogicas : '-'}
-              </span>
-            </div>
-          </Section>
-
-          <Section title="Equipamento">
-            <div>
-              <span className="detail-key">Fabricante</span>
-              <span className="detail-val">{val(c.fabricante)}</span>
-            </div>
-            <div>
-              <span className="detail-key">Modelo</span>
-              <span className="detail-val">{val(c.modeloEquipamento)}</span>
-            </div>
-            <div>
-              <span className="detail-key">Número de série</span>
-              <span className="detail-val">{val(c.numeroSerie)}</span>
-            </div>
-          </Section>
-
-          <Section title="Placa-mãe">
-            <div>
-              <span className="detail-key">Fabricante</span>
-              <span className="detail-val">{val(c.placaMaeFabricante)}</span>
-            </div>
-            <div>
-              <span className="detail-key">Modelo</span>
-              <span className="detail-val">{val(c.placaMaeModelo)}</span>
-            </div>
-          </Section>
-
-          <Section title="BIOS">
-            <div>
-              <span className="detail-key">Fabricante</span>
-              <span className="detail-val">{val(c.biosFabricante)}</span>
-            </div>
-            <div>
-              <span className="detail-key">Versão</span>
-              <span className="detail-val">{val(c.biosVersao)}</span>
-            </div>
-          </Section>
-
-          <Section title="Armazenamento físico">
-            {c.discosFisicos && c.discosFisicos.length > 0 ? (
-              c.discosFisicos.map((d, i) => (
-                <div key={d.id || i} className="disco-item">
-                  <div className="disco-titulo">Disco {i + 1}</div>
-                  <div>
-                    <span className="detail-key">Modelo</span>
-                    <span className="detail-val">{val(d.modelo)}</span>
-                  </div>
-                  <div>
-                    <span className="detail-key">Capacidade</span>
-                    <span className="detail-val">
-                      {d.tamanho != null ? bytesToGB(d.tamanho) : "Não informado"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="detail-key">Interface</span>
-                    <span className="detail-val">{val(d.interface)}</span>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="muted">Nenhum disco físico informado.</div>
-            )}
-          </Section>
-
-          <Section title="Memória">
-            <div>
-              <span className="detail-key">Usada</span>
-              <span className="detail-val">{bytesToGB(c.ramUsada)}</span>
-            </div>
-            <div>
-              <span className="detail-key">Total</span>
-              <span className="detail-val">{bytesToGB(c.ramTotal)}</span>
-            </div>
-            <div className="metric-value-full">
-              {formatPercent(ramPct)}
-              <MetricBar value={ramPct || 0} />
-            </div>
-          </Section>
-
-          <Section title="Disco C:">
-            <div>
-              <span className="detail-key">Livre</span>
-              <span className="detail-val">{bytesToGB(c.discoLivre)}</span>
-            </div>
-            <div>
-              <span className="detail-key">Total</span>
-              <span className="detail-val">{bytesToGB(c.discoTotal)}</span>
-            </div>
-            <div className="metric-value-full">
-              {formatPercent(discoPct)} usado
-              <MetricBar value={discoPct || 0} />
-            </div>
-          </Section>
-
-          <Section title="CPU">
-            <div className="metric-value-full">
-              {formatPercent(c.cpuUso)}
-              <MetricBar value={c.cpuUso || 0} />
-            </div>
-          </Section>
-
-          <Section title="Histórico">
-            <div className="period-selector">
-              {["24h", "7d", "30d"].map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  className={periodo === p ? "period-btn active" : "period-btn"}
-                  onClick={() => setPeriodo(p)}
-                >
-                  {p === "24h" ? "24 horas" : p === "7d" ? "7 dias" : "30 dias"}
-                </button>
-              ))}
-            </div>
-            <MetricChart title="CPU %" data={metricas} dataKey="cpuUso" color="#38bdf8" />
-            <MetricChart title="RAM %" data={metricas} dataKey="ramUsoPct" color="#a78bfa" />
-            <MetricChart title="Disco %" data={metricas} dataKey="discoUsoPct" color="#f59e0b" />
-          </Section>
-
-          <Section title="Histórico de alertas">
-            {alertas.length === 0 ? (
-              <div className="muted">Nenhum alerta registrado para este equipamento.</div>
-            ) : (
-              <div className="alert-history">
-                {alertas.map((a) => {
-                  const fim = a.resolvidoEm ? new Date(a.resolvidoEm) : new Date()
-                  const ms = fim - new Date(a.iniciadoEm)
-                  const min = Math.max(0, Math.floor(ms / 60000))
-                  const dur =
-                    min < 60
-                      ? `${min} min`
-                      : min < 1440
-                      ? `${Math.floor(min / 60)}h ${min % 60}min`
-                      : `${Math.floor(min / 1440)}d ${Math.floor((min % 1440) / 60)}h`
-                  return (
-                    <div
-                      key={a.id}
-                      className={`alert-history-item ${a.ativo ? "ativo" : "resolvido"}`}
-                    >
-                      <div className="ah-top">
-                        <span className={`alert ${a.nivel}`}>{a.mensagem}</span>
-                        {a.ativo ? (
-                          <span className="ah-badge">ATIVO</span>
-                        ) : (
-                          <span className="ah-badge resolvido">RESOLVIDO</span>
-                        )}
-                      </div>
-                      <div className="ah-meta">
-                        Início: {fmtDate(a.iniciadoEm)}
-                        {a.resolvidoEm ? ` · Fim: ${fmtDate(a.resolvidoEm)}` : ""}
-                        {` · Duração: ${dur}`}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </Section>
-
-          {!online && (
-            <p className="offline-info">
-              Últimos dados conhecidos. Última conexão: {fmtDate(c.ultimaConexao)}
-            </p>
-          )}
-        </>
-      )}
+  const cardClass = !online ? 'offline-card' : hasCritical ? 'critical-card' : hasWarn ? 'warn-card' : 'online-card'
+  const updateAvailable = release && c.agentVersion && release.version !== c.agentVersion
+  const inProgress = updateStatus && ['update_pending', 'update_downloading', 'update_validating', 'update_installing'].includes(updateStatus.status)
+  const genericActions = remoteActions.filter((a) => a.action !== 'system_maintenance')
+  const maintenanceActions = remoteActions.filter((a) => a.action === 'system_maintenance')
+  const serviceActions = genericActions.filter((a) => a.action === 'service_restart')
+  const remoteInProgress = remoteActions.some((a) => ['PENDING', 'DISPATCHED', 'RUNNING'].includes(a.status))
+  const serviceInProgress = serviceActions.some((a) => ['PENDING', 'DISPATCHED', 'RUNNING'].includes(a.status))
+  const maintenanceInProgress = maintenanceActions.some((a) => ['PENDING', 'DISPATCHED', 'RUNNING'].includes(a.status))
+  const tabs = [['summary', 'Resumo'], ['hardware', 'Hardware'], ['alerts', `Alertas${alerts.length ? ` (${alerts.length})` : ''}`], ['actions', 'Ações'], ['maintenance', 'Manutenção']]
+  const body = <>
+    <header className={`drawer-header ${cardClass}`}>
+      <div><span className="section-kicker">Detalhes do computador</span><h1>{c.hostname || '(sem nome)'}</h1><div className="drawer-meta"><span className={online ? 'online' : 'offline'}>{online ? '● Online' : '● Offline'}</span><span>{c.ip || 'IP não informado'}</span><span>Agent v{c.agentVersion || '?'}</span><span>Última comunicação: {fmtDate(c.ultimaConexao)}</span></div></div>
+      <button type="button" className="drawer-close" onClick={onClose || (() => window.history.back())} aria-label="Fechar detalhes">×</button>
+    </header>
+    {!serverOk && <p className="server-warn">Não foi possível atualizar os dados.</p>}
+    <nav className="detail-tabs" aria-label="Seções do computador">{tabs.map(([key, label]) => <button key={key} type="button" className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}</nav>
+    <div className="drawer-content">
+      {tab === 'summary' && <>
+        <div className="summary-metrics"><div><span>CPU</span><strong>{formatPercent(c.cpuUso)}</strong><MetricBar value={c.cpuUso} /></div><div><span>RAM</span><strong>{bytesToGB(c.ramUsada)} / {bytesToGB(c.ramTotal)}</strong><MetricBar value={ramPct} /></div><div><span>Disco C:</span><strong>{bytesToGB(c.discoLivre)} livres</strong><MetricBar value={discoPct} /></div></div>
+        <Section title="Estado atual"><Field label="Status">{online ? 'Online' : 'Offline'}</Field><Field label="Uptime">{formatUptime(c.uptime)}</Field><Field label="Usuário">{c.usuario || 'Não informado'}</Field><Field label="Device ID">{c.deviceId}</Field></Section>
+        <Section title="Histórico de métricas"><div className="period-selector">{['24h', '7d', '30d'].map((p) => <button key={p} type="button" className={periodo === p ? 'period-btn active' : 'period-btn'} onClick={() => setPeriodo(p)}>{p === '24h' ? '24 horas' : p === '7d' ? '7 dias' : '30 dias'}</button>)}</div><MetricChart title="CPU %" data={metricas} dataKey="cpuUso" color="#38bdf8" /><MetricChart title="RAM %" data={metricas} dataKey="ramUsoPct" color="#a78bfa" /><MetricChart title="Disco %" data={metricas} dataKey="discoUsoPct" color="#f59e0b" /></Section>
+      </>}
+      {tab === 'hardware' && <>
+        <Section title="Sistema"><Field label="Sistema">{sistemaLabel(c.sistema)}</Field><Field label="Release">{c.sistemaRelease}</Field><Field label="Arquitetura">{c.arquitetura}</Field><Field label="Build Windows">{c.sistemaBuild}</Field></Section>
+        <Section title="Processador"><Field label="Modelo">{c.processador}</Field><Field label="CPUs lógicas">{c.cpusLogicas}</Field><Field label="Fabricante">{c.fabricante}</Field><Field label="Modelo do equipamento">{c.modeloEquipamento}</Field></Section>
+        <Section title="Memória e armazenamento"><Field label="RAM total">{bytesToGB(c.ramTotal)}</Field><Field label="RAM usada">{bytesToGB(c.ramUsada)}</Field><Field label="Disco total">{bytesToGB(c.discoTotal)}</Field><Field label="Disco livre">{bytesToGB(c.discoLivre)}</Field></Section>
+        <Section title="Equipamento"><Field label="Número de série">{c.numeroSerie}</Field><Field label="GPU">{c.gpu}</Field><Field label="MAC">{c.mac}</Field><Field label="Placa-mãe">{[c.placaMaeFabricante, c.placaMaeModelo].filter(Boolean).join(' / ')}</Field><Field label="BIOS">{[c.biosFabricante, c.biosVersao].filter(Boolean).join(' / ')}</Field></Section>
+        <Section title="Discos físicos">{c.discosFisicos?.length ? c.discosFisicos.map((d, i) => <div className="inventory-row" key={d.id || i}><strong>Disco {i + 1}</strong><span>{d.modelo || 'Modelo não informado'} · {d.tamanho != null ? bytesToGB(d.tamanho) : 'Capacidade não informada'} · {d.interface || 'Interface não informada'}</span></div>) : <div className="muted">Nenhum disco físico informado.</div>}</Section>
+        <Section title="Agent"><Field label="Versão instalada">v{c.agentVersion || 'desconhecida'}</Field>{release && <Field label="Versão disponível">v{release.version}</Field>}{release && !updateAvailable && <div className="update-ok">✓ Agent atualizado (v{release.version})</div>}{updateStatus && <div className={`update-status ${updateStatus.status === 'update_failed' ? 'failed' : updateStatus.status === 'update_success' ? 'ok' : 'running'}`}>{updateStatus.status}{updateStatus.message ? ` — ${updateStatus.message}` : ''}</div>}{release && updateAvailable && online && !inProgress && <button type="button" className="btn-update" onClick={() => setConfirm(true)}>Atualizar Agent</button>}{!online && updateAvailable && <div className="muted">Computador offline: não é possível atualizar agora.</div>}{confirm && <ConfirmBox onCancel={() => setConfirm(false)} onConfirm={triggerUpdate} confirmLabel="Atualizar">Atualizar o Agent da máquina <strong>{c.hostname}</strong> para v{release.version}?</ConfirmBox>}</Section>
+      </>}
+      {tab === 'alerts' && <><Section title="Alertas ativos">{alerts.length ? alerts.map((a, i) => <div key={i} className={`alert ${a.severity}`}>⚠ {a.msg}</div>) : <div className="muted">Nenhum alerta ativo.</div>}</Section><Section title="Histórico de alertas">{alertas.length ? <div className="alert-history">{alertas.map((a) => { const end = a.resolvidoEm ? new Date(a.resolvidoEm) : new Date(); const minutes = Math.max(0, Math.floor((end - new Date(a.iniciadoEm)) / 60000)); const duration = minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`; return <div key={a.id} className={`alert-history-item ${a.ativo ? 'ativo' : 'resolvido'}`}><div className="ah-top"><span className={`alert ${a.nivel}`}>{a.mensagem}</span><span className="ah-badge">{a.ativo ? 'ATIVO' : 'RESOLVIDO'}</span></div><div className="ah-meta">Início: {fmtDate(a.iniciadoEm)}{a.resolvidoEm ? ` · Fim: ${fmtDate(a.resolvidoEm)}` : ''} · Duração: {duration}</div></div> })}</div> : <div className="muted">Nenhum alerta registrado para este equipamento.</div>}</Section></>}
+      {tab === 'actions' && <><Section title="Ações remotas"><div className="action-toolbar"><span className="muted">Ações genéricas, incluindo serviços do Windows.</span>{online && !remoteInProgress && <button type="button" className="btn-update" onClick={() => setSpoolerConfirm(true)}>Reiniciar spooler</button>}{!online && <span className="muted">Computador offline: ação remota indisponível.</span>}</div>{spoolerConfirm && <ConfirmBox onCancel={() => setSpoolerConfirm(false)} onConfirm={triggerSpoolerReset} confirmLabel="Reiniciar">Reiniciar o spooler de impressão de <strong>{c.hostname}</strong>?</ConfirmBox>}{serviceRestartError && <div className="update-status failed">{serviceRestartError}</div>}{online && !serviceInProgress && <button type="button" className="btn-update" onClick={() => setServiceRestartConfirm(true)}>Reiniciar serviço Spooler</button>}{serviceRestartConfirm && <ConfirmBox onCancel={() => setServiceRestartConfirm(false)} onConfirm={triggerServiceRestart} confirmLabel="Reiniciar serviço">Reiniciar o serviço Spooler de <strong>{c.hostname}</strong>?</ConfirmBox>}{genericActions.length ? <div className="action-list">{genericActions.map((a) => <ActionItem key={a.actionExecutionId} action={a} />)}</div> : <div className="muted">Nenhuma ação remota registrada.</div>}</Section></>}
+      {tab === 'maintenance' && <Section title="Manutenção do sistema"><div className="action-toolbar"><span className="muted">Histórico de system_maintenance.</span>{online && !maintenanceInProgress && <button type="button" className="btn-update" onClick={() => setSystemMaintenanceConfirm(true)}>Executar manutenção</button>}{!online && <span className="muted">Computador offline: ação remota indisponível.</span>}</div>{systemMaintenanceError && <div className="update-status failed">{systemMaintenanceError}</div>}{systemMaintenanceConfirm && <ConfirmBox onCancel={() => setSystemMaintenanceConfirm(false)} onConfirm={triggerSystemMaintenance} confirmLabel="Executar manutenção">Executar a manutenção preventiva do Windows na máquina <strong>{c.hostname}</strong>?</ConfirmBox>}{maintenanceActions.length ? <div className="action-list">{maintenanceActions.map((action) => <details className="action-item" key={action.actionExecutionId}><summary><span><strong>{fmtDate(action.solicitadaEm)}</strong><small>{action.mensagem || 'Manutenção do sistema'}</small></span><StatusTag status={action.status} /></summary><div className="maintenance-result">{action.resultado?.overallStatus && <Field label="Resultado">{action.resultado.overallStatus}</Field>}{action.resultado?.rebootRecommended != null && <Field label="Reinicialização recomendada">{action.resultado.rebootRecommended ? 'Sim' : 'Não'}</Field>}{action.resultado?.steps?.length ? action.resultado.steps.map((step) => <div className="maintenance-step" key={step.key}><span>{({ temp_cleanup: 'Temporários', sfc: 'SFC', dism: 'DISM', dns_flush: 'DNS' }[step.key] || step.key)}</span><StatusTag status={step.status} /><small>{step.durationMs != null ? `${step.durationMs} ms` : 'Sem duração informada'}</small></div>) : <div className="muted">Resultado detalhado não disponível.</div>}</div></details>)}</div> : <div className="muted">Nenhuma execução de manutenção registrada.</div>}</Section>}
     </div>
-  )
+  </>
+
+  if (drawer) return <div className="drawer-backdrop" onClick={onClose}><aside className="details-drawer" onClick={(event) => event.stopPropagation()}>{body}</aside></div>
+  return <div className="container"><SiteNav /><Link className="back-link" to="/">← Voltar ao Dashboard</Link><div className="detail-page">{body}</div></div>
 }

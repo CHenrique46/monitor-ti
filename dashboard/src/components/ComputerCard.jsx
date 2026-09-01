@@ -2,9 +2,7 @@ import { Link } from "react-router-dom";
 import { computeAlerts } from "../utils/alerts";
 import {
   bytesToGB,
-  formatUptime,
   formatPercent,
-  sistemaLabel,
   fmtDate
 } from "../utils/formatters";
 
@@ -18,7 +16,7 @@ function MetricBar({ value }) {
   );
 }
 
-export default function ComputerCard({ c, latestVersion }) {
+export default function ComputerCard({ c, latestVersion, onOpen }) {
   const online = c.status === "online";
   const { alerts } = computeAlerts(c);
   const updateAvailable =
@@ -43,64 +41,33 @@ export default function ComputerCard({ c, latestVersion }) {
     ? "warn-card"
     : "online-card";
 
+  const openDetails = () => onOpen?.(c.id);
+
   return (
-    <div className={`card ${cardClass}`}>
+    <article
+      className={`card compact-card ${cardClass}`}
+      onClick={openDetails}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") openDetails();
+      }}
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+    >
       <div className="hostname">{c.hostname || "(sem nome)"}</div>
-      <div className="sub">
-        Usuário: {c.usuario || "-"} | IP: {c.ip || "-"} | Sistema:{" "}
-        {sistemaLabel(c.sistema)}
-      </div>
-      <div>
-        Status:{" "}
-        <span className={online ? "online" : "offline"}>
+      <div className="card-status-row">
+        <span className={online ? "status-pill online" : "status-pill offline"}>
           {online ? "Online" : "Offline"}
         </span>
+        <span className="card-ip">{c.ip || "IP não informado"}</span>
       </div>
 
-      {alerts.length > 0 && (
-        <div className="alerts">
-          {alerts.map((a, i) => (
-            <div key={i} className={`alert ${a.severity}`}>
-              ⚠ {a.msg}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!online && (
-        <div className="offline-info">
-          Últimos dados conhecidos. Última conexão: {fmtDate(c.ultimaConexao)}
-        </div>
-      )}
-
-      <div className="metric">
-        <div className="metric-label">CPU</div>
-        <div className="metric-value">{formatPercent(c.cpuUso)}</div>
-        <MetricBar value={c.cpuUso || 0} />
+      <div className="card-metrics">
+        <div className="card-metric"><span>CPU</span><strong>{formatPercent(c.cpuUso)}</strong><MetricBar value={c.cpuUso || 0} /></div>
+        <div className="card-metric"><span>RAM</span><strong>{formatPercent(ramPct)}</strong><MetricBar value={ramPct || 0} /></div>
+        <div className="card-metric"><span>Disco</span><strong>{formatPercent(discoPct)} usado</strong><MetricBar value={discoPct || 0} /></div>
       </div>
 
-      <div className="metric">
-        <div className="metric-label">RAM</div>
-        <div className="metric-value">
-          {bytesToGB(c.ramUsada)} / {bytesToGB(c.ramTotal)} (
-          {formatPercent(ramPct)})
-        </div>
-        <MetricBar value={ramPct || 0} />
-      </div>
-
-      <div className="metric">
-        <div className="metric-label">Disco C:</div>
-        <div className="metric-value">
-          {bytesToGB(c.discoLivre)} livres de {bytesToGB(c.discoTotal)} (
-          {formatPercent(discoPct)} usado)
-        </div>
-        <MetricBar value={discoPct || 0} />
-      </div>
-
-      <div className="metric">
-        <div className="metric-label">Ligado há</div>
-        <div className="metric-value">{formatUptime(c.uptime)}</div>
-      </div>
+      {alerts.length > 0 && <div className="card-alert-summary">⚠ {alerts.length} alerta{alerts.length > 1 ? "s" : ""}</div>}
 
       <div className="agent-line">
         <span className="agent-version">
@@ -114,15 +81,14 @@ export default function ComputerCard({ c, latestVersion }) {
       </div>
 
       <div className="card-actions">
-        <Link className="details-link" to={`/computadores/${c.id}`}>
-          Ver detalhes
-        </Link>
+        {onOpen ? <button type="button" className="details-link" onClick={(event) => { event.stopPropagation(); openDetails(); }}>Ver detalhes</button> : <Link className="details-link" to={`/computadores/${c.id}`}>Ver detalhes</Link>}
         {updateAvailable && online && (
-          <Link className="btn-update" to={`/computadores/${c.id}`}>
+          <Link className="btn-update" onClick={(event) => event.stopPropagation()} to={`/computadores/${c.id}`}>
             Atualizar
           </Link>
         )}
       </div>
-    </div>
+      {!online && <div className="card-last-seen">Última comunicação: {fmtDate(c.ultimaConexao)}</div>}
+    </article>
   );
 }
