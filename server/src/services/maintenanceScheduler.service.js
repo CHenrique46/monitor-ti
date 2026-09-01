@@ -1,5 +1,6 @@
 const prisma = require("../prisma");
 const remoteActionsService = require("./remoteActions.service");
+const { refreshScheduleRun } = require("./remoteActions.service");
 const agentServer = require("../ws/agentServer");
 const { logEvent } = require("../logger");
 
@@ -337,8 +338,8 @@ function createMaintenanceScheduler({ db = prisma, remoteActions = remoteActions
         log(`[Monitor TI] scheduler dispatch failed computadorId=${machine.id} erro=${error.message}`);
       }
     }
-    const status = failed > 0 ? (dispatched > 0 ? "PARTIAL" : "FAILED") : "COMPLETED";
-    await db.maintenanceScheduleRun.update({ where: { id: run.id }, data: { finishedAt: new Date(), status, targetCount: plan.targetCount, dispatchedCount: dispatched, skippedCount: skipped, failedCount: failed } });
+    await db.maintenanceScheduleRun.update({ where: { id: run.id }, data: { targetCount: plan.targetCount, skippedCount: skipped, failedCount: failed } });
+    await refreshScheduleRun(db, run.id);
     return { duplicate: false, dispatched, failed, skipped };
   }
 

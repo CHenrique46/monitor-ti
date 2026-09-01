@@ -5,6 +5,8 @@ const {
   createRemoteActionsService,
   recoverOrphanedExecutions,
   ORPHAN_MESSAGE,
+  refreshScheduleRun,
+  TRANSIENT_STATUSES,
   MAX_RESULT_BYTES,
   sanitizeJsonValue,
   findProblematicJsonCharacters
@@ -595,4 +597,159 @@ test("orphan FAILED reconciliado com FAILED real preserva resultado sanitizado",
   assert.equal(record.mensagem, "Falha real na etapa DISM:\uD800");
   assert.equal(record.resultado.steps[0].message, "erro:\uFFFD");
   assert.notEqual(record.erro, ORPHAN_MESSAGE);
+});
+
+function makeScheduleRecord(status, overrides = {}) {
+  return {
+    id: 20,
+    actionExecutionId: `schedule-${status.toLowerCase()}`,
+    computadorId: 15,
+    action: "system_maintenance",
+    status,
+    mensagem: status === "FAILED" ? ORPHAN_MESSAGE : null,
+    erro: status === "FAILED" ? ORPHAN_MESSAGE : null,
+    resultado: null,
+    concluidaEm: ["SUCCESS", "FAILED", "REJECTED"].includes(status) ? new Date() : null,
+    scheduleRunId: 30,
+    computador: { deviceId: "dev-15" },
+    ...overrides
+  };
+}
+
+function makeScheduleRunDb(records, targetCount = records.length) {
+  const run = {
+    id: 30,
+    scheduleId: 1,
+    scheduledFor: new Date("2026-09-03T23:00:00.000Z"),
+    startedAt: new Date(),
+    finishedAt: null,
+    status: "RUNNING",
+    targetCount,
+    dispatchedCount: 0,
+    skippedCount: Math.max(0, targetCount - records.length),
+    failedCount: 0
+  };
+  const db = {
+    acaoRemotaExecucao: {
+      findMany: async ({ where }) => records.filter((record) => where.status.in.includes(record.status) && record.scheduleRunId === (where.scheduleRunId && where.scheduleRunId.not !== undefined ? record.scheduleRunId : where.scheduleRunId)),
+      findUnique: async () => records[0] || null,
+      update: async ({ data }) => Object.assign(records[0], data),
+      updateMany: async ({ data }) => {
+        let count = 0;
+        for (const record of records) {
+          if (!TRANSIENT_STATUSES.includes(record.status)) continue;
+          Object.assign(record, data);
+          count += 1;
+        }
+        return { count };
+      }
+    },
+    maintenanceScheduleRun: {
+      findUnique: async () => ({ ...run, executions: records.map((record) => ({ status: record.status })) }),
+      update: async ({ data }) => Object.assign(run, data)
+    }
+  };
+  return { db, run };
+}
+
+test("reconciliation não reabre FAILED sintético com RUNNING", async () => {
+  const record = makeScheduleRecord("FAILED");
+  const { db, run } = makeScheduleRunDb([record]);
+  const result = await createRemoteActionsService(db).reconcileAgentStatusMessage({
+    actionExecutionId: record.actionExecutionId,
+    deviceId: "dev-15",
+    action: "system_maintenance",
+    status: "RUNNING"
+  });
+  assert.equal(result.accepted, false);
+  assert.equal(result.reason, "terminal_state_cannot_reopen");
+  assert.equal(record.status, "FAILED");
+  assert.ok(record.concluidaEm);
+  assert.equal(run.status, "RUNNING");
+});
+
+test("FAILED sintético aceita SUCCESS e recalcula run", async () => {
+  const record = makeScheduleRecord("FAILED");
+  const { db, run } = makeScheduleRunDb([record], 1);
+  const result = await createRemoteActionsService(db).reconcileAgentStatusMessage({
+    actionExecutionId: record.actionExecutionId,
+    deviceId: "dev-15",
+    action: "system_maintenance",
+    status: "SUCCESS",
+    result: { overallStatus: "SUCCESS", steps: [] }
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(record.status, "SUCCESS");
+  assert.deepEqual(record.resultado, { overallStatus: "SUCCESS", steps: [] });
+  assert.equal(run.status, "COMPLETED");
+});
+
+test("FAILED sintético aceita FAILED terminal real", async () => {
+  const record = makeScheduleRecord("FAILED");
+  const { db } = makeScheduleRunDb([record]);
+  const result = await createRemoteActionsService(db).reconcileAgentStatusMessage({
+    actionExecutionId: record.actionExecutionId,
+    deviceId: "dev-15",
+    action: "system_maintenance",
+    status: "FAILED",
+    error: "falha real",
+    result: { overallStatus: "FAILED", steps: [] }
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(record.status, "FAILED");
+  assert.equal(record.erro, "falha real");
+});
+
+test("estados terminais SUCCESS e REJECTED não são reabertos por RUNNING", async () => {
+  for (const status of ["SUCCESS", "REJECTED"]) {
+    const record = makeScheduleRecord(status, { actionExecutionId: `terminal-${status}` });
+    const { db } = makeScheduleRunDb([record]);
+    const result = await createRemoteActionsService(db).reconcileAgentStatusMessage({
+      actionExecutionId: record.actionExecutionId,
+      deviceId: "dev-15",
+      action: "system_maintenance",
+      status: "RUNNING"
+    });
+    assert.equal(result.accepted, false);
+    assert.equal(result.reason, "terminal_conflict");
+    assert.equal(record.status, status);
+  }
+});
+
+test("RUNNING limpa concluidaEm e refresh de run mantém RUNNING", async () => {
+  const record = makeScheduleRecord("DISPATCHED", { concluidaEm: new Date() });
+  const { db, run } = makeScheduleRunDb([record]);
+  const service = createRemoteActionsService(db);
+  const state = await service.applyAgentStatusMessage({ actionExecutionId: record.actionExecutionId, status: "RUNNING" });
+  assert.equal(state.status, "RUNNING");
+  assert.equal(record.concluidaEm, null);
+  await refreshScheduleRun(db, run.id);
+  assert.equal(run.status, "RUNNING");
+  assert.equal(run.finishedAt, null);
+});
+
+test("refreshScheduleRun calcula terminal, partial e é idempotente", async () => {
+  const success = makeScheduleRecord("SUCCESS", { actionExecutionId: "multi-success" });
+  const failed = makeScheduleRecord("FAILED", { actionExecutionId: "multi-failed", mensagem: "falha real", erro: "falha real" });
+  const { db, run } = makeScheduleRunDb([success, failed], 2);
+  await refreshScheduleRun(db, run.id);
+  assert.equal(run.status, "PARTIAL");
+  assert.equal(run.dispatchedCount, 2);
+  assert.equal(run.failedCount, 1);
+  const firstFinishedAt = run.finishedAt;
+  await refreshScheduleRun(db, run.id);
+  assert.equal(run.status, "PARTIAL");
+  assert.equal(run.dispatchedCount, 2);
+  assert.equal(run.failedCount, 1);
+  assert.equal(run.finishedAt, firstFinishedAt);
+});
+
+test("recovery de ação vinculada recalcula o schedule run", async () => {
+  const record = makeScheduleRecord("RUNNING");
+  const { db, run } = makeScheduleRunDb([record], 1);
+  const count = await recoverOrphanedExecutions(db);
+  assert.equal(count, 1);
+  assert.equal(record.status, "FAILED");
+  assert.equal(run.status, "FAILED");
+  assert.ok(run.finishedAt);
 });

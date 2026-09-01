@@ -61,6 +61,7 @@ function makeCycleScheduler({ schedule = { ...baseSchedule, enabled: false, targ
         state.runs.push(run);
         return run;
       },
+      findUnique: async () => ({ ...state.runs[0], executions: state.actions.map((action) => ({ status: action.status })) }),
       update: async ({ data }) => Object.assign(state.runs[0], data)
     }
   };
@@ -200,6 +201,7 @@ test("ciclo controlado real cria run e ação idempotentes", async () => {
   assert.equal(state.actions[0].action, "system_maintenance");
   assert.equal(state.actions[0].scheduleRunId, state.runs[0].id);
   assert.equal(state.dispatches.length, 1);
+  assert.equal(state.runs[0].status, "RUNNING");
 });
 
 test("ciclo controlado valida identificador e scheduledFor", async () => {

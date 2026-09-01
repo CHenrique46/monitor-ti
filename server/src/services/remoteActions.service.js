@@ -152,7 +152,46 @@ function validateResult(result) {
   }
 }
 
+async function refreshScheduleRun(db, scheduleRunId) {
+  if (!scheduleRunId || !db.maintenanceScheduleRun || typeof db.maintenanceScheduleRun.findUnique !== "function") return null;
+  const run = await db.maintenanceScheduleRun.findUnique({
+    where: { id: Number(scheduleRunId) },
+    include: { executions: { select: { status: true } } }
+  });
+  if (!run) return null;
+
+  const executions = run.executions || [];
+  const hasTransient = executions.some((execution) => !FINAL_STATUSES.has(execution.status));
+  const failedCount = executions.filter((execution) => ["FAILED", "REJECTED"].includes(execution.status)).length;
+  const successCount = executions.filter((execution) => execution.status === "SUCCESS").length;
+  const skippedCount = Number(run.skippedCount) || 0;
+  const targetCount = Number(run.targetCount) || 0;
+  const allTargetsAccounted = executions.length + skippedCount >= targetCount;
+  let status = "RUNNING";
+  if (!hasTransient && allTargetsAccounted) {
+    if (failedCount && (successCount || skippedCount)) status = "PARTIAL";
+    else if (failedCount) status = "FAILED";
+    else status = "COMPLETED";
+  }
+
+  return db.maintenanceScheduleRun.update({
+    where: { id: run.id },
+    data: {
+      status,
+      finishedAt: status === "RUNNING" ? null : (run.finishedAt || new Date()),
+      dispatchedCount: executions.length,
+      failedCount
+    }
+  });
+}
+
 async function recoverOrphanedExecutions(db = prisma) {
+  const affectedRuns = typeof db.acaoRemotaExecucao.findMany === "function"
+    ? await db.acaoRemotaExecucao.findMany({
+      where: { status: { in: TRANSIENT_STATUSES }, scheduleRunId: { not: null } },
+      select: { scheduleRunId: true }
+    })
+    : [];
   const result = await db.acaoRemotaExecucao.updateMany({
     where: { status: { in: TRANSIENT_STATUSES } },
     data: {
@@ -162,6 +201,8 @@ async function recoverOrphanedExecutions(db = prisma) {
       erro: ORPHAN_MESSAGE
     }
   });
+  const runIds = new Set(affectedRuns.map((item) => item.scheduleRunId).filter(Boolean));
+  for (const runId of runIds) await refreshScheduleRun(db, runId);
   return result.count || 0;
 }
 
@@ -213,6 +254,7 @@ function createRemoteActionsService(db = prisma) {
       data: {
         status: "DISPATCHED",
         enviadaEm: new Date(),
+        concluidaEm: null,
         mensagem: "Solicitacao enviada ao agent."
       }
     });
@@ -245,12 +287,12 @@ function createRemoteActionsService(db = prisma) {
 
     if (msg.deviceId && execution.computador && execution.computador.deviceId !== msg.deviceId) return null;
     if (msg.action && normalizeAction(msg.action) !== normalizeAction(execution.action)) return null;
-    if (FINAL_STATUSES.has(execution.status) && !(allowOrphanRecovery && execution.status === "FAILED" && execution.erro === ORPHAN_MESSAGE)) {
-      return mapExecution(execution);
-    }
-
     const status = String(msg.status || "").trim().toUpperCase();
     if (!["RUNNING", "SUCCESS", "FAILED", "REJECTED"].includes(status)) return mapExecution(execution);
+    const orphanRecovery = execution.status === "FAILED" && execution.erro === ORPHAN_MESSAGE;
+    if (FINAL_STATUSES.has(execution.status) && !(allowOrphanRecovery && orphanRecovery && FINAL_STATUSES.has(status))) {
+      return mapExecution(execution);
+    }
 
     const data = {
       status,
@@ -260,6 +302,7 @@ function createRemoteActionsService(db = prisma) {
 
     if (status === "RUNNING") {
       data.iniciadaEm = execution.iniciadaEm || new Date();
+      data.concluidaEm = null;
     }
     if (status === "SUCCESS" || status === "FAILED" || status === "REJECTED") {
       data.concluidaEm = new Date();
@@ -279,6 +322,7 @@ function createRemoteActionsService(db = prisma) {
       where: { actionExecutionId: execution.actionExecutionId },
       data
     });
+    if (FINAL_STATUSES.has(status)) await refreshScheduleRun(db, updated.scheduleRunId);
     return mapExecution(updated);
   }
 
@@ -307,6 +351,14 @@ function createRemoteActionsService(db = prisma) {
       return { accepted: false, reason: "invalid_status", execution: mapExecution(execution), error: "status inválido." };
     }
     const orphanRecovery = execution.status === "FAILED" && execution.erro === ORPHAN_MESSAGE;
+    if (orphanRecovery && status === "RUNNING") {
+      return {
+        accepted: false,
+        reason: "terminal_state_cannot_reopen",
+        execution: mapExecution(execution),
+        error: "Estado terminal de recovery não pode ser reaberto."
+      };
+    }
     if (FINAL_STATUSES.has(execution.status) && !orphanRecovery) {
       return {
         accepted: false,
@@ -354,6 +406,7 @@ module.exports = {
   SERVICE_ALLOWLIST,
   createRemoteActionsService,
   recoverOrphanedExecutions,
+  refreshScheduleRun,
   validateResult,
   sanitizeJsonValue,
   findProblematicJsonCharacters,
