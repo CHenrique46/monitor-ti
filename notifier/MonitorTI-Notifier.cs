@@ -1265,16 +1265,6 @@ namespace MonitorTI
                 Location = new Point(76, 30)
             };
 
-            var titleLabel = new Label
-            {
-                Text = Sanitize(this._payload.title),
-                Font = new Font("Segoe UI", 14, FontStyle.Bold),
-                ForeColor = Color.FromArgb(242, 247, 252),
-                AutoSize = true,
-                MaximumSize = new Size(contentWidth - 32, 0),
-                Location = new Point(32, 64)
-            };
-
             Color levelColor = Color.FromArgb(84, 205, 231);
             string levelText = "INFORMATIVO";
             if (!string.IsNullOrEmpty(this._payload.level))
@@ -1292,8 +1282,19 @@ namespace MonitorTI
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Size = new Size(108, 22),
-                Location = new Point(32, titleLabel.Bottom + 22)
+                Location = new Point(32, 64)
             };
+
+            var titleLabel = new Label
+            {
+                Text = Sanitize(this._payload.title),
+                Font = new Font("Segoe UI", 14, FontStyle.Bold),
+                ForeColor = Color.FromArgb(242, 247, 252),
+                AutoSize = false,
+                Width = contentWidth - 32,
+                Location = new Point(32, levelLabel.Bottom + 10)
+            };
+            titleLabel.Height = Math.Max(24, MeasureTextHeight(titleLabel.Text, titleLabel.Font, titleLabel.Width) + 2);
 
             var messageLabel = new Label
             {
@@ -1307,7 +1308,7 @@ namespace MonitorTI
                 TabStop = false
             };
 
-            int messageTop = levelLabel.Bottom + 16;
+            int messageTop = titleLabel.Bottom + 24;
             int reserved = messageTop + 74;
             int availForMsg = MAX_FORM_HEIGHT - reserved;
             int measuredMessageHeight = MeasureTextHeight(messageLabel.Text, messageLabel.Font, messageLabel.Width);
@@ -1331,14 +1332,14 @@ namespace MonitorTI
                 Font = new Font("Segoe UI", 9),
                 ForeColor = Color.FromArgb(137, 159, 184),
                 AutoSize = true,
-                Location = new Point(16, messagePanel.Bottom + 10)
+                Location = new Point(22, messagePanel.Bottom + 8)
             };
 
             var button = new Button
             {
                 Text = "ENTENDI",
-                Width = 124,
-                Height = 36,
+                Width = 120,
+                Height = 34,
                 BackColor = Color.FromArgb(31, 105, 174),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -1360,15 +1361,15 @@ namespace MonitorTI
                 this.Close();
             };
 
-            int formHeight = messagePanel.Bottom + 10 + 20 + 16 + button.Height + 16;
+            int formHeight = messagePanel.Bottom + 6 + 18 + 10 + button.Height + 14;
             if (formHeight > MAX_FORM_HEIGHT)
             {
                 int overflow = formHeight - MAX_FORM_HEIGHT;
                 messagePanel.Height = Math.Max(78, messagePanel.Height - overflow);
                 formHeight = MAX_FORM_HEIGHT;
             }
-            button.Location = new Point(FORM_WIDTH - 16 - button.Width, formHeight - 16 - button.Height);
-            dateLabel.Location = new Point(16, button.Top + (button.Height - dateLabel.Height) / 2);
+            button.Location = new Point(FORM_WIDTH - 22 - button.Width, formHeight - 14 - button.Height);
+            dateLabel.Location = new Point(22, button.Top + (button.Height - dateLabel.Height) / 2);
 
             this.ClientSize = new Size(FORM_WIDTH, formHeight);
             this.Controls.Add(accent);
