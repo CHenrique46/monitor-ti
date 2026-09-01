@@ -1,6 +1,14 @@
-import { NavLink, Link } from 'react-router-dom'
+import { NavLink, Link, useLocation } from 'react-router-dom'
+
+const navigationItems = [
+  { key: 'overview', to: '/', label: 'Visão Geral', end: true },
+  { key: 'alerts', to: '/avisos', label: 'Avisos' },
+  { key: 'maintenance', to: '/manutencao-programada', label: 'Manutenção Programada' }
+]
 
 export default function SiteNav() {
+  const location = useLocation()
+
   return (
     <header className="site-header">
       <Link className="site-brand" to="/" aria-label="HenriTech Control">
@@ -11,15 +19,24 @@ export default function SiteNav() {
         </span>
       </Link>
       <nav className="site-nav" aria-label="Navegação principal">
-        <NavLink to="/" end className={({ isActive }) => (isActive ? 'site-nav-link active' : 'site-nav-link')}>
-          Computadores
-        </NavLink>
-        <NavLink to="/avisos" className={({ isActive }) => (isActive ? 'site-nav-link active' : 'site-nav-link')}>
-          Avisos
-        </NavLink>
-        <NavLink to="/manutencao-programada" className={({ isActive }) => (isActive ? 'site-nav-link active' : 'site-nav-link')}>
-          Manutenção programada
-        </NavLink>
+        {navigationItems.map((item) => (
+          <NavLink
+            key={item.key}
+            to={item.to}
+            end={item.end}
+            className={({ isActive }) => {
+              const overviewActive = item.key === 'overview' && location.pathname.startsWith('/computadores/')
+              return isActive || overviewActive ? 'site-nav-link active' : 'site-nav-link'
+            }}
+            aria-current={
+              item.key === 'overview' && (location.pathname === '/' || location.pathname.startsWith('/computadores/'))
+                ? 'page'
+                : undefined
+            }
+          >
+            {item.label}
+          </NavLink>
+        ))}
       </nav>
     </header>
   )
