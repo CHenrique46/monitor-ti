@@ -11,6 +11,7 @@ const agentRoutes = require("./routes/agent.routes");
 const avisosRoutes = require("./routes/avisos.routes");
 const remoteActionsRoutes = require("./routes/remoteActions.routes");
 const maintenanceSchedulerRoutes = require("./routes/maintenanceScheduler.routes");
+const maintenanceSchedulerCanaryRoutes = require("./routes/maintenanceSchedulerCanary.routes");
 const { setupWebSocket } = require("./ws/agentServer");
 const prisma = require("./prisma");
 const { logEvent } = require("./logger");
@@ -33,6 +34,7 @@ app.use("/api/agent", agentRoutes);
 app.use("/api/avisos", avisosRoutes);
 app.use("/api/computadores", remoteActionsRoutes);
 app.use("/api/maintenance-schedules", maintenanceSchedulerRoutes);
+app.use("/internal/maintenance-scheduler/canary", maintenanceSchedulerCanaryRoutes);
 
 const DIST_DIR = path.join(__dirname, "..", "..", "dashboard", "dist");
 
