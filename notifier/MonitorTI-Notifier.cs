@@ -1210,8 +1210,8 @@ namespace MonitorTI
             this.StartPosition = FormStartPosition.CenterScreen;
             this.TopMost = true;
             this.ShowInTaskbar = true;
-            this.Text = Sanitize(this._payload.title);
-            this.BackColor = Color.FromArgb(245, 248, 252);
+            this.Text = "HenriTech Control";
+            this.BackColor = Color.FromArgb(10, 22, 40);
             this.Padding = new Padding(16);
             this.FormClosing += (s, e) =>
             {
@@ -1226,47 +1226,72 @@ namespace MonitorTI
 
             var accent = new Panel
             {
-                BackColor = Color.FromArgb(20, 184, 166),
+                BackColor = Color.FromArgb(48, 205, 218),
                 Location = new Point(16, 14),
-                Size = new Size(5, 72)
+                Size = new Size(4, 62)
             };
+
+            var brandMark = new Panel
+            {
+                BackColor = Color.FromArgb(31, 91, 155),
+                Location = new Point(32, 16),
+                Size = new Size(32, 28)
+            };
+            var markLabel = new Label
+            {
+                Text = "HT",
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                ForeColor = Color.White,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Fill
+            };
+            brandMark.Controls.Add(markLabel);
 
             var brandLabel = new Label
             {
-                Text = "HENRITECH CONTROL  /  CENTRAL DE AVISOS",
+                Text = "HENRITECH CONTROL",
                 Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                ForeColor = Color.FromArgb(20, 120, 126),
+                ForeColor = Color.FromArgb(91, 174, 255),
                 AutoSize = true,
-                Location = new Point(32, 16)
+                Location = new Point(76, 14)
+            };
+            var brandSubtitle = new Label
+            {
+                Text = "Monitoramento e Gerenciamento de TI",
+                Font = new Font("Segoe UI", 8),
+                ForeColor = Color.FromArgb(157, 174, 196),
+                AutoSize = true,
+                Location = new Point(76, 30)
             };
 
             var titleLabel = new Label
             {
                 Text = Sanitize(this._payload.title),
                 Font = new Font("Segoe UI", 14, FontStyle.Bold),
-                ForeColor = Color.FromArgb(22, 39, 63),
+                ForeColor = Color.FromArgb(242, 247, 252),
                 AutoSize = true,
-                MaximumSize = new Size(contentWidth - 16, 0),
-                Location = new Point(32, 34)
+                MaximumSize = new Size(contentWidth - 32, 0),
+                Location = new Point(32, 64)
             };
 
-            Color levelColor = Color.FromArgb(20, 120, 126);
+            Color levelColor = Color.FromArgb(84, 205, 231);
             string levelText = "INFORMATIVO";
             if (!string.IsNullOrEmpty(this._payload.level))
             {
                 string l = this._payload.level.ToUpperInvariant();
-                if (l.Contains("URGENT")) { levelColor = Color.FromArgb(192, 0, 0); levelText = "URGENTE"; }
-                else if (l.Contains("IMPORT")) { levelColor = Color.FromArgb(197, 90, 0); levelText = "IMPORTANTE"; }
+                if (l.Contains("URGENT")) { levelColor = Color.FromArgb(255, 126, 126); levelText = "URGENTE"; }
+                else if (l.Contains("IMPORT")) { levelColor = Color.FromArgb(255, 190, 112); levelText = "IMPORTANTE"; }
             }
             var levelLabel = new Label
             {
                 Text = levelText,
-                Font = new Font("Segoe UI", 8, FontStyle.Bold),
+                Font = new Font("Segoe UI", 7, FontStyle.Bold),
                 ForeColor = levelColor,
-                BackColor = Color.FromArgb(232, 239, 246),
+                BackColor = Color.FromArgb(20, 45, 72),
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Size = new Size(116, 26),
+                Size = new Size(108, 22),
                 Location = new Point(32, titleLabel.Bottom + 22)
             };
 
@@ -1274,15 +1299,16 @@ namespace MonitorTI
             {
                 Text = Sanitize(this._payload.message),
                 AutoSize = false,
-                BackColor = Color.White,
-                ForeColor = Color.FromArgb(43, 58, 78),
+                BackColor = Color.FromArgb(20, 42, 68),
+                ForeColor = Color.FromArgb(232, 240, 248),
                 Font = new Font("Segoe UI", 10),
-                Location = new Point(14, 12),
-                Width = contentWidth - 28,
+                Location = new Point(16, 14),
+                Width = contentWidth - 32,
                 TabStop = false
             };
 
-            int reserved = 16 + titleLabel.Height + 10 + levelLabel.Height + 20 + 36 + 56;
+            int messageTop = levelLabel.Bottom + 16;
+            int reserved = messageTop + 74;
             int availForMsg = MAX_FORM_HEIGHT - reserved;
             int measuredMessageHeight = MeasureTextHeight(messageLabel.Text, messageLabel.Font, messageLabel.Width);
             int messageLabelHeight = Math.Max(30, measuredMessageHeight + 4);
@@ -1290,10 +1316,10 @@ namespace MonitorTI
             int messageHeight = Math.Max(54, Math.Min(messageLabel.Height + 24, Math.Max(54, availForMsg)));
             var messagePanel = new Panel
             {
-                BackColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle,
-                Location = new Point(16, levelLabel.Bottom + 18),
-                Size = new Size(contentWidth, messageHeight + 24),
+                BackColor = Color.FromArgb(20, 42, 68),
+                BorderStyle = BorderStyle.None,
+                Location = new Point(16, messageTop),
+                Size = new Size(contentWidth, messageHeight + 28),
                 TabStop = false
             };
             messagePanel.Controls.Add(messageLabel);
@@ -1301,9 +1327,9 @@ namespace MonitorTI
             string dateText = FormatDate(this._payload.scheduledAt) ?? FormatDate(this._payload.serverTime) ?? "";
             var dateLabel = new Label
             {
-                Text = string.IsNullOrEmpty(dateText) ? "" : "Agendado para: " + dateText,
+                Text = string.IsNullOrEmpty(dateText) ? "" : dateText,
                 Font = new Font("Segoe UI", 9),
-                ForeColor = Color.FromArgb(105, 122, 143),
+                ForeColor = Color.FromArgb(137, 159, 184),
                 AutoSize = true,
                 Location = new Point(16, messagePanel.Bottom + 10)
             };
@@ -1313,10 +1339,16 @@ namespace MonitorTI
                 Text = "ENTENDI",
                 Width = 124,
                 Height = 36,
-                BackColor = Color.FromArgb(22, 95, 138),
+                BackColor = Color.FromArgb(31, 105, 174),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                FlatAppearance = { BorderSize = 0 },
+                FlatAppearance =
+                {
+                    BorderSize = 1,
+                    BorderColor = Color.FromArgb(75, 166, 231),
+                    MouseOverBackColor = Color.FromArgb(43, 126, 198),
+                    MouseDownBackColor = Color.FromArgb(24, 81, 137)
+                },
                 Font = new Font("Segoe UI", 9, FontStyle.Bold),
                 TabIndex = 0
             };
@@ -1340,7 +1372,9 @@ namespace MonitorTI
 
             this.ClientSize = new Size(FORM_WIDTH, formHeight);
             this.Controls.Add(accent);
+            this.Controls.Add(brandMark);
             this.Controls.Add(brandLabel);
+            this.Controls.Add(brandSubtitle);
             this.Controls.Add(titleLabel);
             this.Controls.Add(levelLabel);
             this.Controls.Add(messagePanel);
