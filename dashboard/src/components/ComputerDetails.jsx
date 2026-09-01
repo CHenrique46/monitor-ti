@@ -5,6 +5,7 @@ import MetricChart from './MetricChart'
 import { computeAlerts } from '../utils/alerts'
 import { API_URL } from '../config'
 import { bytesToGB, formatUptime, formatPercent, sistemaLabel, fmtDate } from '../utils/formatters'
+import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from '../utils/uptime'
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
@@ -140,6 +141,8 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
 
   const online = c.status === 'online'
   const { alerts } = computeAlerts(c)
+  const uptimeStatus = getUptimeStatus(c.uptime)
+  const uptimeNeedsAttention = [UPTIME_STATUS.ATTENTION, UPTIME_STATUS.REBOOT_RECOMMENDED].includes(uptimeStatus)
   const ramPct = c.ramTotal && c.ramUsada != null ? Math.round((c.ramUsada / c.ramTotal) * 100) : null
   const discoPct = c.discoTotal && c.discoLivre != null ? Math.round(((c.discoTotal - c.discoLivre) / c.discoTotal) * 100) : null
   const hasCritical = alerts.some((a) => a.severity === 'critical')
@@ -164,7 +167,8 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
     <div className="drawer-content">
       {tab === 'summary' && <>
         <div className="summary-metrics"><div><span>CPU</span><strong>{formatPercent(c.cpuUso)}</strong><MetricBar value={c.cpuUso} /></div><div><span>RAM</span><strong>{bytesToGB(c.ramUsada)} / {bytesToGB(c.ramTotal)}</strong><MetricBar value={ramPct} /></div><div><span>Disco C:</span><strong>{bytesToGB(c.discoLivre)} livres</strong><MetricBar value={discoPct} /></div></div>
-        <Section title="Estado atual"><Field label="Status">{online ? 'Online' : 'Offline'}</Field><Field label="Uptime">{formatUptime(c.uptime)}</Field><Field label="Usuário">{c.usuario || 'Não informado'}</Field><Field label="Device ID">{c.deviceId}</Field></Section>
+        <Section title="Estado atual"><Field label="Status">{online ? 'Online' : 'Offline'}</Field><Field label={online ? 'Uptime atual' : 'Último uptime registrado'}>{formatUptime(c.uptime)}</Field><Field label="Status do uptime"><span className={`uptime-status ${uptimeStatus.toLowerCase()}`}>{uptimeStatusLabel(uptimeStatus)}</span></Field><Field label="Usuário">{c.usuario || 'Não informado'}</Field><Field label="Device ID">{c.deviceId}</Field></Section>
+        {uptimeNeedsAttention && <div className={`uptime-notice ${uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? 'recommended' : ''}`}><strong>{uptimeStatusLabel(uptimeStatus)}</strong><span>{online ? `Este computador está há ${formatUptime(c.uptime)} sem reiniciar.` : `Último uptime registrado: ${formatUptime(c.uptime)}. O valor não é incrementado enquanto offline.`}</span></div>}
         <Section title="Histórico de métricas"><div className="period-selector">{['24h', '7d', '30d'].map((p) => <button key={p} type="button" className={periodo === p ? 'period-btn active' : 'period-btn'} onClick={() => setPeriodo(p)}>{p === '24h' ? '24 horas' : p === '7d' ? '7 dias' : '30 dias'}</button>)}</div><MetricChart title="CPU %" data={metricas} dataKey="cpuUso" color="#38bdf8" /><MetricChart title="RAM %" data={metricas} dataKey="ramUsoPct" color="#a78bfa" /><MetricChart title="Disco %" data={metricas} dataKey="discoUsoPct" color="#f59e0b" /></Section>
       </>}
       {tab === 'hardware' && <>

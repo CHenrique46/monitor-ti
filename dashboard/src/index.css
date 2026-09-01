@@ -329,6 +329,43 @@ p {
   margin-top: 12px;
 }
 
+.card-attention {
+  align-items: center;
+  color: #fbbf24;
+  display: flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.card-attention span {
+  align-items: center;
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 50%;
+  display: inline-flex;
+  font-size: 0.68rem;
+  height: 17px;
+  justify-content: center;
+  width: 17px;
+}
+
+.card-attention.reboot { color: #fca5a5; }
+.card-attention.reboot span { background: rgba(239, 68, 68, 0.16); border-color: rgba(239, 68, 68, 0.45); }
+
+.card-uptime {
+  align-items: baseline;
+  color: #94a3b8;
+  display: flex;
+  font-size: 0.76rem;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.card-uptime strong { color: #cbd5e1; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.card-uptime small { color: #94a3b8; }
+
 .card-last-seen {
   color: #94a3b8;
   font-size: 0.78rem;
@@ -646,6 +683,29 @@ body {
   font-size: 1rem;
   font-variant-numeric: tabular-nums;
 }
+
+.uptime-status { font-weight: 700; }
+.uptime-status.normal { color: #86efac; }
+.uptime-status.attention { color: #fbbf24; }
+.uptime-status.reboot_recommended { color: #fca5a5; }
+.uptime-status.unknown { color: #94a3b8; }
+
+.uptime-notice {
+  align-items: flex-start;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+  color: #fbbf24;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 14px;
+  padding: 10px 12px;
+}
+
+.uptime-notice span { color: #cbd5e1; font-size: 0.86rem; }
+.uptime-notice.recommended { background: rgba(239, 68, 68, 0.08); border-left-color: #ef4444; color: #fca5a5; }
 
 .action-item {
   border-radius: 9px;

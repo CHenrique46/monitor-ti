@@ -3,8 +3,10 @@ import { computeAlerts } from "../utils/alerts";
 import {
   bytesToGB,
   formatPercent,
+  formatUptime,
   fmtDate
 } from "../utils/formatters";
+import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from "../utils/uptime";
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0));
@@ -19,6 +21,8 @@ function MetricBar({ value }) {
 export default function ComputerCard({ c, latestVersion, onOpen }) {
   const online = c.status === "online";
   const { alerts } = computeAlerts(c);
+  const uptimeStatus = getUptimeStatus(c.uptime);
+  const requiresAttention = alerts.length > 0 || [UPTIME_STATUS.ATTENTION, UPTIME_STATUS.REBOOT_RECOMMENDED].includes(uptimeStatus);
   const updateAvailable =
     latestVersion && c.agentVersion && latestVersion !== c.agentVersion;
 
@@ -60,6 +64,7 @@ export default function ComputerCard({ c, latestVersion, onOpen }) {
         </span>
         <span className="card-ip">{c.ip || "IP não informado"}</span>
       </div>
+      {requiresAttention && <div className={`card-attention ${uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? "reboot" : ""}`}><span aria-hidden="true">!</span>{uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? "Reinício recomendado" : uptimeStatus === UPTIME_STATUS.ATTENTION ? `Uptime: ${formatUptime(c.uptime)}` : "Requer atenção"}</div>}
 
       <div className="card-metrics">
         <div className="card-metric"><span>CPU</span><strong>{formatPercent(c.cpuUso)}</strong><MetricBar value={c.cpuUso || 0} /></div>
@@ -88,6 +93,7 @@ export default function ComputerCard({ c, latestVersion, onOpen }) {
           </Link>
         )}
       </div>
+      <div className="card-uptime"><span>{online ? "Uptime" : "Último uptime registrado"}</span><strong>{formatUptime(c.uptime)}</strong>{uptimeStatus !== UPTIME_STATUS.UNKNOWN && uptimeStatus !== UPTIME_STATUS.NORMAL && <small>{uptimeStatusLabel(uptimeStatus)}</small>}</div>
       {!online && <div className="card-last-seen">Última comunicação: {fmtDate(c.ultimaConexao)}</div>}
     </article>
   );

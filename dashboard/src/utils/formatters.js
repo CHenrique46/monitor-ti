@@ -11,6 +11,7 @@ export function gb(bytes) {
 
 export function formatUptime(seg) {
   if (seg === null || seg === undefined) return "-";
+  if (!Number.isFinite(Number(seg)) || Number(seg) < 0) return "-";
   seg = Math.floor(seg);
   const d = Math.floor(seg / 86400);
   const h = Math.floor((seg % 86400) / 3600);
