@@ -23,7 +23,8 @@ test("wallpaper baixa, valida, aplica e reaproveita cache válido", async () => 
   let applied = 0;
   const exec = createWallpaperExecutor({
     serverUrl: "ws://server.test:4000", rootDir: root,
-    fetch: async () => { downloads++; return { ok: true, arrayBuffer: async () => body }; },
+    getDeviceId: () => "device-expected",
+    fetch: async (_url, options) => { assert.equal(options.headers["x-monitor-device-id"], "device-expected"); downloads++; return { ok: true, arrayBuffer: async () => body }; },
     sha256File: async () => SHA256,
     applyWallpaper: null
   });
@@ -38,8 +39,32 @@ test("wallpaper baixa, valida, aplica e reaproveita cache válido", async () => 
 });
 
 test("wallpaper falha em timeout sem aplicar", async () => {
-  const exec = createWallpaperExecutor({ serverUrl: "ws://server.test:4000", rootDir: path.join(os.tmpdir(), "mti-wallpaper-timeout"), downloadTimeoutMs: 10, fetch: async () => { const e = new Error("aborted"); e.name = "AbortError"; throw e; } });
+  const exec = createWallpaperExecutor({ serverUrl: "ws://server.test:4000", rootDir: path.join(os.tmpdir(), "mti-wallpaper-timeout"), getDeviceId: () => "device-timeout", downloadTimeoutMs: 10, fetch: async () => { const e = new Error("aborted"); e.name = "AbortError"; throw e; } });
   await assert.rejects(() => exec(payload()), /Timeout/);
+});
+
+test("wallpaper exige getDeviceId e não aceita deps.deviceId", async () => {
+  let fetches = 0;
+  const exec = createWallpaperExecutor({
+    serverUrl: "ws://server.test:4000", rootDir: path.join(os.tmpdir(), "mti-wallpaper-device-required"), deviceId: "wrong-device",
+    fetch: async () => { fetches++; return { ok: true }; }
+  });
+  await assert.rejects(() => exec(payload()), /deviceId do Agent indisponível/);
+  assert.equal(fetches, 0);
+});
+
+test("wallpaper falha fechado para deviceId vazio, getter ausente ou getter com erro", async () => {
+  for (const getDeviceId of [() => "", () => "   ", () => { throw new Error("config indisponível"); }]) {
+    let fetches = 0;
+    let applied = 0;
+    const exec = createWallpaperExecutor({
+      serverUrl: "ws://server.test:4000", rootDir: await fs.promises.mkdtemp(path.join(os.tmpdir(), "mti-wallpaper-device-invalid-")), getDeviceId,
+      fetch: async () => { fetches++; return { ok: true }; }
+    });
+    await assert.rejects(() => exec(payload(), async () => { applied++; }), /deviceId/);
+    assert.equal(fetches, 0);
+    assert.equal(applied, 0);
+  }
 });
 
 test("set_wallpaper passa pelo handler allowlisted e propaga sucesso ou falha do companion", async () => {

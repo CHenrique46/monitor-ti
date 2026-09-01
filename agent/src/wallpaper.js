@@ -37,6 +37,14 @@ function createWallpaperExecutor(deps = {}) {
   const rename = deps.rename || fs.promises.rename;
   const unlink = deps.unlink || fs.promises.unlink;
 
+  function getDownloadDeviceId() {
+    if (typeof deps.getDeviceId !== "function") throw new Error("deviceId do Agent indisponível.");
+    let deviceId;
+    try { deviceId = deps.getDeviceId(); } catch { throw new Error("Não foi possível obter o deviceId do Agent."); }
+    if (typeof deviceId !== "string" || !deviceId.trim()) throw new Error("deviceId do Agent inválido.");
+    return deviceId.trim();
+  }
+
   function validatePayload(payload) {
     if (!payload || payload.assetId !== ASSET_ID || payload.extension !== EXTENSION || payload.size !== SIZE || String(payload.sha256 || "").toUpperCase() !== SHA256) throw new Error("Asset de wallpaper inválido.");
     let url;
@@ -59,11 +67,12 @@ function createWallpaperExecutor(deps = {}) {
     try { cached = await verify(finalPath); } catch {}
     if (!cached) {
       if (typeof fetchImpl !== "function") throw new Error("Download indisponível.");
+      const deviceId = getDownloadDeviceId();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), downloadTimeoutMs);
       const tempPath = path.join(rootDir, `.WallPaperVava.${crypto.randomUUID()}.tmp`);
       try {
-        const response = await fetchImpl(payload.downloadUrl, { signal: controller.signal, headers: { "x-monitor-device-id": String(deps.deviceId || "") } });
+        const response = await fetchImpl(payload.downloadUrl, { signal: controller.signal, headers: { "x-monitor-device-id": deviceId } });
         if (!response.ok) throw new Error("Download do asset recusado pelo Server.");
         const body = Buffer.from(await response.arrayBuffer());
         if (body.length !== SIZE || body.length > MAX_SIZE) throw new Error("Tamanho do asset inválido.");
