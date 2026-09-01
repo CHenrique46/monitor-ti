@@ -697,6 +697,15 @@ body {
   padding: 0;
 }
 
+:root {
+  --brand-primary: #38bdf8;
+  --brand-accent: #60a5fa;
+  --surface: #1e293b;
+  --surface-secondary: #0f172a;
+  --text-primary: #e2e8f0;
+  --text-muted: #94a3b8;
+}
+
 .compact-card .card-actions {
   align-items: center;
   border-top: 1px solid rgba(71, 85, 105, 0.65);
@@ -844,6 +853,60 @@ body {
   .detail-grid { grid-template-columns: 1fr; }
   .detail-field:nth-last-child(-n + 2) { border-bottom: 1px solid rgba(71, 85, 105, 0.5); }
   .detail-field:last-child { border-bottom: 0; }
+}
+
+/* ===== Identidade HenriTech Control ===== */
+.site-brand {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-mark {
+  align-items: center;
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-accent));
+  border-radius: 9px;
+  color: #082f49;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  letter-spacing: -0.06em;
+  width: 34px;
+}
+
+.brand-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.brand-name {
+  color: var(--brand-primary);
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.brand-copy small {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.brand-short-name { display: none; }
+
+@media (max-width: 600px) {
+  .brand-full-name,
+  .brand-copy small { display: none; }
+  .brand-short-name { display: inline; }
+  .brand-name { font-size: 0.95rem; }
 }
 
 .details-link {
@@ -1240,8 +1303,8 @@ body {
   width: 100%;
   border: 1px solid #334155;
   border-radius: 8px;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--surface-secondary);
+  color: var(--text-primary);
   padding: 9px 11px;
   font: inherit;
 }

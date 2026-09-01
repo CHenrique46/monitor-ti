@@ -119,7 +119,7 @@ export default function Dashboard() {
   return (
     <div className="container">
       <SiteNav />
-      <h1>Monitor TI</h1>
+       <h1>Visão geral do ambiente</h1>
       <p>
         Servidor:{' '}
         <span className={serverOk ? 'online' : 'offline'}>
@@ -182,7 +182,7 @@ export default function Dashboard() {
         <p className="empty">
           Nenhum computador cadastrado.
           <br />
-          Instale ou execute o Monitor TI Agent em uma máquina para ela aparecer
+           Instale ou execute o Agent do HenriTech Control em uma máquina para ela aparecer
           aqui.
         </p>
       ) : filtered.length === 0 ? (
