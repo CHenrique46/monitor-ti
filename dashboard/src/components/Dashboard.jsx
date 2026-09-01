@@ -3,11 +3,12 @@ import SummaryCards from './SummaryCards'
 import SearchBar from './SearchBar'
 import ComputerCard from './ComputerCard'
 import SiteNav from './SiteNav'
-import { computeAlerts, sortComputadores } from '../utils/alerts'
+import { sortComputadores } from '../utils/alerts'
 import { fmtDate } from '../utils/formatters'
 import { API_URL } from '../config'
 import ComputerDetails from './ComputerDetails'
 import { computerRequiresAttention, sortComputadoresByPriority } from '../utils/computerAttention'
+import { buildOperationalSummary } from '../utils/operationalSummary.js'
 
 export default function Dashboard() {
   const [serverOk, setServerOk] = useState(true)
@@ -18,6 +19,8 @@ export default function Dashboard() {
   const [selectedComputerId, setSelectedComputerId] = useState(null)
   const [attentionFilter, setAttentionFilter] = useState('all')
   const [sortMode, setSortMode] = useState('default')
+  const [computersLoaded, setComputersLoaded] = useState(false)
+  const [alertsLoaded, setAlertsLoaded] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -36,8 +39,11 @@ export default function Dashboard() {
         if (!active) return
         if (r.ok) {
           setComputadores(await r.json())
+          setComputersLoaded(true)
         }
-      } catch (e) {}
+      } catch (e) {
+        if (active) setComputersLoaded(true)
+      }
     }
 
     load()
@@ -75,7 +81,10 @@ export default function Dashboard() {
         const r = await fetch(`${API_URL}/api/alertas?ativos=true`)
         if (!active) return
         if (r.ok) setAlertasAtivos(await r.json())
-      } catch (e) {}
+        setAlertsLoaded(true)
+      } catch (e) {
+        if (active) setAlertsLoaded(true)
+      }
     }
     loadAlertas()
     const id = setInterval(loadAlertas, 10000)
@@ -111,12 +120,10 @@ export default function Dashboard() {
   )
 
   const summary = useMemo(() => {
-    const total = computadores.length
-    const online = computadores.filter((c) => c.status === 'online').length
-    const offline = computadores.filter((c) => c.status === 'offline').length
-    const alerts = computadores.filter((c) => computeAlerts(c).hasAlert).length
-    return { total, online, offline, alerts }
-  }, [computadores])
+    return buildOperationalSummary(computadores, alertasAtivos)
+  }, [computadores, alertasAtivos])
+
+  const summaryLoading = !computersLoaded || !alertsLoaded
 
   return (
     <div className="container">
@@ -132,7 +139,12 @@ export default function Dashboard() {
         <p className="server-warn">Não foi possível atualizar os dados.</p>
       )}
 
-      <SummaryCards summary={summary} />
+       <SummaryCards
+         summary={summary}
+         loading={summaryLoading}
+         onShowAll={() => setAttentionFilter('all')}
+         onShowAttention={() => setAttentionFilter('attention')}
+       />
 
       {alertasAtivos.length > 0 && (
         <div className="alertas-ativos">

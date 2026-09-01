@@ -126,6 +126,53 @@ p {
   color: #64748b;
 }
 
+.operational-summary {
+  gap: 10px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin: 20px 0 14px;
+}
+
+.operational-summary .summary-item {
+  min-width: 0;
+  padding: 12px 10px;
+  text-align: left;
+}
+
+.operational-summary .summary-num {
+  font-size: 1.55rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.operational-summary .summary-label {
+  display: block;
+  line-height: 1.25;
+  margin-top: 5px;
+  text-transform: none;
+}
+
+.summary-num.attention { color: #fbbf24; }
+.summary-num.reboot { color: #fca5a5; }
+
+.summary-action {
+  appearance: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.summary-action:hover,
+.summary-action:focus-visible {
+  border-color: #38bdf8;
+  outline: 2px solid rgba(56, 189, 248, 0.18);
+  outline-offset: 1px;
+}
+
+.operational-summary.is-loading .summary-num {
+  color: #64748b;
+}
+
 .computer-toolbar {
   align-items: end;
   display: flex;
@@ -532,6 +579,12 @@ p {
   .action-item summary { align-items: flex-start; }
 }
 
+@media (min-width: 601px) and (max-width: 900px) {
+  .operational-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 /* ===== Refinamento visual do dashboard ===== */
 body {
   background: radial-gradient(circle at 10% 0%, #172554 0, #0f172a 34rem);
@@ -869,6 +922,10 @@ body {
 @media (max-width: 600px) {
   .summary {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .operational-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
