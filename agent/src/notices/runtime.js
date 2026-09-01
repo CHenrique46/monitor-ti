@@ -113,7 +113,8 @@ function createNoticeRuntime(opts) {
     shuttingDown: false,
     persisted: emptyState(),
     saveScheduled: false,
-    shutdownRequest: null
+    shutdownRequest: null,
+    wallpaperRequests: new Map()
   };
 
   function log(m) {
@@ -394,6 +395,25 @@ function createNoticeRuntime(opts) {
     try {
       send(conn, buildError(code, message));
     } catch {}
+  }
+
+  function requestWallpaper(payload, timeoutMs = 30000) {
+    const conn = getActiveConnection();
+    if (!conn || conn.state !== NOTIFIER_STATES.READY) return Promise.reject(new Error("Companion indisponível."));
+    const actionExecutionId = String(payload && payload.actionExecutionId || "");
+    if (!actionExecutionId) return Promise.reject(new Error("Ação de wallpaper inválida."));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        state.wallpaperRequests.delete(actionExecutionId);
+        reject(new Error("Timeout aguardando o companion."));
+      }, timeoutMs);
+      state.wallpaperRequests.set(actionExecutionId, { resolve, reject, timer });
+      if (!send(conn, { type: "wallpaper_apply", protocolVersion: PROTOCOL_VERSION, path: payload.path, expectedSha256: payload.expectedSha256, style: "fill", actionExecutionId })) {
+        clearTimeout(timer);
+        state.wallpaperRequests.delete(actionExecutionId);
+        reject(new Error("Companion indisponível."));
+      }
+    });
   }
 
   function setConnectionState(conn, next, reason) {
@@ -746,6 +766,15 @@ function createNoticeRuntime(opts) {
       case "error":
         log("notifier_error " + (msg.code || "unknown"));
         break;
+      case "wallpaper_result": {
+        const request = state.wallpaperRequests.get(String(msg.actionExecutionId || ""));
+        if (!request) break;
+        clearTimeout(request.timer);
+        state.wallpaperRequests.delete(String(msg.actionExecutionId));
+        if (msg.status === "SUCCESS" && msg.applied === true) request.resolve(msg);
+        else request.reject(new Error(String(msg.error || "Companion falhou ao aplicar wallpaper.")));
+        break;
+      }
       default:
         sendError(conn, "INVALID_PAYLOAD", "Tipo desconhecido");
         break;
@@ -889,6 +918,7 @@ function createNoticeRuntime(opts) {
     getDeliveriesSnapshot,
     hasNoticesCapability: () => isNotifierReady(),
     getState,
+    requestWallpaper,
     pipePath
   };
 }

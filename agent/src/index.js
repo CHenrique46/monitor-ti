@@ -132,6 +132,11 @@ let noticesBridge = null;
 
 const remoteActionRuntime = remoteActions.createRemoteActionRuntime({
   store: createRemoteActionStore({ dir: REMOTE_ACTIONS_DIR, logEvent }),
+  serverUrl: SERVER_URL,
+  getDeviceId: () => deviceId,
+  applyWallpaper: (payload) => noticesBridge && noticesBridge.applyWallpaper
+    ? noticesBridge.applyWallpaper(payload)
+    : Promise.reject(new Error("Companion indisponível.")),
   notifyUser: async (notice) => {
     if (!noticesBridge || !activeWs || activeWs.readyState !== WebSocket.OPEN) {
       return { ok: false, message: "Notifier indisponível ou Agent desconectado." };

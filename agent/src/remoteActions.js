@@ -2,11 +2,13 @@ const { execFile: defaultExecFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { createWallpaperExecutor } = require("./wallpaper");
 
 const ALLOWED_ACTIONS = {
   spooler_reset: true,
   service_restart: true,
-  system_maintenance: true
+  system_maintenance: true,
+  set_wallpaper: true
 };
 
 const SERVICE_ALLOWLIST = Object.freeze({
@@ -477,6 +479,7 @@ function createRemoteActionRuntime(deps = {}) {
     return executor();
   });
   const executeSystemMaintenance = deps.executeSystemMaintenance || createSystemMaintenanceExecutor(deps);
+  const executeWallpaper = deps.executeWallpaper || createWallpaperExecutor(deps);
   const store = deps.store || null;
   const state = new Map();
   let maintenanceRunning = false;
@@ -581,6 +584,8 @@ function createRemoteActionRuntime(deps = {}) {
         ? `Reiniciando ${SERVICE_ALLOWLIST[serviceKey].displayName}.`
         : action === "system_maintenance"
         ? "Executando manutenção preventiva do Windows."
+        : action === "set_wallpaper"
+        ? "Baixando e aplicando papel de parede padrão."
         : "Executando reset do spooler.",
       error: null,
       startedAt: new Date().toISOString(),
@@ -609,6 +614,8 @@ function createRemoteActionRuntime(deps = {}) {
         ? await executeServiceRestart(serviceKey)
         : action === "system_maintenance"
         ? await executeSystemMaintenance()
+        : action === "set_wallpaper"
+        ? await executeWallpaper(msg.payload, deps.applyWallpaper)
         : await executeSpoolerReset();
       const safeResult = action === "system_maintenance" ? limitSystemMaintenanceResult(result) : result;
       if (action === "system_maintenance" && safeResult && safeResult.overallStatus === "FAILED") {
@@ -636,6 +643,8 @@ function createRemoteActionRuntime(deps = {}) {
           ? `${SERVICE_ALLOWLIST[serviceKey].displayName} reiniciado com sucesso.`
           : action === "system_maintenance"
           ? "Manutenção preventiva concluída. Reinicialização recomendada."
+          : action === "set_wallpaper"
+          ? "Papel de parede aplicado com sucesso."
           : "Spooler reiniciado com sucesso.",
         error: null,
         result: safeResult || { spooler: "restarted" },
@@ -695,7 +704,8 @@ function createRemoteActionRuntime(deps = {}) {
     getReconciliationRecords,
     markConfirmed,
     executeSpoolerReset,
-    executeSystemMaintenance
+    executeSystemMaintenance,
+    executeWallpaper
   };
 }
 

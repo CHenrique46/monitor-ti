@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = __dirname;
 const dist = path.join(root, "dist");
-const rel = path.join(root, "..", "release", "agent-test");
+const agentPackage = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const rel = String(agentPackage.version).endsWith("-dev")
+  ? path.join(root, "..", "release", "agent-dev-" + String(agentPackage.version).replace(/-dev$/, ""))
+  : path.join(root, "..", "release", "agent-test");
 
 fs.mkdirSync(dist, { recursive: true });
 fs.mkdirSync(rel, { recursive: true });
@@ -49,7 +52,7 @@ const csc = "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe";
 const notifierSrc = path.join(root, "..", "notifier", "MonitorTI-Notifier.cs");
 const notifierOut = path.join(rel, "MonitorTI-Notifier.exe");
 if (fs.existsSync(csc) && fs.existsSync(notifierSrc)) {
-  execSync(`"${csc}" /target:winexe /out:"${notifierOut}" "${notifierSrc}"`, {
+    execSync(`"${csc}" /target:winexe /out:"${notifierOut}" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Core.dll "${notifierSrc}"`, {
     cwd: root,
     stdio: "inherit"
   });

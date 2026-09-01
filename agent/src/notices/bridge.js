@@ -209,6 +209,13 @@ function createNoticeBridge(opts, deps = {}) {
     return capabilities().length > 0;
   }
 
+  function applyWallpaper(payload) {
+    if (!companionEnabled || !runtime || typeof runtime.requestWallpaper !== "function") {
+      return Promise.reject(new Error("Companion indisponível."));
+    }
+    return runtime.requestWallpaper(payload);
+  }
+
   function getRuntimeState() {
     return runtime && typeof runtime.getState === "function" ? runtime.getState() : null;
   }
@@ -224,6 +231,7 @@ function createNoticeBridge(opts, deps = {}) {
     queryCompanionTask,
     shutdown,
     isNotifierReady,
+    applyWallpaper,
     getRuntimeState
   };
 }

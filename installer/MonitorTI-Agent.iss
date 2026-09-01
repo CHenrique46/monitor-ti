@@ -1,5 +1,6 @@
 #define MyAppName "Monitor TI Agent"
 #define MyAppVersion "1.1.14"
+#define MyAppSourceDir "agent-test"
 #define MyPublisher "Monitor TI"
 #define MyUrl "https://monitor-ti.local"
 
@@ -21,10 +22,10 @@ OutputBaseFilename=MonitorTI-Agent-Setup
 ; O diretorio de saida e definido por /O na linha de comando (build-installer.mjs)
 
 [Files]
-Source: "..\release\agent-test\MonitorTI-Agent.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\release\agent-test\MonitorTI-Notifier.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\release\{#MyAppSourceDir}\MonitorTI-Agent.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\release\{#MyAppSourceDir}\MonitorTI-Notifier.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\agent\config.json"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\release\agent-test\WinSW.exe"; DestName: "MonitorTIAgent.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\release\{#MyAppSourceDir}\WinSW.exe"; DestName: "MonitorTIAgent.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "MonitorTIAgent.xml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "notifier-companion-task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 

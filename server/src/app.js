@@ -10,6 +10,7 @@ const alertasRoutes = require("./routes/alertas.routes");
 const agentRoutes = require("./routes/agent.routes");
 const avisosRoutes = require("./routes/avisos.routes");
 const remoteActionsRoutes = require("./routes/remoteActions.routes");
+const wallpaperAssetRoutes = require("./routes/wallpaperAsset.routes");
 const maintenanceSchedulerRoutes = require("./routes/maintenanceScheduler.routes");
 const maintenanceSchedulerCanaryRoutes = require("./routes/maintenanceSchedulerCanary.routes");
 const { setupWebSocket } = require("./ws/agentServer");
@@ -33,6 +34,7 @@ app.use("/api/computadores", alertasRoutes);
 app.use("/api/agent", agentRoutes);
 app.use("/api/avisos", avisosRoutes);
 app.use("/api/computadores", remoteActionsRoutes);
+app.use("/api/assets", wallpaperAssetRoutes);
 app.use("/api/maintenance-schedules", maintenanceSchedulerRoutes);
 app.use("/internal/maintenance-scheduler/canary", maintenanceSchedulerCanaryRoutes);
 

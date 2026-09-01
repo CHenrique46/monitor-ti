@@ -9,6 +9,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Security.Principal;
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 
 namespace MonitorTI
 {
@@ -42,7 +43,14 @@ namespace MonitorTI
         private const string COMPANION_PIPE_NAME = "MonitorTI-Notifier";
         private const int COMPANION_HEARTBEAT_MS = 15000;
         private const int COMPANION_RECONNECT_MS = 2000;
-        private const string COMPANION_VERSION = "1.1.8";
+        private const string COMPANION_VERSION = "1.1.15-dev";
+        private const uint SPI_SETDESKWALLPAPER = 20;
+        private const uint SPIF_UPDATEINIFILE = 0x01;
+        private const uint SPIF_SENDCHANGE = 0x02;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, string pvParam, uint fWinIni);
+        internal static Func<string, bool> DesktopWallpaperSetter = path => SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, path, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
 
         private static string CompanionPipeName
         {
@@ -913,6 +921,21 @@ namespace MonitorTI
                     return;
                 }
 
+                if (string.Equals(type, "wallpaper_apply", StringComparison.OrdinalIgnoreCase))
+                {
+                    var actionId = GetJsonString(line, "actionExecutionId");
+                    var wallpaperPath = GetJsonString(line, "path");
+                    var expectedSha256 = GetJsonString(line, "expectedSha256");
+                    var style = GetJsonString(line, "style");
+                    if (_ui.IsDisposed)
+                    {
+                        SendWallpaperResult(actionId, false, "UI indisponível.", null, null);
+                        return;
+                    }
+                    _ui.BeginInvoke((Action)(() => ApplyWallpaper(actionId, wallpaperPath, expectedSha256, style)));
+                    return;
+                }
+
                 if (string.Equals(type, "error", StringComparison.OrdinalIgnoreCase))
                 {
                     Log("error do Agent: " + (GetJsonString(line, "code") ?? "unknown") + " " + (GetJsonString(line, "message") ?? ""));
@@ -1053,6 +1076,79 @@ namespace MonitorTI
                     "message", JsonStringLiteral(message)
                 );
                 SendRaw(msg);
+            }
+
+            private void SendWallpaperResult(string actionId, bool applied, string error, string username, string sid)
+            {
+                SendRaw(BuildJsonLine(
+                    "type", JsonStringLiteral("wallpaper_result"),
+                    "protocolVersion", PROTOCOL_VERSION.ToString(),
+                    "actionExecutionId", JsonStringLiteral(actionId),
+                    "status", JsonStringLiteral(applied ? "SUCCESS" : "FAILED"),
+                    "applied", applied ? "true" : "false",
+                    "username", username == null ? "null" : JsonStringLiteral(username),
+                    "sid", sid == null ? "null" : JsonStringLiteral(sid),
+                    "wallpaperPath", applied ? JsonStringLiteral(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "MonitorTI", "wallpaper", "WallPaperVava.jpg")) : "null",
+                    "sha256", applied ? JsonStringLiteral("F5D2B5A264D60A9FC3FA8D130C0D9412411C98F753C10F2D0F441A4326CFE69E") : "null",
+                    "style", applied ? JsonStringLiteral("fill") : "null",
+                    "error", error == null ? "null" : JsonStringLiteral(error)
+                ));
+            }
+
+            private void ApplyWallpaper(string actionId, string wallpaperPath, string expectedSha256, string style)
+            {
+                try
+                {
+                    string root = Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "MonitorTI", "wallpaper"));
+                    string candidate = Path.GetFullPath(wallpaperPath ?? "");
+                    if (!candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Caminho de wallpaper não permitido.");
+                    if (!string.Equals(Path.GetExtension(candidate), ".jpg", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Extensão de wallpaper não permitida.");
+                    if (!File.Exists(candidate)) throw new FileNotFoundException("Arquivo de wallpaper não encontrado.");
+                    if (!string.Equals(expectedSha256, "F5D2B5A264D60A9FC3FA8D130C0D9412411C98F753C10F2D0F441A4326CFE69E", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Hash esperado de wallpaper não permitido.");
+                    string hash;
+                    using (var stream = File.OpenRead(candidate)) using (var sha = System.Security.Cryptography.SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "");
+                    if (!string.Equals(hash, expectedSha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Hash do wallpaper divergente.");
+                    if (!string.Equals(style, "fill", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Estilo de wallpaper não permitido.");
+
+                    string username = WindowsIdentity.GetCurrent().Name;
+                    string sid = WindowsIdentity.GetCurrent().User != null ? WindowsIdentity.GetCurrent().User.Value : null;
+                    using (var key = Registry.CurrentUser.CreateSubKey("Control Panel\\Desktop"))
+                    {
+                        string previousWallpaper = key.GetValue("Wallpaper", "") as string;
+                        string previousStyle = key.GetValue("WallpaperStyle", "") as string;
+                        string previousTile = key.GetValue("TileWallpaper", "") as string;
+                        SaveRollbackMetadata(username, sid, expectedSha256, previousWallpaper, previousStyle, previousTile);
+                    }
+                    using (var key = Registry.CurrentUser.CreateSubKey("Control Panel\\Desktop"))
+                    {
+                        key.SetValue("WallpaperStyle", "10", RegistryValueKind.String);
+                        key.SetValue("TileWallpaper", "0", RegistryValueKind.String);
+                    }
+                    if (!DesktopWallpaperSetter(candidate)) throw new InvalidOperationException("SystemParametersInfo falhou.");
+                    SendWallpaperResult(actionId, true, null, username, sid);
+                }
+                catch
+                {
+                    SendWallpaperResult(actionId, false, "Falha ao validar ou aplicar o wallpaper.", null, null);
+                }
+            }
+
+            private static void SaveRollbackMetadata(string username, string sid, string appliedSha256, string previousWallpaper = null, string previousStyle = null, string previousTile = null)
+            {
+                if (string.IsNullOrEmpty(sid)) throw new InvalidOperationException("SID do usuário não encontrado.");
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "MonitorTI", "wallpaper", "rollback");
+                Directory.CreateDirectory(dir);
+                string target = Path.Combine(dir, sid + ".json");
+                if (File.Exists(target)) return;
+                string json = BuildJsonLine(
+                    "username", JsonStringLiteral(username), "sid", JsonStringLiteral(sid),
+                    "previousWallpaper", previousWallpaper == null ? "null" : JsonStringLiteral(previousWallpaper),
+                    "previousWallpaperStyle", previousStyle == null ? "null" : JsonStringLiteral(previousStyle),
+                    "previousTileWallpaper", previousTile == null ? "null" : JsonStringLiteral(previousTile),
+                    "timestamp", JsonStringLiteral(DateTime.UtcNow.ToString("o")),
+                    "appliedAssetSha256", JsonStringLiteral(appliedSha256)
+                );
+                using (var stream = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None)) using (var writer = new StreamWriter(stream, new UTF8Encoding(false))) writer.Write(json);
             }
 
             private void SendRaw(string line)

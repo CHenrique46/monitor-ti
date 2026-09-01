@@ -1,8 +1,35 @@
 const prisma = require("../prisma");
 const agentServer = require("../ws/agentServer");
 const remoteActionsServiceModule = require("../services/remoteActions.service");
+const wallpaperAsset = require("../services/wallpaperAsset.service");
 
-function createRemoteActionsController({ prisma: db = prisma, agentServer: ws = agentServer, remoteActionsService = remoteActionsServiceModule } = {}) {
+function createRemoteActionsController({ prisma: db = prisma, agentServer: ws = agentServer, remoteActionsService = remoteActionsServiceModule, wallpaperAssetService = wallpaperAsset } = {}) {
+async function setWallpaper(req, res) {
+  try {
+    const computadorId = Number(req.params.id);
+    const computador = await db.computador.findUnique({ where: { id: computadorId }, select: { id: true, deviceId: true, hostname: true, status: true } });
+    if (!computador) return res.status(404).json({ erro: "Computador nao encontrado." });
+    wallpaperAssetService.validate();
+    const execution = await remoteActionsService.createExecution({ computadorId: computador.id, action: "set_wallpaper" });
+    if (computador.status !== "online") {
+      await remoteActionsService.markRejected(execution.actionExecutionId, "Computador offline.", "Computador offline.");
+      return res.status(409).json({ erro: "Computador offline.", execution: await remoteActionsService.getByActionExecutionId(execution.actionExecutionId) });
+    }
+    const issued = wallpaperAssetService.issueDownloadToken({ actionExecutionId: execution.actionExecutionId, deviceId: computador.deviceId });
+    const host = typeof req.get === "function" ? req.get("host") : "127.0.0.1:4000";
+    const protocol = req.protocol || "http";
+    const downloadUrl = `${protocol}://${host}/api/assets/wallpaper/current?token=${encodeURIComponent(issued.token)}&actionExecutionId=${encodeURIComponent(execution.actionExecutionId)}&assetId=${encodeURIComponent(issued.asset.assetId)}`;
+    const ok = ws.sendToAgent(computador.deviceId, { type: "remote_action", protocolVersion: 1, deviceId: computador.deviceId, actionExecutionId: execution.actionExecutionId, action: "set_wallpaper", payload: { actionExecutionId: execution.actionExecutionId, assetId: issued.asset.assetId, downloadUrl, sha256: issued.asset.sha256, size: issued.asset.size, extension: issued.asset.extension } });
+    if (!ok) {
+      await remoteActionsService.markRejected(execution.actionExecutionId, "Agent nao conectado no momento.", "Agent nao conectado no momento.");
+      return res.status(409).json({ erro: "Agent nao conectado no momento.", execution: await remoteActionsService.getByActionExecutionId(execution.actionExecutionId) });
+    }
+    await remoteActionsService.markDispatched(execution.actionExecutionId);
+    return res.status(202).json({ ok: true, execution: await remoteActionsService.getByActionExecutionId(execution.actionExecutionId) });
+  } catch (err) {
+    return res.status(400).json({ erro: err.message });
+  }
+}
 async function spoolerReset(req, res) {
   try {
     const computadorId = Number(req.params.id);
@@ -221,6 +248,7 @@ async function list(req, res) {
     spoolerReset,
     serviceRestart,
     systemMaintenance,
+    setWallpaper,
     list
   };
 }

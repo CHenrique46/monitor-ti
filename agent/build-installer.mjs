@@ -10,14 +10,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const agentRoot = __dirname;
 const repoRoot = path.join(agentRoot, "..");
 const installerDir = path.join(repoRoot, "installer");
-const releaseAgentTest = path.join(repoRoot, "release", "agent-test");
-const outDir = path.join(repoRoot, "release", "installer-test");
+const agentPackage = JSON.parse(fs.readFileSync(path.join(agentRoot, "package.json"), "utf8"));
+const releaseDirName = String(agentPackage.version).endsWith("-dev")
+  ? "agent-dev-" + String(agentPackage.version).replace(/-dev$/, "")
+  : "agent-test";
+const releaseAgentTest = path.join(repoRoot, "release", releaseDirName);
+const outDir = path.join(repoRoot, "release", String(agentPackage.version).endsWith("-dev") ? "installer-dev-" + String(agentPackage.version).replace(/-dev$/, "") : "installer-test");
 const agentExe = path.join(releaseAgentTest, "MonitorTI-Agent.exe");
 const notifierSrc = path.join(repoRoot, "notifier", "MonitorTI-Notifier.cs");
 const notifierExe = path.join(releaseAgentTest, "MonitorTI-Notifier.exe");
 const winswExe = path.join(releaseAgentTest, "WinSW.exe");
 const issFile = path.join(installerDir, "MonitorTI-Agent.iss");
-const agentPackage = JSON.parse(fs.readFileSync(path.join(agentRoot, "package.json"), "utf8"));
 
 const WINSW_URL =
   "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe";
@@ -122,7 +125,7 @@ async function main() {
 
   // 5) compila o instalador
   fs.mkdirSync(outDir, { recursive: true });
-  execSync(`"${iscc}" "${issFile}" /DMyAppVersion=${installerVersion} /O"${outDir}"`, {
+  execSync(`"${iscc}" "${issFile}" /DMyAppVersion=${installerVersion} /DMyAppSourceDir=${releaseDirName} /O"${outDir}"`, {
     cwd: installerDir,
     stdio: "inherit"
   });

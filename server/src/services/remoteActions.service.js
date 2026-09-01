@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const prisma = require("../prisma");
+const wallpaperAsset = require("./wallpaperAsset.service");
 
 const ACTIONS = {
   spooler_reset: {
@@ -10,6 +11,9 @@ const ACTIONS = {
   },
   system_maintenance: {
     label: "Manutenção preventiva do Windows"
+  },
+  set_wallpaper: {
+    label: "Aplicar papel de parede padrão"
   }
 };
 
@@ -215,6 +219,10 @@ function createRemoteActionsService(db = prisma) {
         throw new Error("Serviço não permitido.");
       }
       payload = { serviceKey };
+    }
+    if (normalizedAction === "set_wallpaper") {
+      wallpaperAsset.validate();
+      payload = null;
     }
     const record = await db.acaoRemotaExecucao.create({
       data: {
