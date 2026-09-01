@@ -44,6 +44,8 @@ test("set_wallpaper cria ação somente com payload controlado e rejeita offline
 });
 
 test("set_wallpaper envia somente asset fixo, hash e URL tokenizada", async () => {
+  const previousUrl = process.env.AGENT_SERVER_PUBLIC_URL;
+  process.env.AGENT_SERVER_PUBLIC_URL = "http://192.168.40.133:4000";
   const sent = [];
   const db = {
     computador: { findUnique: async () => ({ id: 1, deviceId: "d1", hostname: "PC-1", status: "online" }) },
@@ -53,6 +55,8 @@ test("set_wallpaper envia somente asset fixo, hash e URL tokenizada", async () =
   const controller = createRemoteActionsController({ prisma: db, remoteActionsService: service, agentServer: { sendToAgent: (deviceId, message) => { sent.push({ deviceId, message }); return true; } }, wallpaperAssetService: service });
   const res = { statusCode: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
   await controller.setWallpaper({ params: { id: 1 }, protocol: "http", get: () => "server.test:4000" }, res);
+  if (previousUrl === undefined) delete process.env.AGENT_SERVER_PUBLIC_URL;
+  else process.env.AGENT_SERVER_PUBLIC_URL = previousUrl;
   assert.equal(res.statusCode, 202);
   const payload = sent[0].message.payload;
   assert.deepEqual(Object.keys(payload).sort(), ["actionExecutionId", "assetId", "downloadUrl", "extension", "sha256", "size"].sort());
