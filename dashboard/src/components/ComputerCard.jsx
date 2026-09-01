@@ -18,7 +18,7 @@ function MetricBar({ value }) {
   );
 }
 
-export default function ComputerCard({ c, latestVersion, onOpen, hasActiveAlert = false }) {
+export default function ComputerCard({ c, latestVersion, onOpen, onDelete, hasActiveAlert = false }) {
   const online = c.status === "online";
   const { alerts } = computeAlerts(c);
   const uptimeStatus = getUptimeStatus(c.uptime);
@@ -92,6 +92,7 @@ export default function ComputerCard({ c, latestVersion, onOpen, hasActiveAlert 
             Atualizar
           </Link>
         )}
+        {!online && onDelete && <button type="button" className="btn-delete-subtle" onClick={(event) => { event.stopPropagation(); onDelete(c); }}>Excluir</button>}
       </div>
       <div className="card-uptime"><span>{online ? "Uptime" : "Último uptime registrado"}</span><strong>{formatUptime(c.uptime)}</strong>{uptimeStatus !== UPTIME_STATUS.UNKNOWN && uptimeStatus !== UPTIME_STATUS.NORMAL && <small>{uptimeStatusLabel(uptimeStatus)}</small>}</div>
       {!online && <div className="card-last-seen">Última comunicação: {fmtDate(c.ultimaConexao)}</div>}

@@ -7,6 +7,7 @@ import { sortComputadores } from '../utils/alerts'
 import { fmtDate } from '../utils/formatters'
 import { API_URL } from '../config'
 import ComputerDetails from './ComputerDetails'
+import DeleteComputerDialog from './DeleteComputerDialog'
 import { computerMatchesFilter, sortComputadoresByPriority } from '../utils/computerAttention'
 import { buildOperationalSummary } from '../utils/operationalSummary.js'
 
@@ -21,6 +22,9 @@ export default function Dashboard() {
   const [sortMode, setSortMode] = useState('default')
   const [computersLoaded, setComputersLoaded] = useState(false)
   const [alertsLoaded, setAlertsLoaded] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleteError, setDeleteError] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -116,6 +120,27 @@ export default function Dashboard() {
 
   const summaryLoading = !computersLoaded || !alertsLoaded
 
+  const requestComputerDeletion = async () => {
+    if (!deleteTarget || deleteTarget.status === 'online') return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const response = await fetch(`${API_URL}/api/computadores/${deleteTarget.id}`, { method: 'DELETE' })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setDeleteError(body.erro || 'Não foi possível excluir o computador.')
+        return
+      }
+      setComputadores((current) => current.filter((computer) => computer.id !== deleteTarget.id))
+      if (selectedComputerId === deleteTarget.id) setSelectedComputerId(null)
+      setDeleteTarget(null)
+    } catch {
+      setDeleteError('Não foi possível excluir o computador.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <div className="container">
       <SiteNav />
@@ -189,14 +214,15 @@ export default function Dashboard() {
         <p className="muted">Nenhum computador corresponde à busca.</p>
       ) : (
         <div className="grid">
-           {filtered.map((c) => (
-             <ComputerCard key={c.id} c={c} latestVersion={latestVersion} onOpen={setSelectedComputerId} hasActiveAlert={alertasAtivos.some((alert) => alert.computadorId === c.id)} />
-           ))}
+             {filtered.map((c) => (
+              <ComputerCard key={c.id} c={c} latestVersion={latestVersion} onOpen={setSelectedComputerId} onDelete={(computer) => { setDeleteError(null); setDeleteTarget(computer) }} hasActiveAlert={alertasAtivos.some((alert) => alert.computadorId === c.id)} />
+            ))}
          </div>
        )}
       {selectedComputerId && (
         <ComputerDetails computerId={selectedComputerId} latestVersion={latestVersion} onClose={() => setSelectedComputerId(null)} />
       )}
+      {deleteTarget && <DeleteComputerDialog computer={deleteTarget} error={deleteError} submitting={deleting} onCancel={() => { if (!deleting) setDeleteTarget(null) }} onConfirm={requestComputerDeletion} />}
     </div>
   )
 }

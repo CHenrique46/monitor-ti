@@ -1,5 +1,23 @@
 const computadoresService = require("../services/computadores.service");
 
+function createComputadoresController({ service = computadoresService } = {}) {
+async function deleteComputer(req, res) {
+  try {
+    const result = await service.deleteOfflineComputer(req.params.id);
+    return res.status(200).json({ ok: true, computadorId: result.id });
+  } catch (err) {
+    if (err && err.code === "INVALID_ID") return res.status(400).json({ erro: err.message });
+    if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
+    if (err && ["ONLINE", "MAINTENANCE"].includes(err.code)) {
+      return res.status(409).json({ erro: err.message });
+    }
+    return res.status(500).json({ erro: "Não foi possível excluir o computador." });
+  }
+}
+
+return { deleteComputer };
+}
+
 async function list(req, res) {
   try {
     const items = await computadoresService.list();
@@ -33,4 +51,4 @@ async function getCapabilities(req, res) {
   }
 }
 
-module.exports = { list, getById, getCapabilities };
+module.exports = { list, getById, getCapabilities, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };

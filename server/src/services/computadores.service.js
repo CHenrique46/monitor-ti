@@ -1,5 +1,13 @@
 const prisma = require("../prisma");
 
+class ComputerDeletionError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "ComputerDeletionError";
+    this.code = code;
+  }
+}
+
 function mapComputador(c) {
   return {
     id: c.id,
@@ -80,4 +88,68 @@ async function getCapabilitiesById(id) {
   };
 }
 
-module.exports = { list, getById, getCapabilitiesById };
+function parseComputerId(value) {
+  const raw = String(value == null ? "" : value).trim();
+  if (!/^\d+$/.test(raw)) throw new ComputerDeletionError("INVALID_ID", "ID de computador inválido.");
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new ComputerDeletionError("INVALID_ID", "ID de computador inválido.");
+  }
+  return id;
+}
+
+async function deleteOfflineComputer(value, db = prisma) {
+  const id = parseComputerId(value);
+  return db.$transaction(async (tx) => {
+    const computer = await tx.computador.findUnique({
+      where: { id },
+      select: { id: true, status: true }
+    });
+    if (!computer) throw new ComputerDeletionError("NOT_FOUND", "Computador não encontrado.");
+    if (computer.status !== "offline") {
+      throw new ComputerDeletionError("ONLINE", "Computadores online não podem ser excluídos.");
+    }
+
+    const activeTarget = await tx.maintenanceScheduleTarget.findFirst({
+      where: { computadorId: id, schedule: { enabled: true } },
+      select: { scheduleId: true }
+    });
+    if (activeTarget) {
+      throw new ComputerDeletionError(
+        "MAINTENANCE",
+        "Computadores vinculados a uma manutenção ativa não podem ser excluídos."
+      );
+    }
+
+    // Revalida imediatamente antes da exclusão e mantém a condição no DELETE.
+    const current = await tx.computador.findUnique({
+      where: { id },
+      select: { status: true }
+    });
+    if (!current || current.status !== "offline") {
+      throw new ComputerDeletionError(
+        "ONLINE",
+        "O computador deixou de estar offline; exclusão cancelada."
+      );
+    }
+
+    const deleted = await tx.computador.deleteMany({
+      where: { id, status: "offline" }
+    });
+    if (deleted.count !== 1) {
+      throw new ComputerDeletionError(
+        "ONLINE",
+        "O estado do computador mudou; exclusão cancelada."
+      );
+    }
+    return { id };
+  });
+}
+
+module.exports = {
+  list,
+  getById,
+  getCapabilitiesById,
+  deleteOfflineComputer,
+  ComputerDeletionError
+};
