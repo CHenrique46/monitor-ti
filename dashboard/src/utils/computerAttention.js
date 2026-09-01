@@ -4,6 +4,29 @@ function alertsForComputer(computer, activeAlerts = []) {
   return activeAlerts.filter((alert) => alert.computadorId === computer.id)
 }
 
+export function computerMatchesFilter(computer, filter, activeAlerts = []) {
+  const alerts = alertsForComputer(computer, activeAlerts)
+  const uptimeStatus = getUptimeStatus(computer.uptime)
+
+  switch (filter) {
+    case 'online':
+      return computer.status === 'online'
+    case 'offline':
+      return computer.status === 'offline'
+    case 'attention':
+      return computerRequiresAttention(computer, activeAlerts)
+    case 'reboot':
+      return uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED
+    case 'critical':
+      return alerts.some((alert) => alert.nivel === 'critical')
+    case 'normal':
+      return alerts.length === 0 && uptimeStatus === UPTIME_STATUS.NORMAL
+    case 'all':
+    default:
+      return true
+  }
+}
+
 export function computerRequiresAttention(computer, activeAlerts = []) {
   const hasActiveAlert = alertsForComputer(computer, activeAlerts).length > 0
   const uptimeStatus = getUptimeStatus(computer.uptime)

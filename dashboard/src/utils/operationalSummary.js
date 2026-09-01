@@ -2,9 +2,11 @@ import { computerRequiresAttention } from './computerAttention.js'
 import { getUptimeStatus, UPTIME_STATUS } from './uptime.js'
 
 export function buildOperationalSummary(computers = [], activeAlerts = []) {
+  const computerIds = new Set(computers.map((computer) => computer.id))
   const criticalComputerIds = new Set(
     activeAlerts
       .filter((alert) => alert.nivel === 'critical')
+      .filter((alert) => computerIds.has(alert.computadorId))
       .map((alert) => alert.computadorId)
   )
 

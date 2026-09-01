@@ -7,7 +7,7 @@ import { sortComputadores } from '../utils/alerts'
 import { fmtDate } from '../utils/formatters'
 import { API_URL } from '../config'
 import ComputerDetails from './ComputerDetails'
-import { computerRequiresAttention, sortComputadoresByPriority } from '../utils/computerAttention'
+import { computerMatchesFilter, sortComputadoresByPriority } from '../utils/computerAttention'
 import { buildOperationalSummary } from '../utils/operationalSummary.js'
 
 export default function Dashboard() {
@@ -17,7 +17,7 @@ export default function Dashboard() {
   const [alertasAtivos, setAlertasAtivos] = useState([])
   const [latestVersion, setLatestVersion] = useState(null)
   const [selectedComputerId, setSelectedComputerId] = useState(null)
-  const [attentionFilter, setAttentionFilter] = useState('all')
+  const [computerFilter, setComputerFilter] = useState('all')
   const [sortMode, setSortMode] = useState('default')
   const [computersLoaded, setComputersLoaded] = useState(false)
   const [alertsLoaded, setAlertsLoaded] = useState(false)
@@ -104,20 +104,11 @@ export default function Dashboard() {
             (c.ip || '').toLowerCase().includes(term)
         )
       : computadores
-    if (attentionFilter === 'attention') {
-      list = list.filter((computer) => computerRequiresAttention(computer, alertasAtivos))
-    } else if (attentionFilter === 'normal') {
-      list = list.filter((computer) => !computerRequiresAttention(computer, alertasAtivos))
-    }
+    list = list.filter((computer) => computerMatchesFilter(computer, computerFilter, alertasAtivos))
     return sortMode === 'priority'
       ? sortComputadoresByPriority(list, alertasAtivos)
       : sortComputadores(list)
-  }, [computadores, search, attentionFilter, sortMode, alertasAtivos])
-
-  const attentionCount = useMemo(
-    () => computadores.filter((computer) => computerRequiresAttention(computer, alertasAtivos)).length,
-    [computadores, alertasAtivos]
-  )
+  }, [computadores, search, computerFilter, sortMode, alertasAtivos])
 
   const summary = useMemo(() => {
     return buildOperationalSummary(computadores, alertasAtivos)
@@ -142,8 +133,8 @@ export default function Dashboard() {
        <SummaryCards
          summary={summary}
          loading={summaryLoading}
-         onShowAll={() => setAttentionFilter('all')}
-         onShowAttention={() => setAttentionFilter('attention')}
+         activeFilter={computerFilter}
+         onFilterChange={setComputerFilter}
        />
 
       {alertasAtivos.length > 0 && (
@@ -165,9 +156,13 @@ export default function Dashboard() {
          <SearchBar value={search} onChange={setSearch} />
          <label className="toolbar-field">
            <span>Mostrar</span>
-           <select value={attentionFilter} onChange={(event) => setAttentionFilter(event.target.value)}>
+           <select value={computerFilter} onChange={(event) => setComputerFilter(event.target.value)}>
              <option value="all">Todos</option>
-             <option value="attention">Requer atenção ({attentionCount})</option>
+             <option value="online">Online</option>
+             <option value="offline">Offline</option>
+             <option value="attention">Requer atenção{summaryLoading ? '' : ` (${summary.attention})`}</option>
+             <option value="reboot">Reinício recomendado</option>
+             <option value="critical">Críticos</option>
              <option value="normal">Normais</option>
            </select>
          </label>
