@@ -1211,7 +1211,7 @@ namespace MonitorTI
             this.TopMost = true;
             this.ShowInTaskbar = true;
             this.Text = Sanitize(this._payload.title);
-            this.BackColor = SystemColors.Control;
+            this.BackColor = Color.FromArgb(245, 248, 252);
             this.Padding = new Padding(16);
             this.FormClosing += (s, e) =>
             {
@@ -1224,17 +1224,33 @@ namespace MonitorTI
 
             int contentWidth = FORM_WIDTH - 32;
 
+            var accent = new Panel
+            {
+                BackColor = Color.FromArgb(20, 184, 166),
+                Location = new Point(16, 14),
+                Size = new Size(5, 72)
+            };
+
+            var brandLabel = new Label
+            {
+                Text = "HENRITECH CONTROL  /  CENTRAL DE AVISOS",
+                Font = new Font("Segoe UI", 8, FontStyle.Bold),
+                ForeColor = Color.FromArgb(20, 120, 126),
+                AutoSize = true,
+                Location = new Point(32, 16)
+            };
+
             var titleLabel = new Label
             {
                 Text = Sanitize(this._payload.title),
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                ForeColor = Color.FromArgb(20, 20, 20),
+                Font = new Font("Segoe UI", 14, FontStyle.Bold),
+                ForeColor = Color.FromArgb(22, 39, 63),
                 AutoSize = true,
-                MaximumSize = new Size(contentWidth, 0),
-                Location = new Point(16, 16)
+                MaximumSize = new Size(contentWidth - 16, 0),
+                Location = new Point(32, 34)
             };
 
-            Color levelColor = Color.FromArgb(0, 90, 160);
+            Color levelColor = Color.FromArgb(20, 120, 126);
             string levelText = "INFORMATIVO";
             if (!string.IsNullOrEmpty(this._payload.level))
             {
@@ -1244,51 +1260,65 @@ namespace MonitorTI
             }
             var levelLabel = new Label
             {
-                Text = "NIVEL: " + levelText,
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Text = levelText,
+                Font = new Font("Segoe UI", 8, FontStyle.Bold),
                 ForeColor = levelColor,
-                AutoSize = true,
-                Location = new Point(16, titleLabel.Bottom + 8)
+                BackColor = Color.FromArgb(232, 239, 246),
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Size = new Size(116, 26),
+                Location = new Point(32, titleLabel.Bottom + 22)
             };
 
-            var messageBox = new TextBox
+            var messageLabel = new Label
             {
                 Text = Sanitize(this._payload.message),
-                ReadOnly = true,
-                Multiline = true,
-                WordWrap = true,
-                BorderStyle = BorderStyle.None,
-                BackColor = SystemColors.Control,
+                AutoSize = false,
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(43, 58, 78),
                 Font = new Font("Segoe UI", 10),
-                ScrollBars = ScrollBars.Vertical,
-                Location = new Point(16, levelLabel.Bottom + 8),
-                Width = contentWidth
+                Location = new Point(14, 12),
+                Width = contentWidth - 28,
+                TabStop = false
             };
 
-            int msgHeight = MeasureTextHeight(Sanitize(this._payload.message), messageBox.Font, contentWidth - 4);
-            int reserved = 16 + titleLabel.Height + 8 + levelLabel.Height + 8 + 8 + 36 + 56;
+            int reserved = 16 + titleLabel.Height + 10 + levelLabel.Height + 20 + 36 + 56;
             int availForMsg = MAX_FORM_HEIGHT - reserved;
-            messageBox.Height = Math.Max(40, Math.Min(msgHeight + 8, Math.Max(40, availForMsg)));
+            int measuredMessageHeight = MeasureTextHeight(messageLabel.Text, messageLabel.Font, messageLabel.Width);
+            int messageLabelHeight = Math.Max(30, measuredMessageHeight + 4);
+            messageLabel.Height = Math.Min(messageLabelHeight, Math.Max(30, availForMsg));
+            int messageHeight = Math.Max(54, Math.Min(messageLabel.Height + 24, Math.Max(54, availForMsg)));
+            var messagePanel = new Panel
+            {
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle,
+                Location = new Point(16, levelLabel.Bottom + 18),
+                Size = new Size(contentWidth, messageHeight + 24),
+                TabStop = false
+            };
+            messagePanel.Controls.Add(messageLabel);
 
             string dateText = FormatDate(this._payload.scheduledAt) ?? FormatDate(this._payload.serverTime) ?? "";
             var dateLabel = new Label
             {
                 Text = string.IsNullOrEmpty(dateText) ? "" : "Agendado para: " + dateText,
                 Font = new Font("Segoe UI", 9),
-                ForeColor = Color.Gray,
+                ForeColor = Color.FromArgb(105, 122, 143),
                 AutoSize = true,
-                Location = new Point(16, messageBox.Bottom + 8)
+                Location = new Point(16, messagePanel.Bottom + 10)
             };
 
             var button = new Button
             {
                 Text = "ENTENDI",
-                Width = 120,
+                Width = 124,
                 Height = 36,
-                BackColor = Color.FromArgb(0, 90, 160),
+                BackColor = Color.FromArgb(22, 95, 138),
                 ForeColor = Color.White,
-                FlatStyle = FlatStyle.Standard,
-                Font = new Font("Segoe UI", 10, FontStyle.Bold)
+                FlatStyle = FlatStyle.Flat,
+                FlatAppearance = { BorderSize = 0 },
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                TabIndex = 0
             };
             button.Click += (s, e) =>
             {
@@ -1298,22 +1328,25 @@ namespace MonitorTI
                 this.Close();
             };
 
-            int formHeight = messageBox.Bottom + 8 + 20 + 16 + button.Height + 16;
+            int formHeight = messagePanel.Bottom + 10 + 20 + 16 + button.Height + 16;
             if (formHeight > MAX_FORM_HEIGHT)
             {
                 int overflow = formHeight - MAX_FORM_HEIGHT;
-                messageBox.Height = Math.Max(40, messageBox.Height - overflow);
+                messagePanel.Height = Math.Max(78, messagePanel.Height - overflow);
                 formHeight = MAX_FORM_HEIGHT;
             }
             button.Location = new Point(FORM_WIDTH - 16 - button.Width, formHeight - 16 - button.Height);
             dateLabel.Location = new Point(16, button.Top + (button.Height - dateLabel.Height) / 2);
 
             this.ClientSize = new Size(FORM_WIDTH, formHeight);
+            this.Controls.Add(accent);
+            this.Controls.Add(brandLabel);
             this.Controls.Add(titleLabel);
             this.Controls.Add(levelLabel);
-            this.Controls.Add(messageBox);
+            this.Controls.Add(messagePanel);
             this.Controls.Add(dateLabel);
             this.Controls.Add(button);
+            this.ActiveControl = button;
         }
 
         private int MeasureTextHeight(string text, Font font, int maxWidth)
