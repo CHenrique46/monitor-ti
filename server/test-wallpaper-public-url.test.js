@@ -19,7 +19,7 @@ function makeController({ createCount = { value: 0 }, sent = [] } = {}) {
   const service = {
     validate: () => true,
     createExecution: async () => { createCount.value += 1; return execution; },
-    issueDownloadToken: () => ({ token: "opaque", asset: { assetId: "official-wallpaper-v1", sha256: "F5D2B5A264D60A9FC3FA8D130C0D9412411C98F753C10F2D0F441A4326CFE69E", size: 174163, extension: ".jpg" } }),
+     issueDownloadToken: () => ({ token: "opaque", asset: { assetId: "official-wallpaper-v1", sha256: "A".repeat(64), size: 32, extension: ".jpg" } }),
     markDispatched: async () => true,
     getByActionExecutionId: async () => execution
   };

@@ -19,7 +19,7 @@ async function setWallpaper(req, res) {
     }
     const issued = wallpaperAssetService.issueDownloadToken({ actionExecutionId: execution.actionExecutionId, deviceId: computador.deviceId });
     const downloadUrl = `${baseUrl}/api/assets/wallpaper/current?token=${encodeURIComponent(issued.token)}&actionExecutionId=${encodeURIComponent(execution.actionExecutionId)}&assetId=${encodeURIComponent(issued.asset.assetId)}`;
-    const ok = ws.sendToAgent(computador.deviceId, { type: "remote_action", protocolVersion: 1, deviceId: computador.deviceId, actionExecutionId: execution.actionExecutionId, action: "set_wallpaper", payload: { actionExecutionId: execution.actionExecutionId, assetId: issued.asset.assetId, downloadUrl, sha256: issued.asset.sha256, size: issued.asset.size, extension: issued.asset.extension } });
+    const ok = ws.sendToAgent(computador.deviceId, { type: "remote_action", protocolVersion: 1, deviceId: computador.deviceId, actionExecutionId: execution.actionExecutionId, action: "set_wallpaper", payload: { actionExecutionId: execution.actionExecutionId, assetId: issued.asset.assetId, downloadUrl, expectedSha256: issued.asset.sha256, expectedSize: issued.asset.size, extension: issued.asset.extension } });
     if (!ok) {
       await remoteActionsService.markRejected(execution.actionExecutionId, "Agent nao conectado no momento.", "Agent nao conectado no momento.");
       return res.status(409).json({ erro: "Agent nao conectado no momento.", execution: await remoteActionsService.getByActionExecutionId(execution.actionExecutionId) });
