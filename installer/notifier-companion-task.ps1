@@ -1,14 +1,16 @@
 param(
   [ValidateSet("install","create","update","remove","run","query","queryxml","state")]
-  [string]$Mode = "install"
+  [string]$Mode = "install",
+  [string]$InstallDir = $PSScriptRoot
 )
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $TaskName = 'MonitorTI-Notifier'
-$Executable = 'C:\Program Files (x86)\MonitorTI\Agent\MonitorTI-Notifier.exe'
-$WorkingDirectory = 'C:\Program Files (x86)\MonitorTI\Agent'
+$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
+$Executable = [System.IO.Path]::Combine($InstallDir, "MonitorTI-Notifier.exe")
+$WorkingDirectory = $InstallDir
 $Arguments = '--companion'
 $GroupId = 'S-1-5-11'
 
@@ -16,23 +18,128 @@ function Get-NotifierTask {
   Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 }
 
-function Test-NotifierTaskMatches {
-  param([object]$Task)
-  if (-not $Task) { return $false }
-  $principal = $Task.Principal
-  $action = @($Task.Actions)[0]
+function Resolve-TaskSchedulerSid {
+  param([object]$Value)
+  if ($null -eq $Value) { return $null }
+  $text = [string]$Value
+  if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+  try {
+    if ($text -match '^S-\d(-\d+)+$') {
+      return ([System.Security.Principal.SecurityIdentifier]::new($text)).Value
+    }
+    return ([System.Security.Principal.NTAccount]::new($text)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+  } catch {
+    return $text.Trim()
+  }
+}
+
+function Normalize-TaskLogonType {
+  param([object]$Value)
+  if ($null -eq $Value) { return $null }
+  $text = [string]$Value
+  switch -Regex ($text.Trim()) {
+    '^(?i)4$|^(?i)Group$' { return 'Group' }
+    '^(?i)0$|^(?i)None$|^(?i)Null$' { return 'None' }
+    '^(?i)1$|^(?i)Password$' { return 'Password' }
+    '^(?i)2$|^(?i)S4U$' { return 'S4U' }
+    '^(?i)3$|^(?i)InteractiveToken$' { return 'InteractiveToken' }
+    '^(?i)5$|^(?i)ServiceAccount$' { return 'ServiceAccount' }
+    '^(?i)6$|^(?i)InteractiveTokenOrPassword$' { return 'InteractiveTokenOrPassword' }
+    default { return $text.Trim() }
+  }
+}
+
+function Normalize-TaskRunLevel {
+  param([object]$Value)
+  if ($null -eq $Value) { return $null }
+  $text = [string]$Value
+  switch -Regex ($text.Trim()) {
+    '^(?i)0$|^(?i)LUA$|^(?i)Limited$|^(?i)LeastPrivilege$' { return 'Limited' }
+    '^(?i)1$|^(?i)Highest$' { return 'Highest' }
+    default { return $text.Trim() }
+  }
+}
+
+function Get-NotifierTaskXml {
+  try {
+    [xml](Export-ScheduledTask -TaskName $TaskName -ErrorAction Stop)
+  } catch {
+    $null
+  }
+}
+
+function Get-NotifierTaskExecNode {
+  param([xml]$Xml)
+  if (-not $Xml -or -not $Xml.Task -or -not $Xml.Task.Actions) { return $null }
+  $exec = @($Xml.Task.Actions.Exec)[0]
+  if ($exec) { return $exec }
+  $child = @($Xml.Task.Actions.ChildNodes | Where-Object { $_.LocalName -eq "Exec" })[0]
+  if ($child) { return $child }
+  return $null
+}
+
+function Test-NotifierTaskTrigger {
+  param([object]$Task, [xml]$Xml)
+  if ($Xml -and $Xml.Task -and $Xml.Task.Triggers) {
+    foreach ($node in @($Xml.Task.Triggers.ChildNodes)) {
+      if ($node -and [string]$node.LocalName -eq "LogonTrigger") { return $true }
+    }
+  }
   $trigger = @($Task.Triggers)[0]
-  if (-not $principal -or -not $action -or -not $trigger) { return $false }
-  $triggerType = [string]$trigger.GetType().Name
+  if (-not $trigger) { return $false }
+  $className = $null
+  if ($trigger.PSObject.Properties.Match("CimClass").Count -gt 0 -and $trigger.CimClass) {
+    $className = [string]$trigger.CimClass.CimClassName
+  } elseif ($trigger.PSObject.Properties.Match("CimSystemProperties").Count -gt 0 -and $trigger.CimSystemProperties) {
+    $className = [string]$trigger.CimSystemProperties.ClassName
+  }
+  return ($className -eq "MSFT_TaskLogonTrigger" -or $className -match "LogonTrigger$")
+}
+
+function Get-NotifierTaskSnapshot {
+  $current = Get-NotifierTask
+  if (-not $current) { return $null }
+  $principal = $current.Principal
+  $xml = Get-NotifierTaskXml
+  $exec = Get-NotifierTaskExecNode -Xml $xml
+  $trigger = @($current.Triggers)[0]
+  $className = $null
+  if ($trigger -and $trigger.PSObject.Properties.Match("CimClass").Count -gt 0 -and $trigger.CimClass) {
+    $className = [string]$trigger.CimClass.CimClassName
+  } elseif ($trigger -and $trigger.PSObject.Properties.Match("CimSystemProperties").Count -gt 0 -and $trigger.CimSystemProperties) {
+    $className = [string]$trigger.CimSystemProperties.ClassName
+  }
+  [pscustomobject]@{
+    exists = $true
+    taskName = $TaskName
+    groupId = Resolve-TaskSchedulerSid $principal.GroupId
+    groupIdRaw = [string]$principal.GroupId
+    logonType = Normalize-TaskLogonType $principal.LogonType
+    logonTypeRaw = [string]$principal.LogonType
+    runLevel = Normalize-TaskRunLevel $principal.RunLevel
+    runLevelRaw = [string]$principal.RunLevel
+    triggerType = if (Test-NotifierTaskTrigger $current $xml) { "AtLogOn" } else { "Other" }
+    triggerClassName = $className
+    triggerUserId = [string]$trigger.UserId
+    executable = [string]$exec.Command
+    arguments = [string]$exec.Arguments
+    workingDirectory = [string]$exec.WorkingDirectory
+  }
+}
+
+function Test-NotifierTaskMatches {
+  $snapshot = Get-NotifierTaskSnapshot
+  if (-not $snapshot) { return $false }
   return (
-    [string]$principal.GroupId -eq $GroupId -and
-    [string]$principal.LogonType -eq "Group" -and
-    [string]$principal.RunLevel -eq "Limited" -and
-    $triggerType -match "LogonTrigger" -and
-    [string]$trigger.UserId -eq "" -and
-    [string]$action.Execute -eq $Executable -and
-    [string]$action.Arguments -eq $Arguments -and
-    [string]$action.WorkingDirectory -eq $WorkingDirectory
+    [string]$snapshot.taskName -eq $TaskName -and
+    [string]$snapshot.groupId -eq $GroupId -and
+    [string]$snapshot.logonType -eq "Group" -and
+    [string]$snapshot.runLevel -eq "Limited" -and
+    [string]$snapshot.triggerType -eq "AtLogOn" -and
+    [string]$snapshot.triggerUserId -eq "" -and
+    [string]$snapshot.executable -eq $Executable -and
+    [string]$snapshot.arguments -eq $Arguments -and
+    [string]$snapshot.workingDirectory -eq $WorkingDirectory
   )
 }
 
@@ -93,25 +200,12 @@ function Query-TaskXml {
 }
 
 function Query-TaskState {
-  $current = Get-NotifierTask
-  if (-not $current) {
+  $snapshot = Get-NotifierTaskSnapshot
+  if (-not $snapshot) {
     [pscustomobject]@{ exists = $false } | ConvertTo-Json -Compress
     return
   }
-  $principal = $current.Principal
-  $action = @($current.Actions)[0]
-  $trigger = @($current.Triggers)[0]
-  [pscustomobject]@{
-    exists = $true
-    groupId = [string]$principal.GroupId
-    logonType = [string]$principal.LogonType
-    runLevel = [string]$principal.RunLevel
-    triggerType = [string]$trigger.GetType().Name
-    triggerUserId = [string]$trigger.UserId
-    executable = [string]$action.Execute
-    arguments = [string]$action.Arguments
-    workingDirectory = [string]$action.WorkingDirectory
-  } | ConvertTo-Json -Compress
+  $snapshot | ConvertTo-Json -Compress
 }
 
 switch ($Mode) {

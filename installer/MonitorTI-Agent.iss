@@ -1,5 +1,5 @@
 #define MyAppName "Monitor TI Agent"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.14"
 #define MyPublisher "Monitor TI"
 #define MyUrl "https://monitor-ti.local"
 
@@ -36,7 +36,7 @@ Filename: "sc"; Parameters: "config MonitorTIAgent start= auto"; Flags: runhidde
 ; 3) recuperacao: reiniciar apos falhas (5s)
 Filename: "sc"; Parameters: "failure MonitorTIAgent reset= 86400 actions= restart/5000/restart/5000/restart/5000"; Flags: runhidden
 ; 4) instala/atualiza a task companion do Notifier
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\notifier-companion-task.ps1"" install"; Flags: runhidden; StatusMsg: "Configurando task MonitorTI-Notifier..."
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\notifier-companion-task.ps1"" install -InstallDir ""{app}"""; Flags: runhidden; StatusMsg: "Configurando task MonitorTI-Notifier..."
 ; 5) inicia o servico
 Filename: "{app}\MonitorTIAgent.exe"; Parameters: "start"; Flags: runhidden; StatusMsg: "Iniciando serviço Monitor TI Agent..."
 
@@ -44,7 +44,7 @@ Filename: "{app}\MonitorTIAgent.exe"; Parameters: "start"; Flags: runhidden; Sta
 ; Para e remove o servico (nao toca em ProgramData\MonitorTI)
 Filename: "{app}\MonitorTIAgent.exe"; Parameters: "stop"; Flags: runhidden
 Filename: "{app}\MonitorTIAgent.exe"; Parameters: "uninstall"; Flags: runhidden
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\notifier-companion-task.ps1"" remove"; Flags: runhidden
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\notifier-companion-task.ps1"" remove -InstallDir ""{app}"""; Flags: runhidden
 
 [UninstallDelete]
 ; Remove arquivos/restos do diretorio de instalacao.

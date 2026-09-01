@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -12,8 +13,11 @@ const installerDir = path.join(repoRoot, "installer");
 const releaseAgentTest = path.join(repoRoot, "release", "agent-test");
 const outDir = path.join(repoRoot, "release", "installer-test");
 const agentExe = path.join(releaseAgentTest, "MonitorTI-Agent.exe");
+const notifierSrc = path.join(repoRoot, "notifier", "MonitorTI-Notifier.cs");
+const notifierExe = path.join(releaseAgentTest, "MonitorTI-Notifier.exe");
 const winswExe = path.join(releaseAgentTest, "WinSW.exe");
 const issFile = path.join(installerDir, "MonitorTI-Agent.iss");
+const agentPackage = JSON.parse(fs.readFileSync(path.join(agentRoot, "package.json"), "utf8"));
 
 const WINSW_URL =
   "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe";
@@ -64,6 +68,40 @@ async function main() {
     console.log("Agent SEA presente: " + agentExe);
   }
 
+  if (!fs.existsSync(agentExe) || fs.statSync(agentExe).size <= 0) {
+    throw new Error("MonitorTI-Agent.exe ausente ou vazio: " + agentExe);
+  }
+  const agentSize = fs.statSync(agentExe).size;
+  const agentHash = crypto.createHash("sha256").update(fs.readFileSync(agentExe)).digest("hex");
+  console.log("Agent gerado: " + agentExe);
+  console.log("Agent tamanho: " + agentSize + " bytes");
+  console.log("Agent SHA256: " + agentHash);
+
+  // O instalador sempre recebe o Notifier recompilado do fonte versionado.
+  if (!fs.existsSync(notifierSrc)) {
+    throw new Error("Fonte do Notifier nao encontrada: " + notifierSrc);
+  }
+  const csc = "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe";
+  if (!fs.existsSync(csc)) {
+    throw new Error("Compilador C# nao encontrado: " + csc);
+  }
+  execSync(`"${csc}" /target:winexe /out:"${notifierExe}" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Core.dll "${notifierSrc}"`, {
+    cwd: agentRoot,
+    stdio: "inherit"
+  });
+  if (!fs.existsSync(notifierExe) || fs.statSync(notifierExe).size <= 0) {
+    throw new Error("MonitorTI-Notifier.exe ausente ou vazio: " + notifierExe);
+  }
+  const notifierHash = crypto.createHash("sha256").update(fs.readFileSync(notifierExe)).digest("hex");
+  console.log("Notifier gerado: " + notifierExe);
+  console.log("Notifier tamanho: " + fs.statSync(notifierExe).size + " bytes");
+  console.log("Notifier SHA256: " + notifierHash);
+
+  const versionMatch = String(agentPackage.version || "").match(/^(\d+\.\d+\.\d+)/);
+  if (!versionMatch) throw new Error("Versao do Agent invalida: " + agentPackage.version);
+  const installerVersion = versionMatch[1];
+  console.log("Versao do installer: " + installerVersion + " (agent/package.json)");
+
   // 2) garante o WinSW
   await ensureWinSW();
 
@@ -84,7 +122,7 @@ async function main() {
 
   // 5) compila o instalador
   fs.mkdirSync(outDir, { recursive: true });
-  execSync(`"${iscc}" "${issFile}" /O"${outDir}"`, {
+  execSync(`"${iscc}" "${issFile}" /DMyAppVersion=${installerVersion} /O"${outDir}"`, {
     cwd: installerDir,
     stdio: "inherit"
   });
@@ -95,6 +133,7 @@ async function main() {
   }
   const size = fs.statSync(setup).size;
   console.log("Instalador gerado: " + setup + " (" + size + " bytes)");
+  console.log("Instalador SHA256: " + crypto.createHash("sha256").update(fs.readFileSync(setup)).digest("hex"));
 }
 
 main().catch((e) => {

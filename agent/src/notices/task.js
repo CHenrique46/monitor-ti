@@ -4,18 +4,37 @@ const path = require("path");
 const { execFileSync: defaultExecFileSync } = require("child_process");
 
 const TASK_NAME = process.env.MTI_NOTIFIER_TASK_NAME || "MonitorTI-Notifier";
-const EXECUTABLE = "C:\\Program Files (x86)\\MonitorTI\\Agent\\MonitorTI-Notifier.exe";
-const WORKING_DIRECTORY = "C:\\Program Files (x86)\\MonitorTI\\Agent";
 const ARGUMENTS = ["--companion"];
 const TASK_GROUP_ID = "S-1-5-11";
 const TASK_LOGON_TYPE = "Group";
 const TASK_RUN_LEVEL = "Limited";
 
+function getInstallDir(argv = process.argv, execPath = process.execPath) {
+  const packageFlag = argv.indexOf("--apply-update-package");
+  if (packageFlag >= 0 && argv[packageFlag + 2]) return path.dirname(argv[packageFlag + 2]);
+  const legacyFlag = argv.indexOf("--apply-update");
+  if (legacyFlag >= 0 && argv[legacyFlag + 1]) return path.dirname(argv[legacyFlag + 1]);
+  if (path.basename(execPath).toLowerCase() === "monitorti-agent.exe") {
+    return path.dirname(execPath);
+  }
+  const programFiles = process.env["ProgramFiles(x86)"] || process.env.ProgramFiles;
+  return programFiles ? path.join(programFiles, "MonitorTI", "Agent") : path.dirname(execPath);
+}
+
+function getTaskExecutable(installDir = getInstallDir()) {
+  return path.join(installDir, "MonitorTI-Notifier.exe");
+}
+
+function getTaskWorkingDirectory(installDir = getInstallDir()) {
+  return installDir;
+}
+
 function psSingleQuote(value) {
   return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
-function buildTaskSpec() {
+function buildTaskSpec(installDir = getInstallDir()) {
+  const executable = getTaskExecutable(installDir);
   return {
     taskName: TASK_NAME,
     trigger: {
@@ -27,19 +46,19 @@ function buildTaskSpec() {
       logonType: TASK_LOGON_TYPE,
       runLevel: TASK_RUN_LEVEL
     },
-    executable: EXECUTABLE,
-    workingDirectory: WORKING_DIRECTORY,
+    executable,
+    workingDirectory: installDir,
     arguments: ARGUMENTS.slice(),
     elevation: "none"
   };
 }
 
-function validateSpec(spec) {
+function validateSpec(spec, installDir = getInstallDir()) {
   if (!spec || typeof spec !== "object") return false;
   return (
     spec.taskName === TASK_NAME &&
-    spec.executable === EXECUTABLE &&
-    spec.workingDirectory === WORKING_DIRECTORY &&
+    spec.executable === getTaskExecutable(installDir) &&
+    spec.workingDirectory === installDir &&
     Array.isArray(spec.arguments) &&
     spec.arguments.length === 1 &&
     spec.arguments[0] === "--companion" &&
@@ -58,15 +77,17 @@ function buildPowerShellScript() {
   const lines = [
     'param(',
     '  [ValidateSet("install","create","update","remove","run","query","queryxml","state")]',
-    '  [string]$Mode = "install"',
+    '  [string]$Mode = "install",',
+    '  [string]$InstallDir = $PSScriptRoot',
     ')',
     '',
     '$ErrorActionPreference = "Stop"',
     '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     '',
     '$TaskName = ' + psSingleQuote(TASK_NAME),
-    '$Executable = ' + psSingleQuote(EXECUTABLE),
-    '$WorkingDirectory = ' + psSingleQuote(WORKING_DIRECTORY),
+    '$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)',
+    '$Executable = [System.IO.Path]::Combine($InstallDir, "MonitorTI-Notifier.exe")',
+    '$WorkingDirectory = $InstallDir',
     '$Arguments = ' + psSingleQuote(ARGUMENTS[0]),
     '$GroupId = ' + psSingleQuote(TASK_GROUP_ID),
     '',
@@ -293,7 +314,7 @@ function invokeTaskMode(mode, execImpl = defaultExecFileSync) {
   try {
     return execImpl(
       "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Mode", mode],
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Mode", mode, "-InstallDir", getInstallDir()],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000, maxBuffer: 2 * 1024 * 1024 }
     );
   } finally {
@@ -342,8 +363,11 @@ function restoreTaskXml(xml, execImpl = defaultExecFileSync) {
 
 module.exports = {
   TASK_NAME,
-  EXECUTABLE,
-  WORKING_DIRECTORY,
+  EXECUTABLE: getTaskExecutable(),
+  WORKING_DIRECTORY: getInstallDir(),
+  getInstallDir,
+  getTaskExecutable,
+  getTaskWorkingDirectory,
   ARGUMENTS,
   TASK_GROUP_ID,
   TASK_LOGON_TYPE,
