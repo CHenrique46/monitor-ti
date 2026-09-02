@@ -825,6 +825,31 @@ body {
 .detail-key { font-size: 0.68rem; }
 .detail-val { font-size: 0.9rem; margin-top: 2px; }
 
+.office-section > h3 { color: #7dd3fc; }
+.office-installations { display: grid; gap: 12px; }
+.office-installation {
+  background: rgba(30, 41, 59, 0.52);
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  border-radius: 9px;
+  min-width: 0;
+  padding: 14px;
+}
+.office-installation-header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 10px; min-width: 0; }
+.office-installation-header strong { color: #f8fafc; display: block; overflow-wrap: anywhere; }
+.office-installation-header small { color: #94a3b8; display: block; margin-top: 3px; overflow-wrap: anywhere; }
+.office-status { border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 999px; flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; padding: 4px 9px; }
+.office-status.ok { background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.35); color: #86efac; }
+.office-status.failed { background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.35); color: #fca5a5; }
+.office-status.attention { background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.35); color: #fbbf24; }
+.office-status.unknown { background: rgba(148, 163, 184, 0.1); color: #cbd5e1; }
+.office-field-grid { display: grid; gap: 0 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.office-field-grid .detail-field:nth-last-child(-n + 2) { border-bottom: 0; }
+.office-license-details { border-top: 1px solid rgba(71, 85, 105, 0.5); margin-top: 8px; padding-top: 9px; }
+.office-license-details summary { color: #7dd3fc; cursor: pointer; font-size: 0.78rem; font-weight: 700; }
+.office-license-details .detail-field { border-bottom: 0; padding: 7px 0 0; }
+.office-empty { background: rgba(30, 41, 59, 0.52); border: 1px dashed #475569; border-radius: 9px; color: #cbd5e1; display: grid; gap: 5px; padding: 16px; }
+.office-empty span { color: #94a3b8; font-size: 0.86rem; }
+
 .summary-metrics > div {
   border-radius: 10px;
   padding: 13px;
@@ -888,6 +913,9 @@ body {
   .detail-tabs { top: 103px; }
   .drawer-meta span { border-right: 0; padding-right: 0; }
   .detail-grid { grid-template-columns: 1fr; }
+  .office-field-grid { grid-template-columns: 1fr; }
+  .office-field-grid .detail-field:nth-last-child(-n + 2) { border-bottom: 1px solid rgba(71, 85, 105, 0.5); }
+  .office-field-grid .detail-field:last-child { border-bottom: 0; }
   .detail-field:nth-last-child(-n + 2) { border-bottom: 1px solid rgba(71, 85, 105, 0.5); }
   .detail-field:last-child { border-bottom: 0; }
 }

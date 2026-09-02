@@ -8,6 +8,7 @@ import { apiFetch } from '../api'
 import { bytesToGB, formatUptime, formatPercent, sistemaLabel, fmtDate } from '../utils/formatters'
 import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from '../utils/uptime'
 import { isVersionNewer } from '../utils/version'
+import { activationStatus, licenseType, normalizeOffice, partialKey } from '../utils/office'
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
@@ -21,6 +22,44 @@ function Field({ label, children }) {
 
 function Section({ title, children }) {
   return <section className="detail-section"><h3>{title}</h3><div className="detail-grid">{children}</div></section>
+}
+
+function OfficeField({ label, value }) {
+  if (value === null || value === undefined || value === '') return null
+  return <Field label={label}>{value}</Field>
+}
+
+function OfficeInstallationCard({ installation }) {
+  const activation = activationStatus(installation.activationStatus)
+  const key = partialKey(installation.partialProductKey)
+  return <article className="office-installation">
+    <div className="office-installation-header">
+      <div><strong>{installation.productName || 'Produto não informado'}</strong>{installation.edition && <small>{installation.edition}</small>}</div>
+      <span className={`office-status ${activation.tone}`}>{activation.label}</span>
+    </div>
+    <div className="office-field-grid">
+      <OfficeField label="Versão" value={installation.version} />
+      <OfficeField label="Arquitetura" value={installation.architecture} />
+      <OfficeField label="Canal de atualização" value={installation.updateChannel} />
+      <OfficeField label="Tecnologia de instalação" value={installation.installationTechnology} />
+      <OfficeField label="Ativação" value={activation.label} />
+      <OfficeField label="Tipo de licença" value={licenseType(installation.licenseType)} />
+      <OfficeField label="Chave parcial" value={key} />
+      <OfficeField label="Última verificação" value={installation.collectedAt ? fmtDate(installation.collectedAt) : null} />
+    </div>
+    {(installation.licenseName || installation.licenseDescription) && <details className="office-license-details">
+      <summary>Detalhes da licença</summary>
+      <OfficeField label="Nome" value={installation.licenseName} />
+      <OfficeField label="Descrição" value={installation.licenseDescription} />
+    </details>}
+  </article>
+}
+
+function OfficeSection({ office }) {
+  const inventory = normalizeOffice(office)
+  return <section className="detail-section office-section"><h3>Microsoft Office</h3>
+    {inventory.installations.length ? <div className="office-installations">{inventory.installations.map((installation, index) => <OfficeInstallationCard key={installation.id || index} installation={installation} />)}</div> : <div className="office-empty"><strong>Informações do Office ainda não disponíveis.</strong><span>Será necessário um Agent compatível para coletar essas informações.</span></div>}
+  </section>
 }
 
 function StatusTag({ status }) {
@@ -176,9 +215,10 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
         {uptimeNeedsAttention && <div className={`uptime-notice ${uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? 'recommended' : ''}`}><strong>{uptimeStatusLabel(uptimeStatus)}</strong><span>{online ? `Este computador está há ${formatUptime(c.uptime)} sem reiniciar.` : `Último uptime registrado: ${formatUptime(c.uptime)}. O valor não é incrementado enquanto offline.`}</span></div>}
         <Section title="Histórico de métricas"><div className="period-selector">{['24h', '7d', '30d'].map((p) => <button key={p} type="button" className={periodo === p ? 'period-btn active' : 'period-btn'} onClick={() => setPeriodo(p)}>{p === '24h' ? '24 horas' : p === '7d' ? '7 dias' : '30 dias'}</button>)}</div><MetricChart title="CPU %" data={metricas} dataKey="cpuUso" color="#38bdf8" /><MetricChart title="RAM %" data={metricas} dataKey="ramUsoPct" color="#a78bfa" /><MetricChart title="Disco %" data={metricas} dataKey="discoUsoPct" color="#f59e0b" /></Section>
       </>}
-      {tab === 'hardware' && <>
-        <Section title="Sistema"><Field label="Sistema">{sistemaLabel(c.sistema)}</Field><Field label="Release">{c.sistemaRelease}</Field><Field label="Arquitetura">{c.arquitetura}</Field><Field label="Build Windows">{c.sistemaBuild}</Field></Section>
-        <Section title="Processador"><Field label="Modelo">{c.processador}</Field><Field label="CPUs lógicas">{c.cpusLogicas}</Field><Field label="Fabricante">{c.fabricante}</Field><Field label="Modelo do equipamento">{c.modeloEquipamento}</Field></Section>
+       {tab === 'hardware' && <>
+         <Section title="Sistema"><Field label="Sistema">{sistemaLabel(c.sistema)}</Field><Field label="Release">{c.sistemaRelease}</Field><Field label="Arquitetura">{c.arquitetura}</Field><Field label="Build Windows">{c.sistemaBuild}</Field></Section>
+         <OfficeSection office={c.office} />
+         <Section title="Processador"><Field label="Modelo">{c.processador}</Field><Field label="CPUs lógicas">{c.cpusLogicas}</Field><Field label="Fabricante">{c.fabricante}</Field><Field label="Modelo do equipamento">{c.modeloEquipamento}</Field></Section>
         <Section title="Memória e armazenamento"><Field label="RAM total">{bytesToGB(c.ramTotal)}</Field><Field label="RAM usada">{bytesToGB(c.ramUsada)}</Field><Field label="Disco total">{bytesToGB(c.discoTotal)}</Field><Field label="Disco livre">{bytesToGB(c.discoLivre)}</Field></Section>
         <Section title="Equipamento"><Field label="Número de série">{c.numeroSerie}</Field><Field label="GPU">{c.gpu}</Field><Field label="MAC">{c.mac}</Field><Field label="Placa-mãe">{[c.placaMaeFabricante, c.placaMaeModelo].filter(Boolean).join(' / ')}</Field><Field label="BIOS">{[c.biosFabricante, c.biosVersao].filter(Boolean).join(' / ')}</Field></Section>
         <Section title="Discos físicos">{c.discosFisicos?.length ? c.discosFisicos.map((d, i) => <div className="inventory-row" key={d.id || i}><strong>Disco {i + 1}</strong><span>{d.modelo || 'Modelo não informado'} · {d.tamanho != null ? bytesToGB(d.tamanho) : 'Capacidade não informada'} · {d.interface || 'Interface não informada'}</span></div>) : <div className="muted">Nenhum disco físico informado.</div>}</Section>
