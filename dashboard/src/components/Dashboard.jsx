@@ -105,6 +105,8 @@ export default function Dashboard() {
       ? computadores.filter(
           (c) =>
             (c.hostname || '').toLowerCase().includes(term) ||
+            (c.apelido || '').toLowerCase().includes(term) ||
+            (c.equipamentoNumero || '').toLowerCase().includes(term) ||
             (c.usuario || '').toLowerCase().includes(term) ||
             (c.ip || '').toLowerCase().includes(term)
         )

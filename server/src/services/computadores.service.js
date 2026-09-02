@@ -9,6 +9,19 @@ class ComputerDeletionError extends Error {
   }
 }
 
+const ADMIN_IDENTITY_FIELDS = new Set(["apelido", "equipamentoNumero"]);
+const MAX_APELIDO_LENGTH = 120;
+const MAX_EQUIPMENT_NUMBER_LENGTH = 64;
+
+function normalizeAdminField(value, maxLength, field) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") throw new ComputerDeletionError("INVALID_METADATA", `${field} deve ser texto.`);
+  const normalized = value.trim();
+  if (normalized.length > maxLength) throw new ComputerDeletionError("INVALID_METADATA", `${field} excede o limite permitido.`);
+  return normalized || null;
+}
+
 function mapComputador(c, includeOffice = false) {
   const officeInstallations = includeOffice ? (c.officeInstallations || []).map((installation) => ({
     id: installation.id,
@@ -35,6 +48,8 @@ function mapComputador(c, includeOffice = false) {
     id: c.id,
     deviceId: c.deviceId,
     hostname: c.hostname,
+    apelido: c.apelido || null,
+    equipamentoNumero: c.equipamentoNumero || null,
     usuario: c.usuario,
     ip: c.ip,
     sistema: c.sistema,
@@ -155,6 +170,25 @@ function parseComputerId(value) {
   return id;
 }
 
+async function updateInventoryMetadata(value, input, db = prisma) {
+  const id = parseComputerId(value);
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new ComputerDeletionError("INVALID_METADATA", "Dados de identificação inválidos.");
+  if (Object.keys(input).some((field) => !ADMIN_IDENTITY_FIELDS.has(field))) throw new ComputerDeletionError("INVALID_METADATA", "Campo de identificação inválido.");
+  if (!Object.keys(input).length) throw new ComputerDeletionError("INVALID_METADATA", "Informe ao menos um campo.");
+  const data = {
+    apelido: normalizeAdminField(input.apelido, MAX_APELIDO_LENGTH, "Apelido"),
+    equipamentoNumero: normalizeAdminField(input.equipamentoNumero, MAX_EQUIPMENT_NUMBER_LENGTH, "Número do equipamento")
+  };
+  Object.keys(data).forEach((field) => data[field] === undefined && delete data[field]);
+  try {
+    return mapComputador(await db.computador.update({ where: { id }, data }));
+  } catch (error) {
+    if (error && error.code === "P2025") throw new ComputerDeletionError("NOT_FOUND", "Computador não encontrado.");
+    if (error && error.code === "P2002") throw new ComputerDeletionError("DUPLICATE_EQUIPMENT", "Número do equipamento já está vinculado a outro computador.");
+    throw error;
+  }
+}
+
 async function deleteOfflineComputer(value, db = prisma) {
   const id = parseComputerId(value);
   return db.$transaction(async (tx) => {
@@ -206,7 +240,8 @@ async function deleteOfflineComputer(value, db = prisma) {
 module.exports = {
   list,
   getById,
-  createComputadoresService: ({ db = prisma } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db) }),
+  createComputadoresService: ({ db = prisma } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db) }),
+  updateInventoryMetadata,
   getCapabilitiesById,
   deleteOfflineComputer,
   ComputerDeletionError

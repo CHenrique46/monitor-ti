@@ -1,22 +1,34 @@
 const computadoresService = require("../services/computadores.service");
 
 function createComputadoresController({ service = computadoresService } = {}) {
-async function deleteComputer(req, res) {
-  try {
-    const result = await service.deleteOfflineComputer(req.params.id);
-    return res.status(200).json({ ok: true, computadorId: result.id });
-  } catch (err) {
-    if (err && err.code === "INVALID_ID") return res.status(400).json({ erro: err.message });
-    if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
-    if (err && ["ONLINE", "MAINTENANCE"].includes(err.code)) {
-      return res.status(409).json({ erro: err.message });
+  async function deleteComputer(req, res) {
+    try {
+      const result = await service.deleteOfflineComputer(req.params.id);
+      return res.status(200).json({ ok: true, computadorId: result.id });
+    } catch (err) {
+      if (err && err.code === "INVALID_ID") return res.status(400).json({ erro: err.message });
+      if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
+      if (err && ["ONLINE", "MAINTENANCE"].includes(err.code)) return res.status(409).json({ erro: err.message });
+      return res.status(500).json({ erro: "Não foi possível excluir o computador." });
     }
-    return res.status(500).json({ erro: "Não foi possível excluir o computador." });
   }
-}
+
+  async function updateInventoryMetadata(req, res) {
+    try {
+      const item = await service.updateInventoryMetadata(req.params.id, req.body);
+      return res.status(200).json(item);
+    } catch (err) {
+      if (err && err.code === "INVALID_ID") return res.status(400).json({ erro: err.message });
+      if (err && err.code === "INVALID_METADATA") return res.status(400).json({ erro: err.message });
+      if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
+      if (err && err.code === "DUPLICATE_EQUIPMENT") return res.status(409).json({ erro: err.message });
+      return res.status(500).json({ erro: "Não foi possível atualizar a identificação." });
+    }
+  }
 
  return {
-   deleteComputer,
+    deleteComputer,
+    updateInventoryMetadata,
    list: (req, res) => listWithService(req, res, service),
    getById: (req, res) => getByIdWithService(req, res, service)
  };
@@ -63,4 +75,4 @@ async function getCapabilities(req, res) {
   }
 }
 
-module.exports = { list, getById, getCapabilities, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };
+module.exports = { list, getById, getCapabilities, updateInventoryMetadata: createComputadoresController().updateInventoryMetadata, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };

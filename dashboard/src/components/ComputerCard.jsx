@@ -57,7 +57,8 @@ export default function ComputerCard({ c, latestVersion, onOpen, onDelete, hasAc
       role={onOpen ? "button" : undefined}
       tabIndex={onOpen ? 0 : undefined}
     >
-      <div className="hostname">{c.hostname || "(sem nome)"}</div>
+      <div className="hostname">{c.apelido || c.hostname || "(sem nome)"}</div>
+      {(c.apelido || c.equipamentoNumero) && <div className="computer-identity-meta">{c.apelido && c.hostname}{c.apelido && c.equipamentoNumero ? " · " : ""}{c.equipamentoNumero && `Equip. ${c.equipamentoNumero}`}</div>}
       <div className="card-status-row">
         <span className={online ? "status-pill online" : "status-pill offline"}>
           {online ? "Online" : "Offline"}

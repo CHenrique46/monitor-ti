@@ -410,6 +410,7 @@ p {
   font-size: 0.82rem;
   overflow-wrap: anywhere;
 }
+.computer-identity-meta { color: #94a3b8; font-size: 0.8rem; margin-top: 2px; }
 
 .card-metrics {
   display: grid;
@@ -1328,6 +1329,12 @@ body {
   display: flex;
   gap: 10px;
 }
+
+.identity-edit-button { margin-top: 10px; }
+.identity-form { display: grid; gap: 10px; grid-column: 1 / -1; margin-top: 10px; }
+.identity-form label { color: #94a3b8; display: grid; font-size: 0.78rem; gap: 5px; }
+.identity-form input { background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font: inherit; padding: 8px 10px; }
+.identity-form input:focus { border-color: #38bdf8; outline: 2px solid rgba(56, 189, 248, 0.18); outline-offset: 1px; }
 
 .modal-backdrop {
   align-items: center;

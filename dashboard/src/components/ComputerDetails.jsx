@@ -114,6 +114,10 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const [wallpaperConfirm, setWallpaperConfirm] = useState(false)
   const [wallpaperError, setWallpaperError] = useState(null)
   const [tab, setTab] = useState('summary')
+  const [editingIdentity, setEditingIdentity] = useState(false)
+  const [identityForm, setIdentityForm] = useState({ apelido: '', equipamentoNumero: '' })
+  const [identitySaving, setIdentitySaving] = useState(false)
+  const [identityError, setIdentityError] = useState(null)
 
   useEffect(() => {
     let active = true
@@ -192,6 +196,16 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const triggerServiceRestart = async () => { setServiceRestartConfirm(false); setServiceRestartError(null); await request('/actions/service-restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceKey: 'spooler' }) }, setServiceRestartError) }
   const triggerSystemMaintenance = async () => { setSystemMaintenanceConfirm(false); setSystemMaintenanceError(null); await request('/actions/system-maintenance', { method: 'POST' }, setSystemMaintenanceError) }
   const triggerWallpaper = async () => { setWallpaperConfirm(false); setWallpaperError(null); await request('/actions/set-wallpaper', { method: 'POST' }, setWallpaperError) }
+  const beginIdentityEdit = () => { setIdentityForm({ apelido: c.apelido || '', equipamentoNumero: c.equipamentoNumero || '' }); setIdentityError(null); setEditingIdentity(true) }
+  const saveIdentity = async () => {
+    setIdentitySaving(true); setIdentityError(null)
+    try {
+      const r = await apiFetch(`${API_URL}/api/computadores/${id}/inventory-metadata`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identityForm) })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) { setIdentityError(body.erro || 'Não foi possível salvar a identificação.'); return }
+      setC((previous) => ({ ...previous, ...body })); setEditingIdentity(false)
+    } catch { setIdentityError('Não foi possível salvar a identificação.') } finally { setIdentitySaving(false) }
+  }
 
   if (notFound) return drawer ? <div className="drawer-backdrop" onClick={onClose}><aside className="details-drawer" onClick={(event) => event.stopPropagation()}><div className="drawer-empty">Computador não encontrado.</div></aside></div> : <div className="container"><Link className="back-link" to="/">← Voltar ao Dashboard</Link><div className="empty">Computador não encontrado.</div></div>
   if (!c) return drawer ? <div className="drawer-backdrop"><aside className="details-drawer"><div className="drawer-empty">Carregando dados do computador...</div></aside></div> : <div className="container"><SiteNav /><p className="muted">Carregando dados do computador...</p></div>
@@ -217,13 +231,14 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const tabs = [['summary', 'Resumo'], ['hardware', 'Hardware'], ['alerts', `Alertas${alerts.length ? ` (${alerts.length})` : ''}`], ['actions', 'Ações'], ['maintenance', 'Manutenção']]
   const body = <>
     <header className={`drawer-header ${cardClass}`}>
-      <div><span className="section-kicker">Detalhes do computador</span><h1>{c.hostname || '(sem nome)'}</h1><div className="drawer-meta"><span className={online ? 'online' : 'offline'}>{online ? '● Online' : '● Offline'}</span><span>{c.ip || 'IP não informado'}</span><span>Agent v{c.agentVersion || '?'}</span><span>Última comunicação: {fmtDate(c.ultimaConexao)}</span></div></div>
+      <div><span className="section-kicker">Detalhes do computador</span><h1>{c.apelido || c.hostname || '(sem nome)'}</h1><div className="drawer-meta"><span>{c.hostname || 'Hostname não informado'}</span>{c.equipamentoNumero && <span>Equip. {c.equipamentoNumero}</span>}<span className={online ? 'online' : 'offline'}>{online ? '● Online' : '● Offline'}</span><span>{c.ip || 'IP não informado'}</span><span>Agent v{c.agentVersion || '?'}</span><span>Última comunicação: {fmtDate(c.ultimaConexao)}</span></div></div>
       <button type="button" className="drawer-close" onClick={onClose || (() => window.history.back())} aria-label="Fechar detalhes">×</button>
     </header>
     {!serverOk && <p className="server-warn">Não foi possível atualizar os dados.</p>}
     <nav className="detail-tabs" aria-label="Seções do computador">{tabs.map(([key, label]) => <button key={key} type="button" className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}</nav>
     <div className="drawer-content">
-      {tab === 'summary' && <>
+       {tab === 'summary' && <>
+         <Section title="Identificação"><Field label="Apelido">{c.apelido || 'Não informado'}</Field><Field label="Equipamento">{c.equipamentoNumero || 'Não informado'}</Field>{!editingIdentity ? <button type="button" className="btn-update identity-edit-button" onClick={beginIdentityEdit}>Editar identificação</button> : <div className="identity-form"><label>Apelido<input type="text" value={identityForm.apelido} maxLength={120} onChange={(event) => setIdentityForm((form) => ({ ...form, apelido: event.target.value }))} /></label><label>Nº do equipamento<input type="text" value={identityForm.equipamentoNumero} maxLength={64} onChange={(event) => setIdentityForm((form) => ({ ...form, equipamentoNumero: event.target.value }))} /></label><div className="confirm-actions"><button type="button" className="btn-cancel" onClick={() => setEditingIdentity(false)} disabled={identitySaving}>Cancelar</button><button type="button" className="btn-update" onClick={saveIdentity} disabled={identitySaving}>{identitySaving ? 'Salvando...' : 'Salvar'}</button></div>{identityError && <div className="update-status failed">{identityError}</div>}</div>}</Section>
         <div className="summary-metrics"><div><span>CPU</span><strong>{formatPercent(c.cpuUso)}</strong><MetricBar value={c.cpuUso} /></div><div><span>RAM</span><strong>{bytesToGB(c.ramUsada)} / {bytesToGB(c.ramTotal)}</strong><MetricBar value={ramPct} /></div><div><span>Disco C:</span><strong>{bytesToGB(c.discoLivre)} livres</strong><MetricBar value={discoPct} /></div></div>
         <Section title="Estado atual"><Field label="Status">{online ? 'Online' : 'Offline'}</Field><Field label={online ? 'Uptime atual' : 'Último uptime registrado'}>{formatUptime(c.uptime)}</Field><Field label="Status do uptime"><span className={`uptime-status ${uptimeStatus.toLowerCase()}`}>{uptimeStatusLabel(uptimeStatus)}</span></Field><Field label="Usuário">{c.usuario || 'Não informado'}</Field><Field label="Device ID">{c.deviceId}</Field></Section>
         {uptimeNeedsAttention && <div className={`uptime-notice ${uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? 'recommended' : ''}`}><strong>{uptimeStatusLabel(uptimeStatus)}</strong><span>{online ? `Este computador está há ${formatUptime(c.uptime)} sem reiniciar.` : `Último uptime registrado: ${formatUptime(c.uptime)}. O valor não é incrementado enquanto offline.`}</span></div>}

@@ -11,6 +11,8 @@ model Computador {
   id            Int      @id @default(autoincrement())
   deviceId      String   @unique
   hostname      String
+  apelido       String?
+  equipamentoNumero String? @unique
   usuario       String?
   ip            String?
   sistema        String?

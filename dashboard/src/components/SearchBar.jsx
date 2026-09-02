@@ -3,7 +3,7 @@ export default function SearchBar({ value, onChange }) {
     <div className="search">
       <input
         type="text"
-        placeholder="Buscar por hostname, usuário ou IP..."
+        placeholder="Buscar por apelido, hostname, equipamento ou IP..."
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />

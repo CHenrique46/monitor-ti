@@ -168,10 +168,10 @@ function markOffline(deviceId, exceptWs, db = prisma) {
     });
 }
 
-function handleMetrics(d) {
+function handleMetrics(d, db = prisma) {
   return new Promise((resolve) => {
     (async () => {
-      const existente = await prisma.computador.findUnique({
+      const existente = await db.computador.findUnique({
         where: { deviceId: d.deviceId }
       });
       // Nao cria computador via metrics; apenas atualiza registro existente
@@ -202,7 +202,7 @@ function handleMetrics(d) {
         return resolve(false);
       }
 
-      await prisma.computador.update({
+      await db.computador.update({
         where: { deviceId: d.deviceId },
         data: {
           status: "online",
@@ -525,7 +525,7 @@ function setupWebSocket(server, dependencies = {}) {
           console.error("[Monitor TI] erro no register:", err.message);
         }
       } else if (msg && msg.type === "metrics" && msg.data && msg.data.deviceId) {
-        await handleMetrics(msg.data);
+        await handleMetrics(msg.data, db);
       }
       }).catch((err) => {
         let context = {};
