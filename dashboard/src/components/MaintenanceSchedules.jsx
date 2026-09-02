@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import SiteNav from './SiteNav'
 import { API_URL } from '../config'
+import { apiFetch } from '../api'
 
 const weekdays = [
   'Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira',
@@ -35,8 +36,8 @@ export default function MaintenanceSchedules() {
   const load = async () => {
     try {
       const [scheduleResponse, computerResponse] = await Promise.all([
-        fetch(`${API_URL}/api/maintenance-schedules`),
-        fetch(`${API_URL}/api/computadores`)
+        apiFetch(`${API_URL}/api/maintenance-schedules`),
+        apiFetch(`${API_URL}/api/computadores`)
       ])
       if (!scheduleResponse.ok || !computerResponse.ok) throw new Error('Não foi possível carregar os agendamentos.')
       const nextSchedules = await scheduleResponse.json()
@@ -61,7 +62,7 @@ export default function MaintenanceSchedules() {
     setNotice('')
     setError('')
     try {
-      const response = await fetch(`${API_URL}/api/maintenance-schedules${editingId ? `/${editingId}` : ''}`, {
+      const response = await apiFetch(`${API_URL}/api/maintenance-schedules${editingId ? `/${editingId}` : ''}`, {
         method: editingId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, dayOfWeek: Number(form.dayOfWeek), computerIds: form.computerIds.map(Number) })
@@ -80,7 +81,7 @@ export default function MaintenanceSchedules() {
     setNotice('')
     setError('')
     try {
-      const response = await fetch(`${API_URL}/api/maintenance-schedules/${editingId}/dry-run`, { method: 'POST' })
+      const response = await apiFetch(`${API_URL}/api/maintenance-schedules/${editingId}/dry-run`, { method: 'POST' })
       const body = await response.json()
       if (!response.ok) throw new Error(body.erro || 'Dry Run indisponível.')
       setPlan(body)

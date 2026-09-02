@@ -126,6 +126,23 @@ p {
   color: #64748b;
 }
 
+.login-shell { align-items: center; background: radial-gradient(circle at 50% 0%, rgba(14, 116, 144, 0.2), transparent 42%), #07111f; display: flex; justify-content: center; min-height: 100vh; padding: 24px; }
+.login-card { background: rgba(15, 23, 42, 0.96); border: 1px solid #164e63; border-radius: 18px; box-shadow: 0 24px 70px rgba(2, 6, 23, 0.45); max-width: 410px; padding: 34px; width: 100%; }
+.login-brand { align-items: center; display: flex; gap: 12px; margin-bottom: 28px; }
+.login-brand strong { color: #e0f2fe; display: block; font-size: 1.1rem; letter-spacing: .02em; }
+.login-brand small { color: #38bdf8; display: block; font-size: .74rem; letter-spacing: .18em; margin-top: 3px; text-transform: uppercase; }
+.login-card h1 { color: #f8fafc; font-size: 1.65rem; margin-bottom: 7px; }
+.login-subtitle { color: #94a3b8; margin-bottom: 22px; }
+.login-card form { display: grid; gap: 8px; }
+.login-card label { color: #cbd5e1; font-size: .86rem; font-weight: 650; margin-top: 8px; }
+.login-card input { background: #020617; border: 1px solid #334155; border-radius: 8px; color: #f8fafc; font: inherit; padding: 11px 12px; }
+.login-card input:focus { border-color: #38bdf8; outline: 2px solid rgba(56, 189, 248, .2); }
+.login-submit { background: #0891b2; border: 0; border-radius: 8px; color: white; cursor: pointer; font: inherit; font-weight: 700; margin-top: 18px; padding: 12px; }
+.login-submit:hover { background: #0e7490; }
+.login-submit:disabled { cursor: wait; opacity: .65; }
+.login-error { background: rgba(127, 29, 29, .28); border: 1px solid #ef4444; border-radius: 7px; color: #fecaca; font-size: .9rem; margin-bottom: 14px; padding: 10px 12px; }
+.login-loading { color: #7dd3fc; }
+
 .operational-summary {
   gap: 10px;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -2035,9 +2052,13 @@ body {
 .site-nav-link:hover,
 .site-nav-link:focus-visible { border-color: #60a5fa; color: #e0f2fe; outline: none; }
 .site-nav-link.active { box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.15); }
+.site-account { align-items: center; color: #94a3b8; display: flex; font-size: .82rem; gap: 9px; margin-left: auto; }
+.site-account button { background: transparent; border: 1px solid #334155; border-radius: 6px; color: #bae6fd; cursor: pointer; font: inherit; padding: 6px 10px; }
+.site-account button:hover { border-color: #38bdf8; color: #f0f9ff; }
 
 @media (max-width: 600px) {
   .site-header { align-items: stretch; gap: 12px; margin-bottom: 22px; }
   .site-nav { gap: 6px; }
   .site-nav-link { font-size: 0.79rem; padding: 6px 9px; }
+  .site-account { justify-content: space-between; margin-left: 0; }
 }

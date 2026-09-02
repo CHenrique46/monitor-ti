@@ -10,6 +10,7 @@ import ComputerDetails from './ComputerDetails'
 import DeleteComputerDialog from './DeleteComputerDialog'
 import { computerMatchesFilter, sortComputadoresByPriority } from '../utils/computerAttention'
 import { buildOperationalSummary } from '../utils/operationalSummary.js'
+import { apiFetch } from '../api'
 
 export default function Dashboard() {
   const [serverOk, setServerOk] = useState(true)
@@ -31,7 +32,7 @@ export default function Dashboard() {
 
     const load = async () => {
       try {
-        const h = await fetch(`${API_URL}/health`)
+        const h = await apiFetch(`${API_URL}/health`)
         if (!active) return
         setServerOk(h.ok)
       } catch (e) {
@@ -39,7 +40,7 @@ export default function Dashboard() {
       }
 
       try {
-        const r = await fetch(`${API_URL}/api/computadores`)
+        const r = await apiFetch(`${API_URL}/api/computadores`)
         if (!active) return
         if (r.ok) {
           setComputadores(await r.json())
@@ -62,7 +63,7 @@ export default function Dashboard() {
     let active = true
     const loadLatest = async () => {
       try {
-        const r = await fetch(`${API_URL}/api/agent/releases/latest`)
+        const r = await apiFetch(`${API_URL}/api/agent/releases/latest`)
         if (!active) return
         if (r.ok) setLatestVersion((await r.json()).version)
         else setLatestVersion(null)
@@ -82,7 +83,7 @@ export default function Dashboard() {
     let active = true
     const loadAlertas = async () => {
       try {
-        const r = await fetch(`${API_URL}/api/alertas?ativos=true`)
+        const r = await apiFetch(`${API_URL}/api/alertas?ativos=true`)
         if (!active) return
         if (r.ok) setAlertasAtivos(await r.json())
         setAlertsLoaded(true)
@@ -125,7 +126,7 @@ export default function Dashboard() {
     setDeleting(true)
     setDeleteError(null)
     try {
-      const response = await fetch(`${API_URL}/api/computadores/${deleteTarget.id}`, { method: 'DELETE' })
+      const response = await apiFetch(`${API_URL}/api/computadores/${deleteTarget.id}`, { method: 'DELETE' })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
         setDeleteError(body.erro || 'Não foi possível excluir o computador.')

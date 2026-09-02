@@ -4,6 +4,7 @@ import SiteNav from './SiteNav'
 import MetricChart from './MetricChart'
 import { computeAlerts } from '../utils/alerts'
 import { API_URL } from '../config'
+import { apiFetch } from '../api'
 import { bytesToGB, formatUptime, formatPercent, sistemaLabel, fmtDate } from '../utils/formatters'
 import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from '../utils/uptime'
 
@@ -65,7 +66,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
     let active = true
     const load = async () => {
       try {
-        const r = await fetch(`${API_URL}/api/computadores/${id}`)
+        const r = await apiFetch(`${API_URL}/api/computadores/${id}`)
         if (!active) return
         if (r.status === 404) { setNotFound(true); return }
         if (!r.ok) { setServerOk(false); return }
@@ -78,14 +79,14 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
 
   useEffect(() => {
     let active = true
-    const loadM = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/metricas?periodo=${periodo}`); if (active && r.ok) setMetricas(await r.json()) } catch {} }
+    const loadM = async () => { try { const r = await apiFetch(`${API_URL}/api/computadores/${id}/metricas?periodo=${periodo}`); if (active && r.ok) setMetricas(await r.json()) } catch {} }
     loadM(); const interval = setInterval(loadM, 60000)
     return () => { active = false; clearInterval(interval) }
   }, [id, periodo])
 
   useEffect(() => {
     let active = true
-    const loadA = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/alertas`); if (active && r.ok) setAlertas(await r.json()) } catch {} }
+    const loadA = async () => { try { const r = await apiFetch(`${API_URL}/api/computadores/${id}/alertas`); if (active && r.ok) setAlertas(await r.json()) } catch {} }
     loadA(); const interval = setInterval(loadA, 10000)
     return () => { active = false; clearInterval(interval) }
   }, [id])
@@ -96,7 +97,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
       return undefined
     }
     let active = true
-    const loadRelease = async () => { try { const r = await fetch(`${API_URL}/api/agent/releases/latest`); if (active) setRelease(r.ok ? await r.json() : null) } catch { if (active) setRelease(null) } }
+    const loadRelease = async () => { try { const r = await apiFetch(`${API_URL}/api/agent/releases/latest`); if (active) setRelease(r.ok ? await r.json() : null) } catch { if (active) setRelease(null) } }
     loadRelease(); const interval = setInterval(loadRelease, 30000)
     return () => { active = false; clearInterval(interval) }
   }, [id, drawer, latestVersion])
@@ -104,14 +105,14 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   useEffect(() => {
     if (!release) return undefined
     let active = true
-    const loadStatus = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/agent-update`); if (active && r.ok) setUpdateStatus(await r.json()) } catch {} }
+    const loadStatus = async () => { try { const r = await apiFetch(`${API_URL}/api/computadores/${id}/agent-update`); if (active && r.ok) setUpdateStatus(await r.json()) } catch {} }
     loadStatus(); const interval = setInterval(loadStatus, 3000)
     return () => { active = false; clearInterval(interval) }
   }, [id, release])
 
   useEffect(() => {
     let active = true
-    const loadActions = async () => { try { const r = await fetch(`${API_URL}/api/computadores/${id}/actions?take=10`); if (active && r.ok) setRemoteActions(await r.json()) } catch {} }
+    const loadActions = async () => { try { const r = await apiFetch(`${API_URL}/api/computadores/${id}/actions?take=10`); if (active && r.ok) setRemoteActions(await r.json()) } catch {} }
     loadActions(); const interval = setInterval(loadActions, 5000)
     return () => { active = false; clearInterval(interval) }
   }, [id])
@@ -127,7 +128,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
 
   const request = async (path, options, onError) => {
     try {
-      const r = await fetch(`${API_URL}/api/computadores/${id}${path}`, options)
+      const r = await apiFetch(`${API_URL}/api/computadores/${id}${path}`, options)
       const body = await r.json().catch(() => ({}))
       if (!r.ok) { onError(body.erro || 'Não foi possível concluir a ação.'); return }
       if (body.execution) setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])

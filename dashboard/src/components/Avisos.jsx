@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import SiteNav from './SiteNav'
 import { API_URL } from '../config'
+import { apiFetch } from '../api'
 import {
   buildSelectionSummary,
   WEEKDAY_OPTIONS,
@@ -94,10 +95,10 @@ export default function Avisos() {
   const reloadData = async () => {
     try {
       const [computersRes, avisosRes, entregasRes, agendamentosRes] = await Promise.all([
-        fetch(`${API_URL}/api/computadores`),
-        fetch(`${API_URL}/api/avisos`),
-        fetch(`${API_URL}/api/avisos/entregas?limit=300`),
-        fetch(`${API_URL}/api/avisos/agendamentos`)
+        apiFetch(`${API_URL}/api/computadores`),
+        apiFetch(`${API_URL}/api/avisos`),
+        apiFetch(`${API_URL}/api/avisos/entregas?limit=300`),
+        apiFetch(`${API_URL}/api/avisos/agendamentos`)
       ])
 
       setServerOk(computersRes.ok && avisosRes.ok && entregasRes.ok && agendamentosRes.ok)
@@ -114,7 +115,7 @@ export default function Avisos() {
         const enriched = await Promise.all(
           items.map(async (computer) => {
             try {
-              const capRes = await fetch(`${API_URL}/api/computadores/${computer.id}/capabilities`)
+              const capRes = await apiFetch(`${API_URL}/api/computadores/${computer.id}/capabilities`)
               if (!capRes.ok) return { ...computer, noticesReady: null }
               const cap = await capRes.json()
               return {
@@ -342,7 +343,7 @@ export default function Avisos() {
 
       setSaving(true)
       try {
-        const response = await fetch(`${API_URL}/api/avisos`, {
+        const response = await apiFetch(`${API_URL}/api/avisos`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -370,7 +371,7 @@ export default function Avisos() {
     setSaving(true)
     clearMessages()
     try {
-      const response = await fetch(`${API_URL}/api/avisos`, {
+      const response = await apiFetch(`${API_URL}/api/avisos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pendingImmediatePayload)
@@ -392,7 +393,7 @@ export default function Avisos() {
     setSaving(true)
     clearMessages()
     try {
-      const response = await fetch(pendingScheduleAction.url, {
+      const response = await apiFetch(pendingScheduleAction.url, {
         method: pendingScheduleAction.method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pendingScheduleAction.body)
@@ -420,7 +421,7 @@ export default function Avisos() {
     setSaving(true)
     clearMessages()
     try {
-      const response = await fetch(`${API_URL}/api/avisos/agendamentos/${pendingDeleteSchedule.id}`, {
+      const response = await apiFetch(`${API_URL}/api/avisos/agendamentos/${pendingDeleteSchedule.id}`, {
         method: 'DELETE'
       })
       if (!response.ok && response.status !== 204) {

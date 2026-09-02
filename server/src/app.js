@@ -13,6 +13,9 @@ const remoteActionsRoutes = require("./routes/remoteActions.routes");
 const wallpaperAssetRoutes = require("./routes/wallpaperAsset.routes");
 const maintenanceSchedulerRoutes = require("./routes/maintenanceScheduler.routes");
 const maintenanceSchedulerCanaryRoutes = require("./routes/maintenanceSchedulerCanary.routes");
+const { createAuthRouter } = require("./routes/auth.routes");
+const { createAuthService } = require("./auth/service");
+const { requireHumanSession } = require("./auth/middleware");
 const { setupWebSocket } = require("./ws/agentServer");
 const prisma = require("./prisma");
 const { logEvent } = require("./logger");
@@ -23,19 +26,22 @@ const avisosService = require("./services/avisos.service");
 const maintenanceScheduler = require("./services/maintenanceScheduler.service");
 
 const app = express();
+const authService = createAuthService();
 
 app.use(express.json());
 
 app.use("/health", healthRoutes);
-app.use("/api/computadores", computadoresRoutes);
-app.use("/api/computadores", metricasRoutes);
-app.use("/api/alertas", alertasRoutes);
-app.use("/api/computadores", alertasRoutes);
+app.use("/api/auth", createAuthRouter({ authService }));
+const humanSession = requireHumanSession(authService);
+app.use("/api/computadores", humanSession, computadoresRoutes);
+app.use("/api/computadores", humanSession, metricasRoutes);
+app.use("/api/alertas", humanSession, alertasRoutes);
+app.use("/api/computadores", humanSession, alertasRoutes);
 app.use("/api/agent", agentRoutes);
-app.use("/api/avisos", avisosRoutes);
-app.use("/api/computadores", remoteActionsRoutes);
+app.use("/api/avisos", humanSession, avisosRoutes);
+app.use("/api/computadores", humanSession, remoteActionsRoutes);
 app.use("/api/assets", wallpaperAssetRoutes);
-app.use("/api/maintenance-schedules", maintenanceSchedulerRoutes);
+app.use("/api/maintenance-schedules", humanSession, maintenanceSchedulerRoutes);
 app.use("/internal/maintenance-scheduler/canary", maintenanceSchedulerCanaryRoutes);
 
 const DIST_DIR = path.join(__dirname, "..", "..", "dashboard", "dist");

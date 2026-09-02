@@ -1,4 +1,5 @@
 import { NavLink, Link, useLocation } from 'react-router-dom'
+import { useAuth } from '../auth/AuthContext'
 
 const navigationItems = [
   { key: 'overview', to: '/', label: 'Visão Geral', end: true },
@@ -8,6 +9,7 @@ const navigationItems = [
 
 export default function SiteNav() {
   const location = useLocation()
+  const { user, logout } = useAuth()
 
   return (
     <header className="site-header">
@@ -38,6 +40,7 @@ export default function SiteNav() {
           </NavLink>
         ))}
       </nav>
+      <div className="site-account"><span>{user.username}</span><button type="button" onClick={logout}>Sair</button></div>
     </header>
   )
 }
