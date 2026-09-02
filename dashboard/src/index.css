@@ -849,6 +849,17 @@ body {
 .office-license-details .detail-field { border-bottom: 0; padding: 7px 0 0; }
 .office-empty { background: rgba(30, 41, 59, 0.52); border: 1px dashed #475569; border-radius: 9px; color: #cbd5e1; display: grid; gap: 5px; padding: 16px; }
 .office-empty span { color: #94a3b8; font-size: 0.86rem; }
+.office-components { display: grid; gap: 8px; margin-top: 14px; }
+.office-components h4 { color: #cbd5e1; font-size: 0.78rem; letter-spacing: 0.04em; margin: 0; text-transform: uppercase; }
+.office-component { background: rgba(15, 23, 42, 0.35); border-left: 2px solid #64748b; display: grid; gap: 3px; padding: 10px 12px; }
+.office-component strong { color: #e2e8f0; overflow-wrap: anywhere; }
+.office-component span { color: #94a3b8; font-size: 0.82rem; }
+.office-additional-state { border-left: 2px solid #f59e0b; display: grid; gap: 3px; margin-top: 12px; padding: 8px 10px; }
+.office-additional-state strong, .office-additional-state span { color: #fbbf24; font-size: 0.82rem; }
+.office-additional-state small { color: #cbd5e1; overflow-wrap: anywhere; }
+.office-technical-details { border-top: 1px solid rgba(71, 85, 105, 0.5); margin-top: 14px; padding-top: 10px; }
+.office-technical-details summary { color: #7dd3fc; cursor: pointer; font-size: 0.78rem; font-weight: 700; }
+.office-technical-details .office-installations { margin-top: 10px; }
 
 .summary-metrics > div {
   border-radius: 10px;

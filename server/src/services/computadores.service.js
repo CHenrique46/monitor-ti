@@ -1,4 +1,5 @@
 const prisma = require("../prisma");
+const { normalizeOfficeInstallations } = require("../inventory/officeNormalization");
 
 class ComputerDeletionError extends Error {
   constructor(code, message) {
@@ -63,7 +64,8 @@ function mapComputador(c, includeOffice = false) {
         // Sem um marcador de coleta no modelo, zero registros é indeterminado.
         available: officeInstallations.length > 0 ? true : null,
         inventoryStatus: officeInstallations.length > 0 ? "reported" : "unknown",
-        installations: officeInstallations
+        installations: officeInstallations,
+        ...(officeInstallations.length ? { normalized: normalizeOfficeInstallations(officeInstallations) } : {})
       }
     } : {}),
     discosFisicos: (c.discosFisicos || []).map((d) => ({

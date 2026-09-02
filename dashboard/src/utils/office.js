@@ -27,7 +27,8 @@ export function normalizeOffice(office) {
   return {
     available: office?.available === true ? true : installations.length ? true : null,
     inventoryStatus: office?.inventoryStatus || 'unknown',
-    installations
+    installations,
+    normalized: office?.normalized || null
   }
 }
 
