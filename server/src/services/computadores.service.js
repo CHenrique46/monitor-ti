@@ -1,5 +1,6 @@
 const prisma = require("../prisma");
 const { normalizeOfficeInstallations } = require("../inventory/officeNormalization");
+const { compareInventory } = require("../inventory/inventoryComparison");
 
 class ComputerDeletionError extends Error {
   constructor(code, message) {
@@ -132,6 +133,19 @@ async function getById(id, db = prisma) {
     }
   });
   return c ? mapComputador(c, true) : null;
+}
+
+async function getInventoryComparison(value, db = prisma) {
+  const id = parseComputerId(value);
+  const computer = await getById(id, db);
+  if (!computer) return null;
+  const baseline = await db.computerInventoryBaseline.findUnique({ where: { computadorId: id } });
+  return {
+    computadorId: id,
+    equipamentoNumero: computer.equipamentoNumero,
+    apelido: computer.apelido,
+    comparison: compareInventory(baseline, computer)
+  };
 }
 
 async function getCapabilitiesById(id) {

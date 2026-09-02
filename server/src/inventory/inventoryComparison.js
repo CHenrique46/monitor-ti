@@ -82,7 +82,8 @@ function fieldResult(field, expected, actual, result) {
 
 function compareInventory(baseline, current) {
   if (!baseline) return ["CPU", "RAM", "STORAGE", "WINDOWS", "OFFICE", "OFFICE_PARTIAL_KEY"].map((field) => ({ field, expected: null, actual: null, status: STATUS.NO_BASELINE, reason: "baseline_missing" }));
-  const office = current && current.officeInstallations ? normalizeOfficeInstallations(current.officeInstallations) : null;
+  const officeInstallations = current && (current.officeInstallations || current.office?.installations);
+  const office = officeInstallations ? normalizeOfficeInstallations(officeInstallations) : null;
   const product = office && office.products[0] ? office.products[0] : null;
   const ramActual = current?.ramTotal == null ? null : `${(Number(current.ramTotal) / (1024 ** 3)).toFixed(1)} GB`;
   const storageActual = Array.isArray(current?.discosFisicos) ? current.discosFisicos.map((disk) => Number.isFinite(Number(disk.tamanho)) ? `${(Number(disk.tamanho) / 1e9).toFixed(0)} GB` : disk.modelo).filter(Boolean).join(", ") || null : null;
