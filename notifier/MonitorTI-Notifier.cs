@@ -90,7 +90,7 @@ namespace MonitorTI
         private const string COMPANION_PIPE_NAME = "MonitorTI-Notifier";
         private const int COMPANION_HEARTBEAT_MS = 15000;
         private const int COMPANION_RECONNECT_MS = 2000;
-        private const string COMPANION_VERSION = "1.1.18-dev";
+        private const string COMPANION_VERSION = "1.1.18";
         private const uint SPI_SETDESKWALLPAPER = 20;
         private const uint SPIF_UPDATEINIFILE = 0x01;
         private const uint SPIF_SENDCHANGE = 0x02;

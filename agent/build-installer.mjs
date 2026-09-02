@@ -13,9 +13,9 @@ const installerDir = path.join(repoRoot, "installer");
 const agentPackage = JSON.parse(fs.readFileSync(path.join(agentRoot, "package.json"), "utf8"));
 const releaseDirName = String(agentPackage.version).endsWith("-dev")
   ? "agent-dev-" + String(agentPackage.version).replace(/-dev$/, "")
-  : "agent-test";
+  : "agent-" + String(agentPackage.version);
 const releaseAgentTest = path.join(repoRoot, "release", releaseDirName);
-const outDir = path.join(repoRoot, "release", String(agentPackage.version).endsWith("-dev") ? "installer-dev-" + String(agentPackage.version).replace(/-dev$/, "") : "installer-test");
+const outDir = path.join(repoRoot, "release", String(agentPackage.version).endsWith("-dev") ? "installer-dev-" + String(agentPackage.version).replace(/-dev$/, "") : "installer-" + String(agentPackage.version));
 const agentExe = path.join(releaseAgentTest, "MonitorTI-Agent.exe");
 const notifierSrc = path.join(repoRoot, "notifier", "MonitorTI-Notifier.cs");
 const notifierExe = path.join(releaseAgentTest, "MonitorTI-Notifier.exe");

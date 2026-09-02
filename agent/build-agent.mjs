@@ -10,7 +10,7 @@ const dist = path.join(root, "dist");
 const agentPackage = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 const rel = String(agentPackage.version).endsWith("-dev")
   ? path.join(root, "..", "release", "agent-dev-" + String(agentPackage.version).replace(/-dev$/, ""))
-  : path.join(root, "..", "release", "agent-test");
+  : path.join(root, "..", "release", "agent-" + String(agentPackage.version));
 
 fs.mkdirSync(dist, { recursive: true });
 fs.mkdirSync(rel, { recursive: true });
