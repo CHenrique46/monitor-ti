@@ -130,7 +130,7 @@ async function main() {
     stdio: "inherit"
   });
 
-  const setup = path.join(outDir, "MonitorTI-Agent-Setup.exe");
+  const setup = path.join(outDir, "HenriTech-Control-Agent-Setup-" + installerVersion + ".exe");
   if (!fs.existsSync(setup)) {
     throw new Error("Instalador nao foi gerado: " + setup);
   }
