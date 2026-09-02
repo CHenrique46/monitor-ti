@@ -4,6 +4,7 @@ const historicoService = require("../services/historico.service");
 const alertasService = require("../services/alertas.service");
 const avisosService = require("../services/avisos.service");
 const remoteActionsService = require("../services/remoteActions.service");
+const { validateInventoryMessage } = require("../inventory/office");
 const logger = require("../logger");
 
 const HEARTBEAT_INTERVAL = 30000;
@@ -295,6 +296,24 @@ function setupWebSocket(server, dependencies = {}) {
           `[Monitor TI] update_status ${msg.deviceId}: ${msg.status}` +
             (msg.message || msg.error ? ` (${msg.message || msg.error})` : "")
         );
+        return;
+      }
+
+      if (msg && msg.type === "inventory") {
+        const validation = validateInventoryMessage(msg, ws.deviceId);
+        if (!validation.ok) {
+          logger.logEvent(`[Monitor TI] inventory rejected reason=${validation.reason}`);
+          return;
+        }
+        const computador = await db.computador.findUnique({
+          where: { deviceId: msg.deviceId },
+          select: { id: true }
+        });
+        if (!computador) {
+          logger.logEvent("[Monitor TI] inventory rejected reason=computer_not_found");
+          return;
+        }
+        logger.logEvent(`[Monitor TI] inventory received computerId=${computador.id} officeInstallationsCount=${validation.installationCount}`);
         return;
       }
 

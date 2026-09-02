@@ -8,6 +8,8 @@ const { execFile, spawn } = require("child_process");
 const { createNoticeBridge } = require("./notices/bridge");
 const remoteActions = require("./remoteActions");
 const { createRemoteActionStore } = require("./remoteActionStore");
+const { collectOfficeInventory } = require("./inventory/office");
+const { createOfficeInventorySender, scheduleOfficeInventory } = require("./inventory/officeProtocol");
 
 // Atualizador: se iniciado com --apply-update (arquivo unico) ou
 // --apply-update-package (pacote Agent+Notifier), executa apenas a troca e
@@ -157,6 +159,7 @@ const remoteActionRuntime = remoteActions.createRemoteActionRuntime({
       : { ok: false, message: "Notifier não aceitou a notificação." };
   }
 });
+const officeInventorySender = createOfficeInventorySender({ collector: collectOfficeInventory, logEvent });
 
 function sendRemoteActionReconciliation(ws) {
   try {
@@ -678,6 +681,7 @@ function connect(machine) {
     ws.send(JSON.stringify({ type: "register", data: machine }));
     logEvent("register enviado");
     startMetrics(ws, machine);
+    scheduleOfficeInventory(() => officeInventorySender.send(ws, machine.deviceId));
     if (noticesBridge) {
       noticesBridge.onWsOpen(ws);
       if (noticesBridge.isCompanionMode && noticesBridge.attemptCompanionTaskRunIfNeeded) {
