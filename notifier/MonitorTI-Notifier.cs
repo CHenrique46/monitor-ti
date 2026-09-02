@@ -13,6 +13,53 @@ using Microsoft.Win32;
 
 namespace MonitorTI
 {
+    public sealed class WallpaperValidationException : InvalidOperationException
+    {
+        public string Code { get; private set; }
+
+        public WallpaperValidationException(string code, string message) : base(message)
+        {
+            Code = code;
+        }
+    }
+
+    public static class WallpaperValidation
+    {
+        public const long MAX_SIZE = 10 * 1024 * 1024;
+
+        public static string NormalizeSha256(string expectedSha256)
+        {
+            string normalized = (expectedSha256 ?? "").Trim().ToUpperInvariant();
+            if (normalized.Length != 64) throw new WallpaperValidationException("WALLPAPER_INVALID_METADATA", "SHA256 esperado inválido.");
+            for (int i = 0; i < normalized.Length; i++)
+            {
+                char c = normalized[i];
+                if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'))) throw new WallpaperValidationException("WALLPAPER_INVALID_METADATA", "SHA256 esperado inválido.");
+            }
+            return normalized;
+        }
+
+        public static string ValidateFile(string candidate, string expectedSha256, long? expectedSize)
+        {
+            string normalizedSha256 = NormalizeSha256(expectedSha256);
+            if (!expectedSize.HasValue || expectedSize.Value <= 0 || expectedSize.Value > MAX_SIZE) throw new WallpaperValidationException("WALLPAPER_INVALID_METADATA", "Tamanho esperado inválido.");
+            if (string.IsNullOrEmpty(candidate) || !File.Exists(candidate)) throw new WallpaperValidationException("WALLPAPER_FILE_NOT_FOUND", "Arquivo de wallpaper não encontrado.");
+            FileInfo info = new FileInfo(candidate);
+            if (info.Length != expectedSize.Value) throw new WallpaperValidationException("WALLPAPER_SIZE_MISMATCH", "Tamanho do wallpaper divergente.");
+            byte[] body = File.ReadAllBytes(candidate);
+            if (!IsJpeg(body)) throw new WallpaperValidationException("WALLPAPER_INVALID_JPEG", "Formato JPEG inválido.");
+            string hash;
+            using (var stream = File.OpenRead(candidate)) using (var sha = System.Security.Cryptography.SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "");
+            if (!string.Equals(hash, normalizedSha256, StringComparison.OrdinalIgnoreCase)) throw new WallpaperValidationException("WALLPAPER_HASH_MISMATCH", "Hash do wallpaper divergente.");
+            return normalizedSha256;
+        }
+
+        private static bool IsJpeg(byte[] body)
+        {
+            return body != null && body.Length >= 4 && body[0] == 0xff && body[1] == 0xd8 && body[2] == 0xff && body[body.Length - 2] == 0xff && body[body.Length - 1] == 0xd9;
+        }
+    }
+
     public class NoticePayload
     {
         public string noticeDeliveryId;
@@ -43,7 +90,7 @@ namespace MonitorTI
         private const string COMPANION_PIPE_NAME = "MonitorTI-Notifier";
         private const int COMPANION_HEARTBEAT_MS = 15000;
         private const int COMPANION_RECONNECT_MS = 2000;
-        private const string COMPANION_VERSION = "1.1.15-dev";
+        private const string COMPANION_VERSION = "1.1.18-dev";
         private const uint SPI_SETDESKWALLPAPER = 20;
         private const uint SPIF_UPDATEINIFILE = 0x01;
         private const uint SPIF_SENDCHANGE = 0x02;
@@ -394,6 +441,29 @@ namespace MonitorTI
                         i++;
                     }
                     return sb.ToString();
+                }
+                idx = json.IndexOf(needle, idx + 1, StringComparison.Ordinal);
+            }
+            return null;
+        }
+
+        private static long? GetJsonInt64(string json, string key)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            string needle = "\"" + key + "\"";
+            int idx = json.IndexOf(needle, StringComparison.Ordinal);
+            while (idx >= 0)
+            {
+                int after = idx + needle.Length;
+                while (after < json.Length && (json[after] == ' ' || json[after] == ':' || json[after] == '\t' || json[after] == '\n' || json[after] == '\r')) after++;
+                int start = after;
+                if (start < json.Length && (json[start] == '-' || (json[start] >= '0' && json[start] <= '9')))
+                {
+                    int end = start + 1;
+                    while (end < json.Length && json[end] >= '0' && json[end] <= '9') end++;
+                    long value;
+                    if (long.TryParse(json.Substring(start, end - start), out value)) return value;
+                    return null;
                 }
                 idx = json.IndexOf(needle, idx + 1, StringComparison.Ordinal);
             }
@@ -926,13 +996,15 @@ namespace MonitorTI
                     var actionId = GetJsonString(line, "actionExecutionId");
                     var wallpaperPath = GetJsonString(line, "path");
                     var expectedSha256 = GetJsonString(line, "expectedSha256");
+                    var expectedSize = GetJsonInt64(line, "expectedSize");
+                    var assetId = GetJsonString(line, "assetId");
                     var style = GetJsonString(line, "style");
                     if (_ui.IsDisposed)
                     {
-                        SendWallpaperResult(actionId, false, "UI indisponível.", null, null);
+                        SendWallpaperResult(actionId, false, "WALLPAPER_APPLY_FAILED", "UI indisponível.", null, null, null, null);
                         return;
                     }
-                    _ui.BeginInvoke((Action)(() => ApplyWallpaper(actionId, wallpaperPath, expectedSha256, style)));
+                    _ui.BeginInvoke((Action)(() => ApplyWallpaper(actionId, wallpaperPath, expectedSha256, expectedSize, assetId, style)));
                     return;
                 }
 
@@ -1078,7 +1150,7 @@ namespace MonitorTI
                 SendRaw(msg);
             }
 
-            private void SendWallpaperResult(string actionId, bool applied, string error, string username, string sid)
+            private void SendWallpaperResult(string actionId, bool applied, string errorCode, string error, string username, string sid, string sha256, long? size)
             {
                 SendRaw(BuildJsonLine(
                     "type", JsonStringLiteral("wallpaper_result"),
@@ -1089,13 +1161,15 @@ namespace MonitorTI
                     "username", username == null ? "null" : JsonStringLiteral(username),
                     "sid", sid == null ? "null" : JsonStringLiteral(sid),
                     "wallpaperPath", applied ? JsonStringLiteral(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "MonitorTI", "wallpaper", "WallPaperVava.jpg")) : "null",
-                    "sha256", applied ? JsonStringLiteral("F5D2B5A264D60A9FC3FA8D130C0D9412411C98F753C10F2D0F441A4326CFE69E") : "null",
+                    "sha256", applied && sha256 != null ? JsonStringLiteral(sha256) : "null",
+                    "size", applied && size.HasValue ? size.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "null",
                     "style", applied ? JsonStringLiteral("fill") : "null",
+                    "errorCode", errorCode == null ? "null" : JsonStringLiteral(errorCode),
                     "error", error == null ? "null" : JsonStringLiteral(error)
                 ));
             }
 
-            private void ApplyWallpaper(string actionId, string wallpaperPath, string expectedSha256, string style)
+            private void ApplyWallpaper(string actionId, string wallpaperPath, string expectedSha256, long? expectedSize, string assetId, string style)
             {
                 try
                 {
@@ -1103,11 +1177,8 @@ namespace MonitorTI
                     string candidate = Path.GetFullPath(wallpaperPath ?? "");
                     if (!candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Caminho de wallpaper não permitido.");
                     if (!string.Equals(Path.GetExtension(candidate), ".jpg", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Extensão de wallpaper não permitida.");
-                    if (!File.Exists(candidate)) throw new FileNotFoundException("Arquivo de wallpaper não encontrado.");
-                    if (!string.Equals(expectedSha256, "F5D2B5A264D60A9FC3FA8D130C0D9412411C98F753C10F2D0F441A4326CFE69E", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Hash esperado de wallpaper não permitido.");
-                    string hash;
-                    using (var stream = File.OpenRead(candidate)) using (var sha = System.Security.Cryptography.SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "");
-                    if (!string.Equals(hash, expectedSha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Hash do wallpaper divergente.");
+                    if (!string.Equals(assetId, "official-wallpaper-v1", StringComparison.Ordinal)) throw new WallpaperValidationException("WALLPAPER_INVALID_METADATA", "Asset de wallpaper inválido.");
+                    string normalizedSha256 = WallpaperValidation.ValidateFile(candidate, expectedSha256, expectedSize);
                     if (!string.Equals(style, "fill", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Estilo de wallpaper não permitido.");
 
                     string username = WindowsIdentity.GetCurrent().Name;
@@ -1117,7 +1188,7 @@ namespace MonitorTI
                         string previousWallpaper = key.GetValue("Wallpaper", "") as string;
                         string previousStyle = key.GetValue("WallpaperStyle", "") as string;
                         string previousTile = key.GetValue("TileWallpaper", "") as string;
-                        SaveRollbackMetadata(username, sid, expectedSha256, previousWallpaper, previousStyle, previousTile);
+                        SaveRollbackMetadata(username, sid, normalizedSha256, previousWallpaper, previousStyle, previousTile);
                     }
                     using (var key = Registry.CurrentUser.CreateSubKey("Control Panel\\Desktop"))
                     {
@@ -1125,11 +1196,15 @@ namespace MonitorTI
                         key.SetValue("TileWallpaper", "0", RegistryValueKind.String);
                     }
                     if (!DesktopWallpaperSetter(candidate)) throw new InvalidOperationException("SystemParametersInfo falhou.");
-                    SendWallpaperResult(actionId, true, null, username, sid);
+                    SendWallpaperResult(actionId, true, null, null, username, sid, normalizedSha256, expectedSize);
                 }
-                catch
+                catch (WallpaperValidationException ex)
                 {
-                    SendWallpaperResult(actionId, false, "Falha ao validar ou aplicar o wallpaper.", null, null);
+                    SendWallpaperResult(actionId, false, ex.Code, ex.Message, null, null, null, null);
+                }
+                catch (Exception ex)
+                {
+                    SendWallpaperResult(actionId, false, "WALLPAPER_APPLY_FAILED", ex.Message, null, null, null, null);
                 }
             }
 

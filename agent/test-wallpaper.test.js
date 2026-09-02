@@ -6,6 +6,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { createWallpaperExecutor, ASSET_ID, EXTENSION } = require("./src/wallpaper");
 const { createRemoteActionRuntime } = require("./src/remoteActions");
+const runtimeSource = fs.readFileSync(path.join(__dirname, "src/notices/runtime.js"), "utf8");
 
 function jpeg(size = 32, fill = 7) {
   const body = Buffer.alloc(size, fill);
@@ -25,6 +26,12 @@ function payload(url = "http://server.test:4000/api/assets/wallpaper/current?tok
   return { actionExecutionId: "a", assetId: ASSET_ID, downloadUrl: url, expectedSha256: sha256(body), expectedSize: body.length, extension: EXTENSION };
 }
 
+test("IPC do companion repassa metadados dinâmicos do wallpaper", () => {
+  assert.match(runtimeSource, /expectedSha256:\s*payload\.expectedSha256/);
+  assert.match(runtimeSource, /expectedSize:\s*payload\.expectedSize/);
+  assert.match(runtimeSource, /assetId:\s*payload\.assetId/);
+});
+
 test("wallpaper rejeita URL inválida ou host diferente", async () => {
   const exec = createWallpaperExecutor({ serverUrl: "ws://server.test:4000", rootDir: path.join(os.tmpdir(), "mti-wallpaper-invalid"), fetch: async () => { throw new Error("não deveria baixar"); } });
   await assert.rejects(() => exec(payload("http://evil.test/api/assets/wallpaper/current?token=t&actionExecutionId=a&assetId=official-wallpaper-v1")), /Origem/);
@@ -43,7 +50,7 @@ test("wallpaper baixa, valida, aplica e reaproveita cache válido", async () => 
     fetch: async (_url, options) => { assert.equal(options.headers["x-monitor-device-id"], "device-expected"); downloads++; return { ok: true, arrayBuffer: async () => body }; },
     applyWallpaper: null
   });
-  const apply = async (request) => { applied++; assert.equal(request.style, "fill"); return { applied: true, username: "tester", sid: "S-1" }; };
+  const apply = async (request) => { applied++; assert.equal(request.style, "fill"); assert.equal(request.expectedSha256, expectedSha256); assert.equal(request.expectedSize, body.length); assert.equal(request.assetId, ASSET_ID); return { applied: true, username: "tester", sid: "S-1" }; };
   const command = payload(undefined, body);
   assert.equal(command.expectedSha256, expectedSha256);
   const first = await exec(command, apply);

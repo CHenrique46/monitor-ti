@@ -573,6 +573,12 @@ p {
 .inventory-row span { color: #cbd5e1; overflow-wrap: anywhere; }
 .action-toolbar { justify-content: space-between; margin-bottom: 12px; }
 .action-list { display: grid; gap: 8px; }
+.remote-actions-layout { align-items: start; display: grid; gap: 14px; grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr); }
+.remote-actions-available, .remote-actions-history { align-self: start; min-width: 0; }
+.remote-actions-available { display: grid; align-content: start; gap: 10px; }
+.remote-actions-available .action-toolbar { align-items: flex-start; flex-direction: column; margin-bottom: 0; }
+.remote-actions-available > .btn-update { width: 100%; }
+.remote-actions-history { max-height: 360px; overflow-y: auto; padding-right: 4px; }
 .action-item { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; }
 .action-item summary { align-items: center; cursor: pointer; display: flex; gap: 12px; justify-content: space-between; list-style: none; }
 .action-item summary::-webkit-details-marker { display: none; }
@@ -597,6 +603,8 @@ p {
   .detail-section { margin-top: 20px; }
   .detail-grid { grid-template-columns: 1fr; }
   .action-item summary { align-items: flex-start; }
+  .remote-actions-layout { grid-template-columns: 1fr; }
+  .remote-actions-history { max-height: 300px; }
 }
 
 @media (min-width: 601px) and (max-width: 900px) {

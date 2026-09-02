@@ -408,7 +408,7 @@ function createNoticeRuntime(opts) {
         reject(new Error("Timeout aguardando o companion."));
       }, timeoutMs);
       state.wallpaperRequests.set(actionExecutionId, { resolve, reject, timer });
-      if (!send(conn, { type: "wallpaper_apply", protocolVersion: PROTOCOL_VERSION, path: payload.path, expectedSha256: payload.expectedSha256, style: "fill", actionExecutionId })) {
+      if (!send(conn, { type: "wallpaper_apply", protocolVersion: PROTOCOL_VERSION, path: payload.path, expectedSha256: payload.expectedSha256, expectedSize: payload.expectedSize, assetId: payload.assetId, style: "fill", actionExecutionId })) {
         clearTimeout(timer);
         state.wallpaperRequests.delete(actionExecutionId);
         reject(new Error("Companion indisponível."));
@@ -772,7 +772,7 @@ function createNoticeRuntime(opts) {
         clearTimeout(request.timer);
         state.wallpaperRequests.delete(String(msg.actionExecutionId));
         if (msg.status === "SUCCESS" && msg.applied === true) request.resolve(msg);
-        else request.reject(new Error(String(msg.error || "Companion falhou ao aplicar wallpaper.")));
+        else request.reject(new Error([msg.errorCode, msg.error].filter(Boolean).join(": ") || "Companion falhou ao aplicar wallpaper."));
         break;
       }
       default:

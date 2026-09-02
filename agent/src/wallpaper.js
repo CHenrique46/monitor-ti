@@ -95,7 +95,7 @@ function createWallpaperExecutor(deps = {}) {
       } finally { clearTimeout(timer); }
     }
     if (typeof applyWallpaper !== "function") throw new Error("Companion indisponível.");
-    const result = await applyWallpaper({ path: finalPath, expectedSha256, style: "fill", actionExecutionId: payload.actionExecutionId });
+    const result = await applyWallpaper({ path: finalPath, expectedSha256, expectedSize, assetId: payload.assetId, style: "fill", actionExecutionId: payload.actionExecutionId });
     if (!result || result.applied !== true) throw new Error(result && result.error ? result.error : "Companion não aplicou o wallpaper.");
     return { ...result, wallpaperPath: finalPath, sha256: expectedSha256, size: expectedSize, cached };
   };
