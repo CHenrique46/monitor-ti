@@ -47,7 +47,7 @@ test("inventory validation rejects malformed, excessive and sensitive payloads",
 });
 
 function createDb() {
-  const calls = { upsert: 0, findUnique: 0 };
+  const calls = { upsert: 0, findUnique: 0, officeUpsert: 0, officeUpdateMany: 0 };
   return {
     calls,
     computador: {
@@ -55,7 +55,14 @@ function createDb() {
       findUnique: async ({ where }) => { calls.findUnique += 1; return where.deviceId === "dev-1" ? { id: 7 } : null; },
       updateMany: async () => ({ count: 0 })
     },
-    $transaction: async (callback) => callback({ discoFisico: { deleteMany: async () => {}, createMany: async () => {} } })
+    $transaction: async (callback) => callback({
+      computador: { findUnique: async ({ where }) => where.id === 7 ? { id: 7 } : null },
+      officeInstallation: {
+        upsert: async () => { calls.officeUpsert += 1; return {}; },
+        updateMany: async () => { calls.officeUpdateMany += 1; return { count: 0 }; }
+      },
+      discoFisico: { deleteMany: async () => {}, createMany: async () => {} }
+    })
   };
 }
 
@@ -83,7 +90,8 @@ test("WebSocket receives valid inventory without persistence or sensitive logs",
     await waitFor(() => db.calls.upsert === 1);
     client.send(JSON.stringify(validMessage()));
     await waitFor(() => logs.some((message) => message.includes("inventory received")));
-    assert.equal(db.calls.findUnique, 1);
+    assert.equal(db.calls.officeUpsert, 1);
+    assert.equal(db.calls.officeUpdateMany, 1);
     assert.equal(logs.some((message) => message.includes("AAAAA") || message.includes("licenseDescription")), false);
   } finally {
     logger.logEvent = originalLog;

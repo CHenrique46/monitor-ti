@@ -46,6 +46,7 @@ model Computador {
   entregasAviso EntregaAviso[]
   acoesRemotas  AcaoRemotaExecucao[]
   maintenanceScheduleTargets MaintenanceScheduleTarget[]
+  officeInstallations OfficeInstallation[]
 }
 
 model DiscoFisico {
@@ -207,6 +208,36 @@ model EntregaAviso {
 
   @@index([computadorId, estado])
   @@index([expiraEm])
+}
+
+model OfficeInstallation {
+  id                     Int      @id @default(autoincrement())
+  computadorId           Int
+  source                 String?
+  productReleaseId       String?
+  productName            String?
+  edition                String?
+  version                String?
+  architecture           String?
+  updateChannel          String?
+  installationTechnology String?
+  activationStatus       String?
+  rawStatusCode          String?
+  licenseType            String?
+  licenseName            String?
+  licenseDescription     String?
+  partialProductKey      String?
+  fingerprint            String
+  firstSeenAt            DateTime @default(now())
+  lastSeenAt             DateTime @default(now())
+  collectedAt            DateTime @default(now())
+  isPresent              Boolean  @default(true)
+
+  computador             Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+
+  @@unique([computadorId, fingerprint])
+  @@index([computadorId, isPresent])
+  @@index([computadorId, productReleaseId])
 }
 
 model AcaoRemotaExecucao {

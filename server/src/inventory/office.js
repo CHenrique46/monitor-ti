@@ -28,6 +28,7 @@ function validateInstallation(item) {
   if (!item || typeof item !== "object" || Array.isArray(item)) return false;
   if (Object.keys(item).some((key) => !FIELDS.includes(key))) return false;
   if (FIELDS.some((field) => !validString(item[field]))) return false;
+  if (typeof item.fingerprint !== "string" || !item.fingerprint.trim()) return false;
   return item.partialProductKey == null || /^[A-Za-z0-9]{5}$/.test(item.partialProductKey);
 }
 

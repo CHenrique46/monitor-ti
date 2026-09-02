@@ -5,6 +5,7 @@ const alertasService = require("../services/alertas.service");
 const avisosService = require("../services/avisos.service");
 const remoteActionsService = require("../services/remoteActions.service");
 const { validateInventoryMessage } = require("../inventory/office");
+const { persistOfficeInventory } = require("../inventory/persistence");
 const logger = require("../logger");
 
 const HEARTBEAT_INTERVAL = 30000;
@@ -313,7 +314,12 @@ function setupWebSocket(server, dependencies = {}) {
           logger.logEvent("[Monitor TI] inventory rejected reason=computer_not_found");
           return;
         }
-        logger.logEvent(`[Monitor TI] inventory received computerId=${computador.id} officeInstallationsCount=${validation.installationCount}`);
+        try {
+          await persistOfficeInventory({ db, computadorId: computador.id, office: msg.data.office });
+          logger.logEvent(`[Monitor TI] inventory received computerId=${computador.id} officeInstallationsCount=${validation.installationCount}`);
+        } catch (error) {
+          logger.logEvent(`[Monitor TI] inventory persistence failed computerId=${computador.id} reason=${String(error && (error.code || error.message) || "unknown").replace(/[\r\n]+/g, " ").slice(0, 160)}`);
+        }
         return;
       }
 
