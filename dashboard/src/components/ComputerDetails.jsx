@@ -8,7 +8,7 @@ import { apiFetch } from '../api'
 import { bytesToGB, formatUptime, formatPercent, sistemaLabel, fmtDate } from '../utils/formatters'
 import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from '../utils/uptime'
 import { compareVersions, isVersionNewer } from '../utils/version'
-import { activationStatus, licenseType, normalizeOffice, partialKey } from '../utils/office'
+import { activationStatus, displayProductName, licenseType, normalizeOffice, partialKey } from '../utils/office'
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
@@ -59,9 +59,8 @@ function NormalizedProduct({ product }) {
   const activation = activationStatus(product.primaryLicense?.activationStatus)
   const key = partialKey(product.primaryLicense?.partialProductKey)
   return <article className="office-installation office-product">
-    <div className="office-installation-header"><div><strong>{product.productName || 'Produto não informado'}</strong><small>{product.productFamily === 'MICROSOFT_365' ? 'Microsoft 365' : product.editionFamily !== 'UNKNOWN' ? product.editionFamily : null}</small></div><span className={`office-status ${activation.tone}`}>{product.primaryLicense ? activation.label : 'Licença não identificada'}</span></div>
-    <div className="office-field-grid"><OfficeField label="Versão" value={product.version} /><OfficeField label="Arquitetura" value={product.architecture || 'Não identificada'} /><OfficeField label="Tecnologia de instalação" value={product.installationTechnology} /><OfficeField label="Canal de atualização" value={product.updateChannel || (product.installationTechnology === 'MSI' ? 'Não aplicável' : 'Desconhecido')} /><OfficeField label="Ativação" value={product.primaryLicense ? activation.label : null} /><OfficeField label="Tipo de licença" value={product.primaryLicense ? licenseType(product.primaryLicense.licenseType) : null} /><OfficeField label="Chave parcial" value={key} /><OfficeField label="Última verificação" value={product.collectedAt ? fmtDate(product.collectedAt) : null} /></div>
-    {product.additionalLicenseStates?.length ? <div className="office-additional-state"><strong>Estado adicional detectado</strong><span>Requer atenção</span>{product.additionalLicenseStates.map((license, index) => <small key={index}>{license.licenseDescription || license.licenseName || license.activationStatus}</small>)}</div> : null}
+    <div className="office-installation-header"><div><strong>{displayProductName(product.productName) || 'Produto não informado'}</strong></div>{product.primaryLicense?.activationStatus === 'LICENSED' && <span className="office-status ok">Licenciado</span>}</div>
+    {key && <OfficeField label="Chave parcial" value={key} />}
   </article>
 }
 
@@ -72,7 +71,7 @@ function OfficeComponent({ component }) {
 function OfficeSection({ office }) {
   const inventory = normalizeOffice(office)
   return <section className="detail-section office-section"><h3>Microsoft Office</h3>
-    {inventory.normalized ? <>{inventory.normalized.products.map((product, index) => <NormalizedProduct key={index} product={product} />)}{inventory.normalized.components.length ? <div className="office-components"><h4>Componentes do Office</h4>{inventory.normalized.components.map((component, index) => <OfficeComponent key={index} component={component} />)}</div> : null}<details className="office-technical-details"><summary>Detalhes técnicos</summary><div className="office-installations">{inventory.installations.map((installation, index) => <OfficeInstallationCard key={installation.id || index} installation={installation} />)}</div></details></> : inventory.installations.length ? <div className="office-installations">{inventory.installations.map((installation, index) => <OfficeInstallationCard key={installation.id || index} installation={installation} />)}</div> : <div className="office-empty"><strong>Informações do Office ainda não disponíveis.</strong><span>Será necessário um Agent compatível para coletar essas informações.</span></div>}
+    {inventory.normalized ? <>{inventory.normalized.products.length ? inventory.normalized.products.map((product, index) => <NormalizedProduct key={index} product={product} />) : <div className="office-empty"><strong>Office não identificado.</strong></div>}{inventory.installations.length ? <details className="office-technical-details"><summary>Detalhes técnicos</summary><div className="office-installations">{inventory.installations.map((installation, index) => <OfficeInstallationCard key={installation.id || index} installation={installation} />)}</div></details> : null}</> : inventory.installations.length ? <div className="office-installations">{inventory.installations.map((installation, index) => <OfficeInstallationCard key={installation.id || index} installation={installation} />)}</div> : <div className="office-empty"><strong>Informação ainda não disponível.</strong></div>}
   </section>
 }
 

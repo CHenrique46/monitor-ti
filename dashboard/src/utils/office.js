@@ -45,3 +45,8 @@ export function partialKey(value) {
   const key = String(value).slice(-5)
   return key ? `••••• ${key}` : null
 }
+
+export function displayProductName(value) {
+  const name = String(value || '').trim()
+  return name.replace(/\s+-\s+(?:pt-br|pt-pt|en-us|en-gb|es-es|fr-fr|de-de|it-it|ja-jp|zh-cn|zh-tw)$/i, '') || null
+}
