@@ -47,7 +47,8 @@ function makeService(records = []) {
           discosFisicos: [],
           officeInstallations: records.filter((item) => args.include.officeInstallations.where.isPresent ? item.isPresent : true)
         };
-      }
+      },
+      findMany: async () => [{ id: 1, deviceId: "device-1", hostname: "PC-1", discosFisicos: [] }]
     }
   };
   return { service: computadoresService.createComputadoresService({ db }), calls };
@@ -92,6 +93,16 @@ test("computador inexistente retorna 404", async () => {
   const { service } = makeService();
   const controller = computadoresController.createComputadoresController({ service });
   assert.equal((await invoke(controller.getById, { id: 999 })).status, 404);
+});
+
+test("listagem geral continua retornando computadores sem depender de Office", async () => {
+  const { service } = makeService([office()]);
+  const controller = computadoresController.createComputadoresController({ service });
+  const result = await invoke(controller.list);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.length, 1);
+  assert.equal(result.body[0].hostname, "PC-1");
+  assert.equal(Object.hasOwn(result.body[0], "office"), false);
 });
 
 test("computador sem registros retorna inventário desconhecido e vazio", async () => {

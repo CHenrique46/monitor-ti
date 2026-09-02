@@ -8,8 +8,8 @@ class ComputerDeletionError extends Error {
   }
 }
 
-function mapComputador(c) {
-  const officeInstallations = (c.officeInstallations || []).map((installation) => ({
+function mapComputador(c, includeOffice = false) {
+  const officeInstallations = includeOffice ? (c.officeInstallations || []).map((installation) => ({
     id: installation.id,
     source: installation.source,
     productReleaseId: installation.productReleaseId,
@@ -28,7 +28,7 @@ function mapComputador(c) {
     firstSeenAt: installation.firstSeenAt,
     lastSeenAt: installation.lastSeenAt,
     collectedAt: installation.collectedAt
-  }));
+  })) : [];
 
   return {
     id: c.id,
@@ -58,12 +58,14 @@ function mapComputador(c) {
     discoLivre: c.discoLivre,
     uptime: c.uptime,
     ultimaMetrica: c.ultimaMetrica,
-    office: {
-      // Sem um marcador de coleta no modelo, zero registros é indeterminado.
-      available: officeInstallations.length > 0 ? true : null,
-      inventoryStatus: officeInstallations.length > 0 ? "reported" : "unknown",
-      installations: officeInstallations
-    },
+    ...(includeOffice ? {
+      office: {
+        // Sem um marcador de coleta no modelo, zero registros é indeterminado.
+        available: officeInstallations.length > 0 ? true : null,
+        inventoryStatus: officeInstallations.length > 0 ? "reported" : "unknown",
+        installations: officeInstallations
+      }
+    } : {}),
     discosFisicos: (c.discosFisicos || []).map((d) => ({
       id: d.id,
       modelo: d.modelo,
@@ -73,12 +75,12 @@ function mapComputador(c) {
   };
 }
 
-async function list() {
-  const items = await prisma.computador.findMany({
+async function list(db = prisma) {
+  const items = await db.computador.findMany({
     orderBy: { hostname: "asc" }
   });
 
-  return items.map(mapComputador);
+  return items.map((item) => mapComputador(item));
 }
 
 async function getById(id, db = prisma) {
@@ -112,7 +114,7 @@ async function getById(id, db = prisma) {
       }
     }
   });
-  return c ? mapComputador(c) : null;
+  return c ? mapComputador(c, true) : null;
 }
 
 async function getCapabilitiesById(id) {
@@ -202,7 +204,7 @@ async function deleteOfflineComputer(value, db = prisma) {
 module.exports = {
   list,
   getById,
-  createComputadoresService: ({ db = prisma } = {}) => ({ getById: (id) => getById(id, db) }),
+  createComputadoresService: ({ db = prisma } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db) }),
   getCapabilitiesById,
   deleteOfflineComputer,
   ComputerDeletionError

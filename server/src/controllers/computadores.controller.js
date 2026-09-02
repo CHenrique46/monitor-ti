@@ -17,12 +17,16 @@ async function deleteComputer(req, res) {
 
  return {
    deleteComputer,
-   list: (req, res) => list(req, res, service),
-   getById: (req, res) => getById(req, res, service)
+   list: (req, res) => listWithService(req, res, service),
+   getById: (req, res) => getByIdWithService(req, res, service)
  };
 }
 
-async function list(req, res, service = computadoresService) {
+async function list(req, res) {
+  return listWithService(req, res, computadoresService);
+}
+
+async function listWithService(req, res, service) {
   try {
     const items = await service.list();
     return res.status(200).json(items);
@@ -31,7 +35,11 @@ async function list(req, res, service = computadoresService) {
   }
 }
 
-async function getById(req, res, service = computadoresService) {
+async function getById(req, res) {
+  return getByIdWithService(req, res, computadoresService);
+}
+
+async function getByIdWithService(req, res, service) {
   try {
     const item = await service.getById(req.params.id);
     if (!item) {
