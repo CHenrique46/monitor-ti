@@ -7,6 +7,7 @@ import { API_URL } from '../config'
 import { apiFetch } from '../api'
 import { bytesToGB, formatUptime, formatPercent, sistemaLabel, fmtDate } from '../utils/formatters'
 import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from '../utils/uptime'
+import { isVersionNewer } from '../utils/version'
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
@@ -152,7 +153,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const hasCritical = alerts.some((a) => a.severity === 'critical')
   const hasWarn = alerts.some((a) => a.severity === 'warn')
   const cardClass = !online ? 'offline-card' : hasCritical ? 'critical-card' : hasWarn ? 'warn-card' : 'online-card'
-  const updateAvailable = release && c.agentVersion && release.version !== c.agentVersion
+  const updateAvailable = release && isVersionNewer(release.version, c.agentVersion)
   const inProgress = updateStatus && ['update_pending', 'update_downloading', 'update_validating', 'update_installing'].includes(updateStatus.status)
   const genericActions = remoteActions.filter((a) => a.action !== 'system_maintenance')
   const maintenanceActions = remoteActions.filter((a) => a.action === 'system_maintenance')

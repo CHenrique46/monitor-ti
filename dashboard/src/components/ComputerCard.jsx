@@ -7,6 +7,7 @@ import {
   fmtDate
 } from "../utils/formatters";
 import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from "../utils/uptime";
+import { isVersionNewer } from "../utils/version";
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0));
@@ -23,8 +24,7 @@ export default function ComputerCard({ c, latestVersion, onOpen, onDelete, hasAc
   const { alerts } = computeAlerts(c);
   const uptimeStatus = getUptimeStatus(c.uptime);
   const requiresAttention = hasActiveAlert || alerts.length > 0 || [UPTIME_STATUS.ATTENTION, UPTIME_STATUS.REBOOT_RECOMMENDED].includes(uptimeStatus);
-  const updateAvailable =
-    latestVersion && c.agentVersion && latestVersion !== c.agentVersion;
+  const updateAvailable = isVersionNewer(latestVersion, c.agentVersion);
 
   const ramPct =
     c.ramTotal && c.ramUsada != null
