@@ -26,9 +26,21 @@ function createComputadoresController({ service = computadoresService } = {}) {
     }
   }
 
+  async function getInventoryComparison(req, res) {
+    try {
+      const result = await service.getInventoryComparison(req.params.id);
+      if (!result) return res.status(404).json({ erro: "Computador não encontrado." });
+      return res.status(200).json(result);
+    } catch (err) {
+      if (err && err.code === "INVALID_ID") return res.status(400).json({ erro: err.message });
+      return res.status(500).json({ erro: "Não foi possível comparar o inventário." });
+    }
+  }
+
  return {
     deleteComputer,
     updateInventoryMetadata,
+    getInventoryComparison,
    list: (req, res) => listWithService(req, res, service),
    getById: (req, res) => getByIdWithService(req, res, service)
  };
@@ -75,4 +87,4 @@ async function getCapabilities(req, res) {
   }
 }
 
-module.exports = { list, getById, getCapabilities, updateInventoryMetadata: createComputadoresController().updateInventoryMetadata, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };
+module.exports = { list, getById, getCapabilities, updateInventoryMetadata: createComputadoresController().updateInventoryMetadata, getInventoryComparison: createComputadoresController().getInventoryComparison, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };

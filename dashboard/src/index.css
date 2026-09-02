@@ -1335,6 +1335,15 @@ body {
 .identity-form label { color: #94a3b8; display: grid; font-size: 0.78rem; gap: 5px; }
 .identity-form input { background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font: inherit; padding: 8px 10px; }
 .identity-form input:focus { border-color: #38bdf8; outline: 2px solid rgba(56, 189, 248, 0.18); outline-offset: 1px; }
+.inventory-comparison { display: grid; gap: 8px; grid-column: 1 / -1; }
+.inventory-comparison-row { border: 1px solid rgba(51, 65, 85, 0.75); border-radius: 8px; padding: 9px 11px; }
+.inventory-comparison-title { align-items: center; display: flex; justify-content: space-between; }
+.inventory-comparison-title strong { color: #e2e8f0; }
+.inventory-comparison-title span { color: #94a3b8; font-size: 1rem; font-weight: 700; }
+.inventory-comparison-row.match .inventory-comparison-title span { color: #86efac; }
+.inventory-comparison-row.different .inventory-comparison-title span { color: #fbbf24; }
+.inventory-comparison-status { color: #94a3b8; display: block; font-size: 0.78rem; margin-top: 2px; }
+.inventory-comparison-values { color: #cbd5e1; display: grid; font-size: 0.82rem; gap: 2px; margin-top: 6px; }
 
 .modal-backdrop {
   align-items: center;

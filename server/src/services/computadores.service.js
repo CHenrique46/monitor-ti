@@ -240,7 +240,7 @@ async function deleteOfflineComputer(value, db = prisma) {
 module.exports = {
   list,
   getById,
-  createComputadoresService: ({ db = prisma } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db) }),
+  createComputadoresService: ({ db = prisma } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db), getInventoryComparison: (id) => getInventoryComparison(id, db) }),
   updateInventoryMetadata,
   getCapabilitiesById,
   deleteOfflineComputer,

@@ -16,6 +16,9 @@ build/
 # Pacote de distribuicao gerado pelo build do agent (nao versionar)
 release/
 
+# Inventario administrativo e backups (podem conter chaves históricas)
+/private/
+
 # Releases de agente (artefatos gerados; metadados ficam no banco, nao no git)
 releases/
 !releases/**/.gitkeep

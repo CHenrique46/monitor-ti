@@ -24,6 +24,14 @@ function Section({ title, children }) {
   return <section className="detail-section"><h3>{title}</h3><div className="detail-grid">{children}</div></section>
 }
 
+const inventoryLabels = { CPU: 'Processador', RAM: 'Memória', STORAGE: 'Armazenamento', WINDOWS: 'Windows', OFFICE: 'Office', OFFICE_PARTIAL_KEY: 'Chave Office' }
+const inventoryStatusLabels = { MATCH: 'De acordo', DIFFERENT: 'Divergente', NO_BASELINE: 'Sem inventário', NO_AGENT_DATA: 'Aguardando dados da máquina', NOT_COMPARABLE: 'Não comparável' }
+
+function InventorySection({ result }) {
+  if (!result) return null
+  return <Section title="Inventário"><div className="inventory-comparison">{result.comparison.map((item) => <div className={`inventory-comparison-row ${item.status.toLowerCase()}`} key={item.field}><div className="inventory-comparison-title"><strong>{inventoryLabels[item.field] || item.field}</strong><span>{item.status === 'MATCH' ? '✓' : item.status === 'DIFFERENT' ? '⚠' : '·'}</span></div><span className="inventory-comparison-status">{inventoryStatusLabels[item.status] || item.status}</span>{item.status === 'DIFFERENT' && <div className="inventory-comparison-values"><span>Inventário: {item.expected || 'Não informado'}</span><span>Máquina: {item.actual || 'Não informado'}</span></div>}</div>)}</div></Section>
+}
+
 function OfficeField({ label, value }) {
   if (value === null || value === undefined || value === '') return null
   return <Field label={label}>{value}</Field>
@@ -118,6 +126,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const [identityForm, setIdentityForm] = useState({ apelido: '', equipamentoNumero: '' })
   const [identitySaving, setIdentitySaving] = useState(false)
   const [identityError, setIdentityError] = useState(null)
+  const [inventoryComparison, setInventoryComparison] = useState(null)
 
   useEffect(() => {
     let active = true
@@ -131,6 +140,13 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
       } catch { if (active) setServerOk(false) }
     }
     load(); const interval = setInterval(load, 5000)
+    return () => { active = false; clearInterval(interval) }
+  }, [id])
+
+  useEffect(() => {
+    let active = true
+    const loadComparison = async () => { try { const r = await apiFetch(`${API_URL}/api/computadores/${id}/inventory-comparison`); if (active) setInventoryComparison(r.ok ? await r.json() : null) } catch { if (active) setInventoryComparison(null) } }
+    loadComparison(); const interval = setInterval(loadComparison, 60000)
     return () => { active = false; clearInterval(interval) }
   }, [id])
 
@@ -239,6 +255,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
     <div className="drawer-content">
        {tab === 'summary' && <>
          <Section title="Identificação"><Field label="Apelido">{c.apelido || 'Não informado'}</Field><Field label="Equipamento">{c.equipamentoNumero || 'Não informado'}</Field>{!editingIdentity ? <button type="button" className="btn-update identity-edit-button" onClick={beginIdentityEdit}>Editar identificação</button> : <div className="identity-form"><label>Apelido<input type="text" value={identityForm.apelido} maxLength={120} onChange={(event) => setIdentityForm((form) => ({ ...form, apelido: event.target.value }))} /></label><label>Nº do equipamento<input type="text" value={identityForm.equipamentoNumero} maxLength={64} onChange={(event) => setIdentityForm((form) => ({ ...form, equipamentoNumero: event.target.value }))} /></label><div className="confirm-actions"><button type="button" className="btn-cancel" onClick={() => setEditingIdentity(false)} disabled={identitySaving}>Cancelar</button><button type="button" className="btn-update" onClick={saveIdentity} disabled={identitySaving}>{identitySaving ? 'Salvando...' : 'Salvar'}</button></div>{identityError && <div className="update-status failed">{identityError}</div>}</div>}</Section>
+         <InventorySection result={inventoryComparison} />
         <div className="summary-metrics"><div><span>CPU</span><strong>{formatPercent(c.cpuUso)}</strong><MetricBar value={c.cpuUso} /></div><div><span>RAM</span><strong>{bytesToGB(c.ramUsada)} / {bytesToGB(c.ramTotal)}</strong><MetricBar value={ramPct} /></div><div><span>Disco C:</span><strong>{bytesToGB(c.discoLivre)} livres</strong><MetricBar value={discoPct} /></div></div>
         <Section title="Estado atual"><Field label="Status">{online ? 'Online' : 'Offline'}</Field><Field label={online ? 'Uptime atual' : 'Último uptime registrado'}>{formatUptime(c.uptime)}</Field><Field label="Status do uptime"><span className={`uptime-status ${uptimeStatus.toLowerCase()}`}>{uptimeStatusLabel(uptimeStatus)}</span></Field><Field label="Usuário">{c.usuario || 'Não informado'}</Field><Field label="Device ID">{c.deviceId}</Field></Section>
         {uptimeNeedsAttention && <div className={`uptime-notice ${uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? 'recommended' : ''}`}><strong>{uptimeStatusLabel(uptimeStatus)}</strong><span>{online ? `Este computador está há ${formatUptime(c.uptime)} sem reiniciar.` : `Último uptime registrado: ${formatUptime(c.uptime)}. O valor não é incrementado enquanto offline.`}</span></div>}

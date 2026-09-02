@@ -1,3 +1,9 @@
+const path = require("path");
+
+function getInventoryExcelPath() {
+  return String(process.env.INVENTORY_EXCEL_PATH || path.join(__dirname, "..", "..", "private", "inventory", "inventario.xlsx")).trim();
+}
+
 function getAgentServerPublicUrl() {
   const raw = String(process.env.AGENT_SERVER_PUBLIC_URL || "").trim();
   if (!raw) {
@@ -24,4 +30,4 @@ function getAgentServerPublicUrl() {
   return raw.replace(/\/+$/, "");
 }
 
-module.exports = { getAgentServerPublicUrl };
+module.exports = { getAgentServerPublicUrl, getInventoryExcelPath };
