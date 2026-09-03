@@ -50,6 +50,7 @@ model Computador {
   maintenanceScheduleTargets MaintenanceScheduleTarget[]
   officeInstallations OfficeInstallation[]
   inventoryBaseline ComputerInventoryBaseline?
+  excelInventorySyncs ExcelInventorySync[]
 }
 
 model ComputerInventoryBaseline {
@@ -70,6 +71,30 @@ model ComputerInventoryBaseline {
   updatedAt                DateTime  @updatedAt
 
   computador               Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  excelInventorySync       ExcelInventorySync?
+}
+
+model ExcelInventorySync {
+  id                  Int      @id @default(autoincrement())
+  computerId          Int
+  baselineId          Int      @unique
+  equipamentoNumero   String
+  operation           String   @default("UPSERT_INVENTORY")
+  status              String   @default("PENDING")
+  attempts            Int      @default(0)
+  nextAttemptAt       DateTime @default(now())
+  lastError           String?
+  leaseUntil          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  processedAt         DateTime?
+
+  computador          Computador @relation(fields: [computerId], references: [id], onDelete: Cascade)
+  baseline            ComputerInventoryBaseline @relation(fields: [baselineId], references: [id], onDelete: Cascade)
+
+  @@unique([baselineId, operation])
+  @@index([status, nextAttemptAt])
+  @@index([computerId])
 }
 
 model DiscoFisico {

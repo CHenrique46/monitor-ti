@@ -119,4 +119,4 @@ function readInventoryRows(filePath = getInventoryExcelPath()) {
   return rows.slice(1).map((row) => sanitizeInventoryRow(Object.fromEntries(Object.entries(row).map(([column, value]) => [headers[column] || column, value]))));
 }
 
-module.exports = { FULL_KEY_RE, normalizeEquipmentNumber, parseStorageCapacity, partialOfficeKey, sanitizeInventoryRow, parseCells, parseSheetRows, readInventoryRows };
+module.exports = { FULL_KEY_RE, normalizeEquipmentNumber, parseStorageCapacity, partialOfficeKey, sanitizeInventoryRow, parseCells, parseSheetRows, sheetPath, readInventoryRows };

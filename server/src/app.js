@@ -24,9 +24,11 @@ const { recoverOrphanedExecutions } = require("./services/remoteActions.service"
 const historicoService = require("./services/historico.service");
 const avisosService = require("./services/avisos.service");
 const maintenanceScheduler = require("./services/maintenanceScheduler.service");
+const { createExcelSyncWorker } = require("./inventory/excelSyncWorker");
 
 const app = express();
 const authService = createAuthService();
+const excelSyncWorker = createExcelSyncWorker({ db: prisma, log: (message) => logEvent(`[Monitor TI] ${message}`) });
 
 app.use(express.json());
 
@@ -106,6 +108,7 @@ if (require.main === module) {
     historicoService.iniciarRetencao();
     avisosService.iniciarAgendador();
     maintenanceScheduler.start();
+    excelSyncWorker.start();
   })().catch((err) => {
     console.error("[Monitor TI] erro no startup:", err.message);
     process.exitCode = 1;
