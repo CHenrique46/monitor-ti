@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { sanitizeInventoryRow, partialOfficeKey, normalizeEquipmentNumber } = require("./src/inventory/excelInventory");
 const { importAuthorizedBaselines } = require("./src/inventory/baselineImport");
 const { compareInventory, compareCpu, compareRam, compareStorage, compareWindows, compareOffice, comparePartialKey, STATUS } = require("./src/inventory/inventoryComparison");
+const { createComputadoresController } = require("./src/controllers/computadores.controller");
 
 const fullOfficeKey = ["ABCDE", "12345", "FGHIJ", "KLMNO", "PQRST"].join("-");
 
@@ -59,4 +60,19 @@ test("supports comparison statuses and technical normalizers", () => {
   assert.equal(comparePartialKey("ABCDE", null).status, STATUS.NO_AGENT_DATA);
   assert.equal(compareInventory(null, {}).every((item) => item.status === STATUS.NO_BASELINE), true);
   assert.equal(compareInventory({ processadorEsperado: "CPU" }, {}).some((item) => item.status === STATUS.NO_AGENT_DATA), true);
+});
+
+test("controller serves the inventory comparison service payload", async () => {
+  const calls = [];
+  const controller = createComputadoresController({ service: {
+    getInventoryComparison: async (id) => {
+      calls.push(id);
+      return { baseline: { computadorId: 161 }, comparison: [{ field: "CPU", status: STATUS.MATCH }] };
+    }
+  } });
+  const response = { code: null, body: null, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } };
+  await controller.getInventoryComparison({ params: { id: "161" } }, response);
+  assert.equal(response.code, 200);
+  assert.deepEqual(response.body, { baseline: { computadorId: 161 }, comparison: [{ field: "CPU", status: STATUS.MATCH }] });
+  assert.deepEqual(calls, ["161"]);
 });

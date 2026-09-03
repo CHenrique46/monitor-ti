@@ -1,6 +1,6 @@
 const computadoresService = require("../services/computadores.service");
 
-function createComputadoresController({ service = computadoresService } = {}) {
+function createComputadoresController({ service = computadoresService.createComputadoresService() } = {}) {
   async function deleteComputer(req, res) {
     try {
       const result = await service.deleteOfflineComputer(req.params.id);
