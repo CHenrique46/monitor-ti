@@ -2,10 +2,20 @@ const prisma = require("../prisma");
 const { normalizeOfficeInstallations } = require("../inventory/officeNormalization");
 const { compareInventory } = require("../inventory/inventoryComparison");
 
+const OFFICE_PARTIAL_KEY_RE = /^[A-Za-z0-9]{5}$/;
+
 class ComputerDeletionError extends Error {
   constructor(code, message) {
     super(message);
     this.name = "ComputerDeletionError";
+    this.code = code;
+  }
+}
+
+class InventoryBaselineError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "InventoryBaselineError";
     this.code = code;
   }
 }
@@ -144,8 +154,135 @@ async function getInventoryComparison(value, db = prisma) {
     computadorId: id,
     equipamentoNumero: computer.equipamentoNumero,
     apelido: computer.apelido,
+    hasBaseline: Boolean(baseline),
     comparison: compareInventory(baseline, computer)
   };
+}
+
+function normalizeInventoryEquipmentNumber(value) {
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value <= 0) throw new InventoryBaselineError("INVALID_EQUIPMENT", "Número do equipamento inválido.");
+    return String(value);
+  }
+  if (typeof value !== "string") throw new InventoryBaselineError("INVALID_EQUIPMENT", "Número do equipamento inválido.");
+  const raw = value.trim();
+  if (!/^\d+$/.test(raw) || Number(raw) <= 0 || !Number.isSafeInteger(Number(raw))) {
+    throw new InventoryBaselineError("INVALID_EQUIPMENT", "Número do equipamento inválido.");
+  }
+  return String(Number(raw));
+}
+
+function normalizeInventoryRequest(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new InventoryBaselineError("INVALID_REQUEST", "Dados administrativos inválidos.");
+  }
+  const allowed = new Set(["equipamentoNumero", "apelido"]);
+  if (Object.keys(input).some((field) => !allowed.has(field))) {
+    throw new InventoryBaselineError("INVALID_REQUEST", "Somente equipamentoNumero e apelido são aceitos.");
+  }
+  if (input.equipamentoNumero === undefined) {
+    throw new InventoryBaselineError("INVALID_EQUIPMENT", "Número do equipamento é obrigatório.");
+  }
+  const equipamentoNumero = normalizeInventoryEquipmentNumber(input.equipamentoNumero);
+  let apelido = input.apelido;
+  if (apelido !== undefined && apelido !== null && typeof apelido !== "string") {
+    throw new InventoryBaselineError("INVALID_REQUEST", "Apelido inválido.");
+  }
+  if (typeof apelido === "string") {
+    apelido = apelido.trim();
+    if (apelido.length > MAX_APELIDO_LENGTH) throw new InventoryBaselineError("INVALID_REQUEST", "Apelido excede o limite permitido.");
+    apelido = apelido || null;
+  }
+  return { equipamentoNumero, apelido };
+}
+
+function storageBaselineFromSnapshot(disks) {
+  const capacities = (Array.isArray(disks) ? disks : []).map((disk) => Number(disk.tamanho)).filter((size) => Number.isFinite(size) && size > 0);
+  if (!capacities.length) throw new InventoryBaselineError("SNAPSHOT_INSUFFICIENT", "Snapshot técnico sem armazenamento válido.");
+  const commercialGb = Math.round(Math.max(...capacities) / 1e9);
+  if (!Number.isFinite(commercialGb) || commercialGb <= 0) throw new InventoryBaselineError("SNAPSHOT_INSUFFICIENT", "Snapshot técnico sem armazenamento válido.");
+  return `${commercialGb} GB`;
+}
+
+function buildTrustedInventoryBaseline(computer) {
+  if (!computer || !String(computer.processador || "").trim()) {
+    throw new InventoryBaselineError("SNAPSHOT_INSUFFICIENT", "Snapshot técnico sem processador válido.");
+  }
+  if (!Number.isFinite(Number(computer.ramTotal)) || Number(computer.ramTotal) <= 0) {
+    throw new InventoryBaselineError("SNAPSHOT_INSUFFICIENT", "Snapshot técnico sem memória válida.");
+  }
+  if (!String(computer.sistemaRelease || computer.sistema || "").trim()) {
+    throw new InventoryBaselineError("SNAPSHOT_INSUFFICIENT", "Snapshot técnico sem Windows válido.");
+  }
+
+  const storage = storageBaselineFromSnapshot(computer.discosFisicos);
+  const office = normalizeOfficeInstallations(computer.officeInstallations || []);
+  const product = office.products[0] || null;
+  const partialKey = product?.primaryLicense?.partialProductKey;
+
+  return {
+    processadorEsperado: String(computer.processador).trim(),
+    ramEsperada: Number((Number(computer.ramTotal) / (1024 ** 3)).toFixed(1)),
+    armazenamentoEsperado: storage,
+    windowsEsperado: String(computer.sistemaRelease || computer.sistema).trim(),
+    officeEsperado: product?.productName || null,
+    officePartialKeyEsperada: OFFICE_PARTIAL_KEY_RE.test(String(partialKey || "")) ? String(partialKey).slice(-5) : null,
+    fabricanteModeloEsperado: null,
+    observacoes: null
+  };
+}
+
+async function addInventoryBaseline(value, input, db = prisma) {
+  const id = parseComputerId(value);
+  const request = normalizeInventoryRequest(input);
+  try {
+    return await db.$transaction(async (tx) => {
+      const computer = await tx.computador.findUnique({
+        where: { id },
+        include: {
+          discosFisicos: true,
+          officeInstallations: { where: { isPresent: true }, orderBy: { id: "asc" } },
+          inventoryBaseline: true
+        }
+      });
+      if (!computer) throw new InventoryBaselineError("NOT_FOUND", "Computador não encontrado.");
+      if (computer.inventoryBaseline) throw new InventoryBaselineError("BASELINE_EXISTS", "Este computador já possui inventário aprovado.");
+
+      const equipmentBaseline = await tx.computerInventoryBaseline.findUnique({ where: { equipamentoNumero: request.equipamentoNumero } });
+      if (equipmentBaseline) throw new InventoryBaselineError("DUPLICATE_EQUIPMENT", "Número do equipamento já possui inventário aprovado.");
+
+      const baselineData = buildTrustedInventoryBaseline(computer);
+      const apelido = request.apelido === undefined ? computer.apelido || null : request.apelido;
+      const updated = await tx.computador.update({ where: { id }, data: { equipamentoNumero: request.equipamentoNumero, apelido } });
+      const baseline = await tx.computerInventoryBaseline.create({
+        data: {
+          computadorId: id,
+          equipamentoNumero: request.equipamentoNumero,
+          apelidoEsperado: apelido,
+          ...baselineData,
+          source: "ADMIN_APPROVED_SNAPSHOT"
+        }
+      });
+      return {
+        computadorId: updated.id,
+        equipamentoNumero: updated.equipamentoNumero,
+        apelido: updated.apelido,
+        baseline: {
+          equipamentoNumero: baseline.equipamentoNumero,
+          processadorEsperado: baseline.processadorEsperado,
+          ramEsperada: baseline.ramEsperada,
+          armazenamentoEsperado: baseline.armazenamentoEsperado,
+          windowsEsperado: baseline.windowsEsperado,
+          officeEsperado: baseline.officeEsperado,
+          officePartialKeyEsperada: baseline.officePartialKeyEsperada
+        }
+      };
+    });
+  } catch (error) {
+    if (error instanceof InventoryBaselineError) throw error;
+    if (error && error.code === "P2002") throw new InventoryBaselineError("CONFLICT", "Identidade ou inventário já existe.");
+    throw error;
+  }
 }
 
 async function getCapabilitiesById(id) {
@@ -254,9 +391,11 @@ async function deleteOfflineComputer(value, db = prisma) {
 module.exports = {
   list,
   getById,
-  createComputadoresService: ({ db = prisma } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db), getInventoryComparison: (id) => getInventoryComparison(id, db) }),
+  createComputadoresService: ({ db = prisma } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db), getInventoryComparison: (id) => getInventoryComparison(id, db), addInventoryBaseline: (id, input) => addInventoryBaseline(id, input, db) }),
   updateInventoryMetadata,
   getCapabilitiesById,
   deleteOfflineComputer,
-  ComputerDeletionError
+  ComputerDeletionError,
+  InventoryBaselineError,
+  buildTrustedInventoryBaseline
 };

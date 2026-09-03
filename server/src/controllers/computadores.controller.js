@@ -37,10 +37,24 @@ function createComputadoresController({ service = computadoresService.createComp
     }
   }
 
+  async function addInventoryBaseline(req, res) {
+    try {
+      const result = await service.addInventoryBaseline(req.params.id, req.body);
+      return res.status(201).json(result);
+    } catch (err) {
+      if (err && err.code === "INVALID_ID") return res.status(400).json({ erro: err.message });
+      if (err && ["INVALID_REQUEST", "INVALID_EQUIPMENT"].includes(err.code)) return res.status(400).json({ erro: err.message });
+      if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
+      if (err && ["BASELINE_EXISTS", "DUPLICATE_EQUIPMENT", "CONFLICT", "SNAPSHOT_INSUFFICIENT"].includes(err.code)) return res.status(409).json({ erro: err.message });
+      return res.status(500).json({ erro: "Não foi possível adicionar o computador ao inventário." });
+    }
+  }
+
  return {
     deleteComputer,
     updateInventoryMetadata,
     getInventoryComparison,
+    addInventoryBaseline,
    list: (req, res) => listWithService(req, res, service),
    getById: (req, res) => getByIdWithService(req, res, service)
  };
@@ -87,4 +101,4 @@ async function getCapabilities(req, res) {
   }
 }
 
-module.exports = { list, getById, getCapabilities, updateInventoryMetadata: createComputadoresController().updateInventoryMetadata, getInventoryComparison: createComputadoresController().getInventoryComparison, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };
+module.exports = { list, getById, getCapabilities, updateInventoryMetadata: createComputadoresController().updateInventoryMetadata, getInventoryComparison: createComputadoresController().getInventoryComparison, addInventoryBaseline: createComputadoresController().addInventoryBaseline, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };

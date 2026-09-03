@@ -9,6 +9,7 @@ import { bytesToGB, formatUptime, formatPercent, sistemaLabel, fmtDate } from '.
 import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from '../utils/uptime'
 import { compareVersions, isVersionNewer } from '../utils/version'
 import { activationStatus, displayProductName, licenseType, normalizeOffice, partialKey } from '../utils/office'
+import { buildInventoryBaselinePayload, canAddInventory } from '../utils/inventoryBaseline'
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
@@ -100,6 +101,22 @@ function ConfirmBox({ children, onCancel, onConfirm, confirmLabel }) {
   return <div className="confirm-box"><p>{children}</p><div className="confirm-actions"><button type="button" className="btn-cancel" onClick={onCancel}>Cancelar</button><button type="button" className="btn-update" onClick={onConfirm}>{confirmLabel}</button></div></div>
 }
 
+function AddInventoryModal({ computer, form, saving, error, onChange, onCancel, onConfirm }) {
+  const office = computer.office?.normalized?.products?.[0]
+  const officeKey = partialKey(office?.primaryLicense?.partialProductKey)
+  const storage = computer.discosFisicos?.map((disk) => disk.tamanho != null ? bytesToGB(disk.tamanho) : null).filter(Boolean).join(', ')
+  return <div className="modal-backdrop" role="presentation"><section className="delete-dialog inventory-baseline-dialog" role="dialog" aria-modal="true" aria-labelledby="add-inventory-title" onClick={(event) => event.stopPropagation()}>
+    <span className="section-kicker">Confirmação administrativa</span>
+    <h2 id="add-inventory-title">Adicionar ao inventário</h2>
+    <div className="delete-computer-meta"><span>Hostname: <strong>{computer.hostname}</strong></span><span>CPU: {computer.processador || 'Não informado'}</span><span>RAM: {computer.ramTotal != null ? bytesToGB(computer.ramTotal) : 'Não informado'}</span><span>Armazenamento: {storage || 'Não informado'}</span><span>Windows: {computer.sistemaRelease || computer.sistema || 'Não informado'}</span><span>Office: {office?.productName || 'Não informado'}{office?.primaryLicense?.activationStatus ? ` · ${activationStatus(office.primaryLicense.activationStatus).label}` : ''}</span>{officeKey && <span>Final da chave: {officeKey}</span>}</div>
+    <p className="muted">Confirme apenas a identidade administrativa. Os dados técnicos serão obtidos pelo servidor.</p>
+    <label className="delete-confirm-field">Número do equipamento<input value={form.equipamentoNumero} maxLength={64} onChange={(event) => onChange('equipamentoNumero', event.target.value)} /></label>
+    <label className="delete-confirm-field">Apelido / usuário atual<input value={form.apelido} maxLength={120} onChange={(event) => onChange('apelido', event.target.value)} /></label>
+    {error && <div className="update-status failed">{error}</div>}
+    <div className="confirm-actions"><button type="button" className="btn-cancel" onClick={onCancel} disabled={saving}>Cancelar</button><button type="button" className="btn-update" onClick={onConfirm} disabled={saving}>{saving ? 'Adicionando...' : 'Adicionar ao inventário'}</button></div>
+  </section></div>
+}
+
 export default function ComputerDetails({ computerId, latestVersion, onClose }) {
   const routeId = useParams().id
   const id = computerId || routeId
@@ -127,6 +144,10 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const [identitySaving, setIdentitySaving] = useState(false)
   const [identityError, setIdentityError] = useState(null)
   const [inventoryComparison, setInventoryComparison] = useState(null)
+  const [addInventoryOpen, setAddInventoryOpen] = useState(false)
+  const [addInventoryForm, setAddInventoryForm] = useState({ equipamentoNumero: '', apelido: '' })
+  const [addInventorySaving, setAddInventorySaving] = useState(false)
+  const [addInventoryError, setAddInventoryError] = useState(null)
 
   useEffect(() => {
     let active = true
@@ -222,6 +243,20 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
       setC((previous) => ({ ...previous, ...body })); setEditingIdentity(false)
     } catch { setIdentityError('Não foi possível salvar a identificação.') } finally { setIdentitySaving(false) }
   }
+  const beginAddInventory = () => { setAddInventoryForm({ equipamentoNumero: c.equipamentoNumero || '', apelido: c.apelido || '' }); setAddInventoryError(null); setAddInventoryOpen(true) }
+  const addToInventory = async () => {
+    setAddInventorySaving(true); setAddInventoryError(null)
+    try {
+      const response = await apiFetch(`${API_URL}/api/computadores/${id}/inventory-baseline`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildInventoryBaselinePayload(addInventoryForm)) })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) { setAddInventoryError(body.erro || 'Não foi possível adicionar ao inventário.'); return }
+      const [computerResponse, comparisonResponse] = await Promise.all([apiFetch(`${API_URL}/api/computadores/${id}`), apiFetch(`${API_URL}/api/computadores/${id}/inventory-comparison`)
+      ])
+      if (computerResponse.ok) setC(await computerResponse.json())
+      if (comparisonResponse.ok) setInventoryComparison(await comparisonResponse.json())
+      setAddInventoryOpen(false)
+    } catch { setAddInventoryError('Não foi possível adicionar ao inventário.') } finally { setAddInventorySaving(false) }
+  }
 
   if (notFound) return drawer ? <div className="drawer-backdrop" onClick={onClose}><aside className="details-drawer" onClick={(event) => event.stopPropagation()}><div className="drawer-empty">Computador não encontrado.</div></aside></div> : <div className="container"><Link className="back-link" to="/">← Voltar ao Dashboard</Link><div className="empty">Computador não encontrado.</div></div>
   if (!c) return drawer ? <div className="drawer-backdrop"><aside className="details-drawer"><div className="drawer-empty">Carregando dados do computador...</div></aside></div> : <div className="container"><SiteNav /><p className="muted">Carregando dados do computador...</p></div>
@@ -255,6 +290,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
     <div className="drawer-content">
        {tab === 'summary' && <>
          <Section title="Identificação"><Field label="Apelido">{c.apelido || 'Não informado'}</Field><Field label="Equipamento">{c.equipamentoNumero || 'Não informado'}</Field>{!editingIdentity ? <button type="button" className="btn-update identity-edit-button" onClick={beginIdentityEdit}>Editar identificação</button> : <div className="identity-form"><label>Apelido<input type="text" value={identityForm.apelido} maxLength={120} onChange={(event) => setIdentityForm((form) => ({ ...form, apelido: event.target.value }))} /></label><label>Nº do equipamento<input type="text" value={identityForm.equipamentoNumero} maxLength={64} onChange={(event) => setIdentityForm((form) => ({ ...form, equipamentoNumero: event.target.value }))} /></label><div className="confirm-actions"><button type="button" className="btn-cancel" onClick={() => setEditingIdentity(false)} disabled={identitySaving}>Cancelar</button><button type="button" className="btn-update" onClick={saveIdentity} disabled={identitySaving}>{identitySaving ? 'Salvando...' : 'Salvar'}</button></div>{identityError && <div className="update-status failed">{identityError}</div>}</div>}</Section>
+         {canAddInventory(inventoryComparison) && <button type="button" className="btn-update inventory-add-button" onClick={beginAddInventory}>Adicionar ao inventário</button>}
          <div className="summary-metrics"><div><span>CPU</span><strong>{formatPercent(c.cpuUso)}</strong><MetricBar value={c.cpuUso} /></div><div><span>RAM</span><strong>{bytesToGB(c.ramUsada)} / {bytesToGB(c.ramTotal)}</strong><MetricBar value={ramPct} /></div><div><span>Disco C:</span><strong>{bytesToGB(c.discoLivre)} livres</strong><MetricBar value={discoPct} /></div></div>
         <Section title="Estado atual"><Field label="Status">{online ? 'Online' : 'Offline'}</Field><Field label={online ? 'Uptime atual' : 'Último uptime registrado'}>{formatUptime(c.uptime)}</Field><Field label="Status do uptime"><span className={`uptime-status ${uptimeStatus.toLowerCase()}`}>{uptimeStatusLabel(uptimeStatus)}</span></Field><Field label="Usuário">{c.usuario || 'Não informado'}</Field><Field label="Device ID">{c.deviceId}</Field></Section>
         {uptimeNeedsAttention && <div className={`uptime-notice ${uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? 'recommended' : ''}`}><strong>{uptimeStatusLabel(uptimeStatus)}</strong><span>{online ? `Este computador está há ${formatUptime(c.uptime)} sem reiniciar.` : `Último uptime registrado: ${formatUptime(c.uptime)}. O valor não é incrementado enquanto offline.`}</span></div>}
@@ -276,6 +312,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
     </div>
   </>
 
-  if (drawer) return <div className="drawer-backdrop" onClick={onClose}><aside className="details-drawer" onClick={(event) => event.stopPropagation()}>{body}</aside></div>
-  return <div className="container"><SiteNav /><Link className="back-link" to="/">← Voltar ao Dashboard</Link><div className="detail-page">{body}</div></div>
+  const addInventoryDialog = addInventoryOpen && <AddInventoryModal computer={c} form={addInventoryForm} saving={addInventorySaving} error={addInventoryError} onChange={(field, value) => setAddInventoryForm((current) => ({ ...current, [field]: value }))} onCancel={() => setAddInventoryOpen(false)} onConfirm={addToInventory} />
+  if (drawer) return <div className="drawer-backdrop" onClick={onClose}><aside className="details-drawer" onClick={(event) => event.stopPropagation()}>{body}</aside>{addInventoryDialog}</div>
+  return <div className="container"><SiteNav /><Link className="back-link" to="/">← Voltar ao Dashboard</Link><div className="detail-page">{body}</div>{addInventoryDialog}</div>
 }

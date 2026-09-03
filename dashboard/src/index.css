@@ -1366,6 +1366,12 @@ body {
   width: 100%;
 }
 
+.inventory-add-button { margin: 0 0 18px; }
+.inventory-baseline-dialog { border-color: #155e75; max-height: min(780px, 92vh); overflow: auto; }
+.inventory-baseline-dialog .delete-computer-meta { border: 1px solid #334155; border-radius: 8px; margin-top: 16px; padding: 12px; }
+.inventory-baseline-dialog .delete-confirm-field { margin-top: 14px; }
+.inventory-baseline-dialog .delete-confirm-field input { border-color: #475569; }
+
 .delete-dialog h2 { margin: 5px 0 16px; }
 .delete-computer-meta { display: grid; gap: 5px; margin-bottom: 18px; color: #cbd5e1; }
 .delete-computer-meta strong { color: #fca5a5; }
