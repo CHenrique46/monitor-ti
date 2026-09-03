@@ -1,11 +1,63 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { sanitizeInventoryRow, parseStorageCapacity, partialOfficeKey, normalizeEquipmentNumber } = require("./src/inventory/excelInventory");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { zipSync, strToU8 } = require("fflate");
+const { sanitizeInventoryRow, parseStorageCapacity, partialOfficeKey, normalizeEquipmentNumber, parseCells, readInventoryRows } = require("./src/inventory/excelInventory");
 const { importAuthorizedBaselines } = require("./src/inventory/baselineImport");
 const { compareInventory, normalizeCpu, compareCpu, compareRam, compareStorage, compareWindows, compareOffice, comparePartialKey, STATUS } = require("./src/inventory/inventoryComparison");
 const { createComputadoresController } = require("./src/controllers/computadores.controller");
 
 const fullOfficeKey = ["ABCDE", "12345", "FGHIJ", "KLMNO", "PQRST"].join("-");
+const fictitiousOfficeKey = ["ABCDE", "12345", "FGHIJ", "KLMNO", "TFY23"].join("-");
+
+function writeTestWorkbook(filePath) {
+  const shared = ["EQUIP. N°", "ARMAZENAMENTO", "OFFICE KEY", "OFFICE", "52", "240 GB", fictitiousOfficeKey, "2013 H B"];
+  const sharedXml = `<sst>${shared.map((value) => `<si><t>${value}</t></si>`).join("")}</sst>`;
+  const sheetXml = '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="G1" t="s"><v>1</v></c><c r="H1"/><c r="I1" t="s"><v>2</v></c><c r="J1" t="s"><v>3</v></c></row><row r="39"><c r="A39" t="s"><v>4</v></c><c r="G39" t="s"><v>5</v></c><c r="H39"/><c r="I39" t="s"><v>6</v></c><c r="J39" t="s"><v>7</v></c></row></sheetData></worksheet>';
+  const workbookXml = '<workbook><sheets><sheet name="INVENTARIO" r:id="rId1"/></sheets></workbook>';
+  const relationsXml = '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>';
+  fs.writeFileSync(filePath, Buffer.from(zipSync({
+    "xl/workbook.xml": strToU8(workbookXml),
+    "xl/_rels/workbook.xml.rels": strToU8(relationsXml),
+    "xl/sharedStrings.xml": strToU8(sharedXml),
+    "xl/worksheets/sheet1.xml": strToU8(sheetXml)
+  })));
+}
+
+test("parses self-closing cells without consuming the next cell", () => {
+  const row = parseCells('<c r="H39"/><c r="I39" t="s"><v>0</v></c><c r="J39" t="s"><v>1</v></c>', [fullOfficeKey, "2013 H B"]);
+  assert.equal(row.H, "");
+  assert.equal(row.I, fullOfficeKey);
+  assert.equal(row.J, "2013 H B");
+});
+
+test("parses a normal empty cell before a populated cell", () => {
+  const row = parseCells('<c r="H39"></c><c r="I39" t="s"><v>0</v></c>', [fullOfficeKey]);
+  assert.equal(row.H, "");
+  assert.equal(row.I, fullOfficeKey);
+});
+
+test("parses consecutive self-closing cells independently", () => {
+  const row = parseCells('<c r="H39"/><c r="I39"/><c r="J39" t="s"><v>0</v></c>', ["2013 H B"]);
+  assert.equal(row.H, "");
+  assert.equal(row.I, "");
+  assert.equal(row.J, "2013 H B");
+});
+
+test("reads a fictitious Office key partial and storage from an XLSX-shaped row", () => {
+  const filePath = path.join(os.tmpdir(), `monitor-ti-inventory-${process.pid}.xlsx`);
+  try {
+    writeTestWorkbook(filePath);
+    const row = readInventoryRows(filePath).find((item) => item.equipamentoNumero === "52");
+    assert.equal(row.officePartialKeyEsperada, "TFY23");
+    assert.equal(row.armazenamentoEsperado, "240 GB");
+    assert.equal(Object.values(row).includes(fictitiousOfficeKey), false);
+  } finally {
+    fs.rmSync(filePath, { force: true });
+  }
+});
 
 test("sanitizes Excel row and keeps only an Office partial key", () => {
   const row = sanitizeInventoryRow({ "EQUIP. Nº": " 67. ", PROCESSADOR: "Intel Core i5-8400", " RAM": "8", "SISTEMA OPERACIONAL": "Windows 10", marca: "Lenovo V530S", atual: "Vinicius - Legal", "ARMAZENAMENTO": "240 GB", "OBSERVAÇÕES": "SSD comprado 30/08/2022", "KEY WIN": fullOfficeKey, "OFFICE KEY": fullOfficeKey, OFFICE: "2013 H B" });

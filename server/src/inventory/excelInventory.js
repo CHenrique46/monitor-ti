@@ -65,20 +65,46 @@ function sheetPath(workbookXml, relationsXml) {
   return target.startsWith("xl/") ? target : `xl/${target}`;
 }
 
+function parseCells(rowXml, strings) {
+  const values = {};
+  let cursor = 0;
+
+  while (true) {
+    const start = rowXml.indexOf("<c", cursor);
+    if (start < 0) break;
+
+    const openingEnd = rowXml.indexOf(">", start);
+    if (openingEnd < 0) break;
+
+    const attributes = rowXml.slice(start + 2, openingEnd);
+    const ref = /\br="([A-Z]+\d+)"/i.exec(attributes);
+    const selfClosing = attributes.trimEnd().endsWith("/");
+    let content = "";
+    let nextCursor = openingEnd + 1;
+
+    if (!selfClosing) {
+      const closing = rowXml.indexOf("</c>", nextCursor);
+      if (closing < 0) break;
+      content = rowXml.slice(nextCursor, closing);
+      nextCursor = closing + 4;
+    }
+
+    cursor = nextCursor;
+    if (!ref) continue;
+
+    const value = /<v[^>]*>([\s\S]*?)<\/v>/i.exec(content);
+    const inline = /<t[^>]*>([\s\S]*?)<\/t>/i.exec(content);
+    let result = value ? decodeXml(value[1]) : inline ? decodeXml(inline[1]) : "";
+    if (/\bt="s"/.test(attributes) && strings[Number(result)] !== undefined) result = strings[Number(result)];
+    values[ref[1].replace(/\d+$/, "")] = result;
+  }
+
+  return values;
+}
+
 function parseSheetRows(xml, strings) {
   return Array.from(String(xml || "").matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g), (rowMatch) => {
-    const values = {};
-    for (const cell of rowMatch[1].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
-      const attributes = cell[1];
-      const ref = /\br="([A-Z]+\d+)"/i.exec(attributes);
-      if (!ref) continue;
-      const value = /<v[^>]*>([\s\S]*?)<\/v>/i.exec(cell[2]);
-      const inline = /<t[^>]*>([\s\S]*?)<\/t>/i.exec(cell[2]);
-      let result = value ? decodeXml(value[1]) : inline ? decodeXml(inline[1]) : "";
-      if (/\bt="s"/.test(attributes) && strings[Number(result)] !== undefined) result = strings[Number(result)];
-      values[ref[1].replace(/\d+$/, "")] = result;
-    }
-    return values;
+    return parseCells(rowMatch[1], strings);
   });
 }
 
@@ -93,4 +119,4 @@ function readInventoryRows(filePath = getInventoryExcelPath()) {
   return rows.slice(1).map((row) => sanitizeInventoryRow(Object.fromEntries(Object.entries(row).map(([column, value]) => [headers[column] || column, value]))));
 }
 
-module.exports = { FULL_KEY_RE, normalizeEquipmentNumber, parseStorageCapacity, partialOfficeKey, sanitizeInventoryRow, readInventoryRows };
+module.exports = { FULL_KEY_RE, normalizeEquipmentNumber, parseStorageCapacity, partialOfficeKey, sanitizeInventoryRow, parseCells, parseSheetRows, readInventoryRows };
