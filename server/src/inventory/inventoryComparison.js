@@ -1,4 +1,5 @@
 const { normalizeOfficeInstallations } = require("./officeNormalization");
+const { parseStorageCapacity } = require("./excelInventory");
 
 const STATUS = { MATCH: "MATCH", DIFFERENT: "DIFFERENT", NO_BASELINE: "NO_BASELINE", NO_AGENT_DATA: "NO_AGENT_DATA", NOT_COMPARABLE: "NOT_COMPARABLE" };
 
@@ -27,12 +28,14 @@ function compareRam(expected, actualBytes) {
 }
 
 function compareStorage(expected, disks) {
-  if (!expected) return { status: STATUS.NOT_COMPARABLE, reason: "unstructured_storage_baseline" };
+  const normalizedExpected = parseStorageCapacity(expected);
+  if (!normalizedExpected) return { status: STATUS.NOT_COMPARABLE, reason: "invalid_storage_baseline" };
   if (!Array.isArray(disks) || !disks.length) return { status: STATUS.NO_AGENT_DATA, reason: "agent_storage_missing" };
-  const expectedGb = numberValue(expected);
-  if (!expectedGb) return { status: STATUS.NOT_COMPARABLE, reason: "storage_capacity_missing" };
+  const expectedValue = numberValue(normalizedExpected);
+  const expectedGb = normalizedExpected.endsWith("TB") ? expectedValue * 1000 : expectedValue;
   const actualGb = disks.map((disk) => Number(disk.tamanho) / 1e9).filter(Number.isFinite);
   if (!actualGb.length) return { status: STATUS.NO_AGENT_DATA, reason: "agent_storage_size_missing" };
+  // Compare commercial decimal capacities with an 8% tolerance for GiB reporting and rounding.
   const match = actualGb.some((value) => Math.abs(value - expectedGb) / expectedGb <= 0.08);
   return { status: match ? STATUS.MATCH : STATUS.DIFFERENT, reason: "commercial_capacity_tolerance" };
 }

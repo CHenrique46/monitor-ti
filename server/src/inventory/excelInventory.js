@@ -19,6 +19,14 @@ function normalizeEquipmentNumber(value) {
   return match ? match[1] : null;
 }
 
+function parseStorageCapacity(value) {
+  const match = text(value).match(/^(\d+(?:[.,]\d+)?)\s*(GB|TB)$/i);
+  if (!match) return null;
+  const amount = Number(match[1].replace(",", "."));
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return `${amount} ${match[2].toUpperCase()}`;
+}
+
 function partialOfficeKey(value) {
   const raw = text(value);
   if (FULL_KEY_RE.test(raw)) return raw.slice(-5);
@@ -34,7 +42,7 @@ function sanitizeInventoryRow(row) {
     windowsEsperado: safeText(row["SISTEMA OPERACIONAL"]) || null,
     fabricanteModeloEsperado: safeText(row.marca) || null,
     apelidoEsperado: safeText(row.atual) || null,
-    armazenamentoEsperado: safeText(row["OBSERVAÇÕES"]) || null,
+    armazenamentoEsperado: parseStorageCapacity(row.ARMAZENAMENTO),
     observacoes: safeText(row["OBSERVAÇÕES"]) || null,
     officePartialKeyEsperada: partialOfficeKey(row["OFFICE KEY"]),
     officeEsperado: safeText(row.OFFICE) || null
@@ -85,4 +93,4 @@ function readInventoryRows(filePath = getInventoryExcelPath()) {
   return rows.slice(1).map((row) => sanitizeInventoryRow(Object.fromEntries(Object.entries(row).map(([column, value]) => [headers[column] || column, value]))));
 }
 
-module.exports = { FULL_KEY_RE, normalizeEquipmentNumber, partialOfficeKey, sanitizeInventoryRow, readInventoryRows };
+module.exports = { FULL_KEY_RE, normalizeEquipmentNumber, parseStorageCapacity, partialOfficeKey, sanitizeInventoryRow, readInventoryRows };

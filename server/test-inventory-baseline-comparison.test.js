@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { sanitizeInventoryRow, partialOfficeKey, normalizeEquipmentNumber } = require("./src/inventory/excelInventory");
+const { sanitizeInventoryRow, parseStorageCapacity, partialOfficeKey, normalizeEquipmentNumber } = require("./src/inventory/excelInventory");
 const { importAuthorizedBaselines } = require("./src/inventory/baselineImport");
 const { compareInventory, compareCpu, compareRam, compareStorage, compareWindows, compareOffice, comparePartialKey, STATUS } = require("./src/inventory/inventoryComparison");
 const { createComputadoresController } = require("./src/controllers/computadores.controller");
@@ -8,11 +8,23 @@ const { createComputadoresController } = require("./src/controllers/computadores
 const fullOfficeKey = ["ABCDE", "12345", "FGHIJ", "KLMNO", "PQRST"].join("-");
 
 test("sanitizes Excel row and keeps only an Office partial key", () => {
-  const row = sanitizeInventoryRow({ "EQUIP. Nº": " 67. ", PROCESSADOR: "Intel Core i5-8400", " RAM": "8", "SISTEMA OPERACIONAL": "Windows 10", marca: "Lenovo V530S", atual: "Vinicius - Legal", "OBSERVAÇÕES": "SSD 240 GB", "KEY WIN": fullOfficeKey, "OFFICE KEY": fullOfficeKey, OFFICE: "2013 H B" });
+  const row = sanitizeInventoryRow({ "EQUIP. Nº": " 67. ", PROCESSADOR: "Intel Core i5-8400", " RAM": "8", "SISTEMA OPERACIONAL": "Windows 10", marca: "Lenovo V530S", atual: "Vinicius - Legal", "ARMAZENAMENTO": "240 GB", "OBSERVAÇÕES": "SSD comprado 30/08/2022", "KEY WIN": fullOfficeKey, "OFFICE KEY": fullOfficeKey, OFFICE: "2013 H B" });
   assert.equal(row.equipamentoNumero, "67");
   assert.equal(row.officePartialKeyEsperada, "PQRST");
+  assert.equal(row.armazenamentoEsperado, "240 GB");
+  assert.equal(row.observacoes, "SSD comprado 30/08/2022");
   assert.equal(Object.values(row).includes(fullOfficeKey), false);
   assert.equal(Object.hasOwn(row, "KEY WIN"), false);
+});
+
+test("accepts only simple commercial storage capacities", () => {
+  assert.equal(parseStorageCapacity("240 GB"), "240 GB");
+  assert.equal(parseStorageCapacity("480   gb"), "480 GB");
+  assert.equal(parseStorageCapacity("500 GB"), "500 GB");
+  assert.equal(parseStorageCapacity("1 TB"), "1 TB");
+  assert.equal(parseStorageCapacity("SSD comprado 30/08/2022"), null);
+  assert.equal(parseStorageCapacity(""), null);
+  assert.equal(parseStorageCapacity("240 GB extra"), null);
 });
 
 test("normalizes equipment formatting and partial keys safely", () => {
@@ -45,7 +57,7 @@ test("rejects duplicate authorized Excel rows", async () => {
 });
 
 test("compares VAVA67 baseline and observed Office", () => {
-  const result = compareInventory({ processadorEsperado: "Intel Core i5-8400", ramEsperada: 8, armazenamentoEsperado: "SSD 240 GB", windowsEsperado: "Windows 10 64bits", officeEsperado: "2013 H B", officePartialKeyEsperada: "PYQTQ" }, {
+  const result = compareInventory({ processadorEsperado: "Intel Core i5-8400", ramEsperada: 8, armazenamentoEsperado: "240 GB", windowsEsperado: "Windows 10 64bits", officeEsperado: "2013 H B", officePartialKeyEsperada: "PYQTQ" }, {
     processador: "Intel(R) Core(TM) i5-8400 CPU @ 2.80GHz", ramTotal: 8477552640, sistema: "win32", sistemaRelease: "10.0.19045", discosFisicos: [{ tamanho: 240054796800, modelo: "SSD" }], officeInstallations: [{ source: "MSI", productName: "Microsoft Office Home and Business 2013", version: "15.0" }, { source: "OSPP", productName: "OfficeHomeBusinessR_Retail", activationStatus: "LICENSED", licenseType: "RETAIL", partialProductKey: "PYQTQ" }]
   });
   assert.deepEqual(result.map((item) => item.status), Array(6).fill(STATUS.MATCH));
@@ -54,7 +66,9 @@ test("compares VAVA67 baseline and observed Office", () => {
 test("supports comparison statuses and technical normalizers", () => {
   assert.equal(compareCpu("i5-8400", "i7-8700").status, STATUS.DIFFERENT);
   assert.equal(compareRam(8, 16 * 1024 ** 3).status, STATUS.DIFFERENT);
-  assert.equal(compareStorage("SSD 240 GB", [{ tamanho: 480000000000 }]).status, STATUS.DIFFERENT);
+  assert.equal(compareStorage("240 GB", [{ tamanho: 480000000000 }]).status, STATUS.DIFFERENT);
+  assert.equal(compareStorage("240 GB", [{ tamanho: 223 * 1024 ** 3 }]).status, STATUS.MATCH);
+  assert.equal(compareStorage("SSD comprado 30/08/2022", [{ tamanho: 240000000000 }]).status, STATUS.NOT_COMPARABLE);
   assert.equal(compareWindows("Windows 10", "win32", "10.0.19045").status, STATUS.MATCH);
   assert.equal(compareOffice("Microsoft 365", "Office 2013").status, STATUS.DIFFERENT);
   assert.equal(comparePartialKey("ABCDE", null).status, STATUS.NO_AGENT_DATA);
