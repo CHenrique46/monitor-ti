@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { sanitizeInventoryRow, parseStorageCapacity, partialOfficeKey, normalizeEquipmentNumber } = require("./src/inventory/excelInventory");
 const { importAuthorizedBaselines } = require("./src/inventory/baselineImport");
-const { compareInventory, compareCpu, compareRam, compareStorage, compareWindows, compareOffice, comparePartialKey, STATUS } = require("./src/inventory/inventoryComparison");
+const { compareInventory, normalizeCpu, compareCpu, compareRam, compareStorage, compareWindows, compareOffice, comparePartialKey, STATUS } = require("./src/inventory/inventoryComparison");
 const { createComputadoresController } = require("./src/controllers/computadores.controller");
 
 const fullOfficeKey = ["ABCDE", "12345", "FGHIJ", "KLMNO", "PQRST"].join("-");
@@ -64,6 +64,10 @@ test("compares VAVA67 baseline and observed Office", () => {
 });
 
 test("supports comparison statuses and technical normalizers", () => {
+  assert.equal(normalizeCpu("Intel Core I5 4590 3.3ghz"), "i5-4590");
+  assert.equal(normalizeCpu("Intel(R) Core(TM) i5-4590 CPU @ 3.30GHz"), "i5-4590");
+  assert.equal(compareCpu("Intel Core I5 4590 3.3ghz", "Intel(R) Core(TM) i5-4590 CPU @ 3.30GHz").status, STATUS.MATCH);
+  assert.equal(compareCpu("Intel Core i5-4590", "Intel Core i5-6500").status, STATUS.DIFFERENT);
   assert.equal(compareCpu("i5-8400", "i7-8700").status, STATUS.DIFFERENT);
   assert.equal(compareRam(8, 16 * 1024 ** 3).status, STATUS.DIFFERENT);
   assert.equal(compareStorage("240 GB", [{ tamanho: 480000000000 }]).status, STATUS.DIFFERENT);

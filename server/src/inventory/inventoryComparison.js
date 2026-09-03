@@ -4,13 +4,19 @@ const { parseStorageCapacity } = require("./excelInventory");
 const STATUS = { MATCH: "MATCH", DIFFERENT: "DIFFERENT", NO_BASELINE: "NO_BASELINE", NO_AGENT_DATA: "NO_AGENT_DATA", NOT_COMPARABLE: "NOT_COMPARABLE" };
 
 function clean(value) {
-  return String(value || "").toLowerCase().replace(/\(r\)|\(tm\)|\(c\)/g, "").replace(/\bcpu\b|@.*$/g, "").replace(/[^a-z0-9]+/g, "").trim();
+  return String(value || "").toLowerCase().replace(/\(r\)|\(tm\)|\(c\)/g, "").replace(/\b\d+(?:[.,]\d+)?\s*ghz\b/g, "").replace(/\bcpu\b|@.*$/g, "").replace(/[^a-z0-9]+/g, "").trim();
+}
+
+function normalizeCpu(value) {
+  const raw = String(value || "");
+  const model = /\b(i[3579])\s*[- ]?\s*(\d{4,5})\b/i.exec(raw);
+  return model ? `${model[1].toLowerCase()}-${model[2]}` : clean(raw);
 }
 
 function compareCpu(expected, actual) {
   if (!expected) return { status: STATUS.NO_BASELINE, reason: "baseline_missing" };
   if (!actual) return { status: STATUS.NO_AGENT_DATA, reason: "agent_cpu_missing" };
-  return { status: clean(expected) === clean(actual) ? STATUS.MATCH : STATUS.DIFFERENT, reason: "normalized_cpu_comparison" };
+  return { status: normalizeCpu(expected) === normalizeCpu(actual) ? STATUS.MATCH : STATUS.DIFFERENT, reason: "normalized_cpu_comparison" };
 }
 
 function numberValue(value) {
@@ -100,4 +106,4 @@ function compareInventory(baseline, current) {
   ];
 }
 
-module.exports = { STATUS, compareCpu, compareRam, compareStorage, compareWindows, compareOffice, comparePartialKey, compareInventory };
+module.exports = { STATUS, normalizeCpu, compareCpu, compareRam, compareStorage, compareWindows, compareOffice, comparePartialKey, compareInventory };
