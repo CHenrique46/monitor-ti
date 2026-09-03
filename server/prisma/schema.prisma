@@ -71,13 +71,13 @@ model ComputerInventoryBaseline {
   updatedAt                DateTime  @updatedAt
 
   computador               Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
-  excelInventorySync       ExcelInventorySync?
+  excelInventorySyncs      ExcelInventorySync[]
 }
 
 model ExcelInventorySync {
   id                  Int      @id @default(autoincrement())
   computerId          Int
-  baselineId          Int      @unique
+  baselineId          Int
   equipamentoNumero   String
   operation           String   @default("UPSERT_INVENTORY")
   status              String   @default("PENDING")
@@ -92,7 +92,6 @@ model ExcelInventorySync {
   computador          Computador @relation(fields: [computerId], references: [id], onDelete: Cascade)
   baseline            ComputerInventoryBaseline @relation(fields: [baselineId], references: [id], onDelete: Cascade)
 
-  @@unique([baselineId, operation])
   @@index([status, nextAttemptAt])
   @@index([computerId])
 }

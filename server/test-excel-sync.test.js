@@ -113,11 +113,56 @@ test("rejects an existing lock without touching the original", () => {
 
 test("outbox references a baseline and never stores key or Windows data", async () => {
   const calls = [];
-  const db = { excelInventorySync: { create: async (args) => { calls.push(args); return args.data; } } };
+  const db = { excelInventorySync: { findFirst: async () => null, create: async (args) => { calls.push(args); return args.data; } } };
   await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77" });
   assert.deepEqual(calls[0].data, { computerId: 162, baselineId: 9, equipamentoNumero: "77", operation: "UPSERT_INVENTORY", status: "PENDING" });
   assert.equal(JSON.stringify(calls[0]).includes(fakeFullSame), false);
   assert.equal(JSON.stringify(calls[0]).includes("Windows"), false);
+});
+
+function outboxDb(initial = []) {
+  const items = [...initial];
+  return {
+    items,
+    excelInventorySync: {
+      findFirst: async ({ where }) => items.filter((item) => item.baselineId === where.baselineId && item.operation === where.operation && (!where.status || where.status.in.includes(item.status))).sort((a, b) => b.id - a.id)[0] || null,
+      create: async ({ data }) => {
+        if (items.some((item) => item.baselineId === data.baselineId && item.operation === data.operation && ["PENDING", "PROCESSING"].includes(item.status))) { const error = new Error("active duplicate"); error.code = "P2002"; throw error; }
+        const item = { ...data, id: items.length + 1 };
+        items.push(item);
+        return item;
+      }
+    }
+  };
+}
+
+test("outbox keeps one active run and preserves completed history", async () => {
+  const db = outboxDb();
+  const first = await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77" });
+  const duplicate = await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77" });
+  assert.equal(db.items.length, 1);
+  assert.equal(duplicate.id, first.id);
+  db.items[0].status = "PROCESSING";
+  assert.equal((await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77" })).id, first.id);
+  db.items[0].status = "SYNCED";
+  const resync = await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77", forceNewRun: true });
+  assert.equal(resync.id, 2);
+  assert.equal(db.items[0].status, "SYNCED");
+  assert.equal(db.items.length, 2);
+});
+
+test("outbox retries FAILED with a new explicit run and protects concurrent requests", async () => {
+  const db = outboxDb([{ id: 1, baselineId: 9, operation: "UPSERT_INVENTORY", status: "FAILED" }]);
+  const retry = await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77", forceNewRun: true });
+  assert.equal(retry.id, 2);
+  assert.equal(db.items[0].status, "FAILED");
+  const concurrentDb = outboxDb();
+  const results = await Promise.all([
+    enqueueExcelSync({ db: concurrentDb, computerId: 162, baselineId: 9, equipamentoNumero: "77", forceNewRun: true }),
+    enqueueExcelSync({ db: concurrentDb, computerId: 162, baselineId: 9, equipamentoNumero: "77", forceNewRun: true })
+  ]);
+  assert.equal(concurrentDb.items.filter((item) => ["PENDING", "PROCESSING"].includes(item.status)).length, 1);
+  assert.equal(new Set(results.map((item) => item.id)).size, 1);
 });
 
 test("normalizes baseline presentation for Excel", () => {
