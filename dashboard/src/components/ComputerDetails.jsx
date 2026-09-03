@@ -30,7 +30,8 @@ const inventoryStatusLabels = { MATCH: 'De acordo', DIFFERENT: 'Divergente', NO_
 
 function InventorySection({ result }) {
   if (!result) return <Section title="Inventário"><div className="muted">Não foi possível carregar o inventário.</div></Section>
-  return <Section title="Inventário"><div className="inventory-comparison">{result.comparison.map((item) => <div className={`inventory-comparison-row ${item.status.toLowerCase()}`} key={item.field}><div className="inventory-comparison-title"><strong>{inventoryLabels[item.field] || item.field}</strong><span>{item.status === 'MATCH' ? '✓' : item.status === 'DIFFERENT' ? '⚠' : '·'}</span></div><span className="inventory-comparison-status">{inventoryStatusLabels[item.status] || item.status}</span>{item.status === 'DIFFERENT' && <div className="inventory-comparison-values"><span>Inventário: {item.expected || 'Não informado'}</span><span>Máquina: {item.actual || 'Não informado'}</span></div>}</div>)}</div></Section>
+  const excelLabels = { PENDING: 'Sincronização com Excel pendente', PROCESSING: 'Sincronização com Excel em andamento', SYNCED: 'Sincronizado com Excel', FAILED: 'Sincronização com Excel falhou' }
+  return <Section title="Inventário"><div className="inventory-comparison">{result.excelSync && <div className={`update-status ${result.excelSync.status === 'FAILED' ? 'failed' : ''}`}>{excelLabels[result.excelSync.status] || `Excel: ${result.excelSync.status}`}</div>}{result.comparison.map((item) => <div className={`inventory-comparison-row ${item.status.toLowerCase()}`} key={item.field}><div className="inventory-comparison-title"><strong>{inventoryLabels[item.field] || item.field}</strong><span>{item.status === 'MATCH' ? '✓' : item.status === 'DIFFERENT' ? '⚠' : '·'}</span></div><span className="inventory-comparison-status">{inventoryStatusLabels[item.status] || item.status}</span>{item.status === 'DIFFERENT' && <div className="inventory-comparison-values"><span>Inventário: {item.expected || 'Não informado'}</span><span>Máquina: {item.actual || 'Não informado'}</span></div>}</div>)}</div></Section>
 }
 
 function OfficeField({ label, value }) {
@@ -252,8 +253,8 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
       if (!response.ok) { setAddInventoryError(body.erro || 'Não foi possível adicionar ao inventário.'); return }
       const [computerResponse, comparisonResponse] = await Promise.all([apiFetch(`${API_URL}/api/computadores/${id}`), apiFetch(`${API_URL}/api/computadores/${id}/inventory-comparison`)
       ])
-      if (computerResponse.ok) setC(await computerResponse.json())
-      if (comparisonResponse.ok) setInventoryComparison(await comparisonResponse.json())
+       if (computerResponse.ok) setC(await computerResponse.json())
+       if (comparisonResponse.ok) setInventoryComparison(await comparisonResponse.json())
       setAddInventoryOpen(false)
     } catch { setAddInventoryError('Não foi possível adicionar ao inventário.') } finally { setAddInventorySaving(false) }
   }

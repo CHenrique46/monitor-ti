@@ -1,6 +1,7 @@
 const prisma = require("../prisma");
 const { normalizeOfficeInstallations } = require("../inventory/officeNormalization");
 const { compareInventory } = require("../inventory/inventoryComparison");
+const { enqueueExcelSync } = require("../inventory/excelSyncOutbox");
 
 const OFFICE_PARTIAL_KEY_RE = /^[A-Za-z0-9]{5}$/;
 
@@ -150,12 +151,14 @@ async function getInventoryComparison(value, db = prisma) {
   const computer = await getById(id, db);
   if (!computer) return null;
   const baseline = await db.computerInventoryBaseline.findUnique({ where: { computadorId: id } });
+  const excelSync = baseline ? await db.excelInventorySync.findFirst({ where: { baselineId: baseline.id, operation: "UPSERT_INVENTORY" }, orderBy: { id: "desc" }, select: { id: true, status: true } }) : null;
   return {
     computadorId: id,
     equipamentoNumero: computer.equipamentoNumero,
     apelido: computer.apelido,
     hasBaseline: Boolean(baseline),
-    comparison: compareInventory(baseline, computer)
+    comparison: compareInventory(baseline, computer),
+    excelSync
   };
 }
 
@@ -232,7 +235,7 @@ function buildTrustedInventoryBaseline(computer) {
   };
 }
 
-async function addInventoryBaseline(value, input, db = prisma) {
+async function addInventoryBaseline(value, input, db = prisma, enqueue = enqueueExcelSync) {
   const id = parseComputerId(value);
   const request = normalizeInventoryRequest(input);
   try {
@@ -263,6 +266,7 @@ async function addInventoryBaseline(value, input, db = prisma) {
           source: "ADMIN_APPROVED_SNAPSHOT"
         }
       });
+      const excelSync = await enqueue({ db: tx, computerId: id, baselineId: baseline.id, equipamentoNumero: baseline.equipamentoNumero });
       return {
         computadorId: updated.id,
         equipamentoNumero: updated.equipamentoNumero,
@@ -275,7 +279,8 @@ async function addInventoryBaseline(value, input, db = prisma) {
           windowsEsperado: baseline.windowsEsperado,
           officeEsperado: baseline.officeEsperado,
           officePartialKeyEsperada: baseline.officePartialKeyEsperada
-        }
+        },
+        excelSync: { id: excelSync.id, status: excelSync.status }
       };
     });
   } catch (error) {
@@ -391,7 +396,7 @@ async function deleteOfflineComputer(value, db = prisma) {
 module.exports = {
   list,
   getById,
-  createComputadoresService: ({ db = prisma } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db), getInventoryComparison: (id) => getInventoryComparison(id, db), addInventoryBaseline: (id, input) => addInventoryBaseline(id, input, db) }),
+  createComputadoresService: ({ db = prisma, enqueue = enqueueExcelSync } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db), getInventoryComparison: (id) => getInventoryComparison(id, db), addInventoryBaseline: (id, input) => addInventoryBaseline(id, input, db, enqueue) }),
   updateInventoryMetadata,
   getCapabilitiesById,
   deleteOfflineComputer,

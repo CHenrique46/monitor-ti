@@ -31,13 +31,13 @@ function makeComputer(overrides = {}) {
 }
 
 function makeDb({ computer = makeComputer(), equipmentBaselines = [], failCreate = false } = {}) {
-  const state = { computer: structuredClone(computer), equipmentBaselines: [...equipmentBaselines], baseline: computer?.inventoryBaseline || null };
+  const state = { computer: structuredClone(computer), equipmentBaselines: [...equipmentBaselines], baseline: computer?.inventoryBaseline || null, excelSyncs: [] };
   let transactionTail = Promise.resolve();
   const db = {
     state,
     $transaction(work) {
       const run = transactionTail.then(async () => {
-        const staged = { computer: structuredClone(state.computer), equipmentBaselines: [...state.equipmentBaselines], baseline: structuredClone(state.baseline) };
+        const staged = { computer: structuredClone(state.computer), equipmentBaselines: [...state.equipmentBaselines], baseline: structuredClone(state.baseline), excelSyncs: [...state.excelSyncs] };
         const tx = {
           computador: {
             findUnique: async () => staged.computer ? structuredClone({ ...staged.computer, inventoryBaseline: staged.baseline }) : null,
@@ -51,6 +51,10 @@ function makeDb({ computer = makeComputer(), equipmentBaselines = [], failCreate
               staged.equipmentBaselines.push(staged.baseline);
               return structuredClone(staged.baseline);
             }
+          },
+          excelInventorySync: {
+            findFirst: async () => staged.excelSyncs[staged.excelSyncs.length - 1] || null,
+            create: async ({ data }) => { const item = { id: staged.excelSyncs.length + 1, ...data }; staged.excelSyncs.push(item); return structuredClone(item); }
           }
         };
         const result = await work(tx);
@@ -61,6 +65,9 @@ function makeDb({ computer = makeComputer(), equipmentBaselines = [], failCreate
       return run;
     }
   };
+  db.computador = { findUnique: async () => state.computer ? structuredClone({ ...state.computer, inventoryBaseline: state.baseline }) : null };
+  db.computerInventoryBaseline = { findUnique: async () => structuredClone(state.baseline) };
+  db.excelInventorySync = { findFirst: async () => { const item = state.excelSyncs[state.excelSyncs.length - 1]; return item ? { id: item.id, status: item.status } : null; } };
   return db;
 }
 
@@ -101,6 +108,7 @@ test("creates a baseline from the server snapshot and keeps only a partial Offic
   const db = makeDb();
   const result = await invoke(createHandler(db), { id: "162" }, { equipamentoNumero: 77, apelido: "Sheila" });
   assert.equal(result.status, 201);
+  assert.deepEqual(result.body.excelSync, { id: 1, status: "PENDING" });
   assert.equal(db.state.computer.equipamentoNumero, "77");
   assert.equal(db.state.computer.apelido, "Sheila");
   assert.equal(db.state.baseline.armazenamentoEsperado, "512 GB");
@@ -108,6 +116,26 @@ test("creates a baseline from the server snapshot and keeps only a partial Offic
   assert.equal(db.state.baseline.officePartialKeyEsperada, "DV3TM");
   assert.equal(JSON.stringify(db.state.baseline).includes(fakeFullOfficeKey), false);
   assert.equal(Object.values(db.state.baseline).includes("LICENSED"), false);
+});
+
+test("rolls back baseline and identity when Excel enqueue fails", async () => {
+  const db = makeDb();
+  const service = computadoresService.createComputadoresService({ db, enqueue: async () => { throw new Error("simulated enqueue failure"); } });
+  const result = await invoke(computadoresController.createComputadoresController({ service }).addInventoryBaseline, { id: "162" }, { equipamentoNumero: 77, apelido: "Sheila" });
+  assert.equal(result.status, 500);
+  assert.equal(db.state.computer.equipamentoNumero, null);
+  assert.equal(db.state.baseline, null);
+  assert.equal(db.state.excelSyncs.length, 0);
+});
+
+test("exposes the latest Excel sync status without exposing sensitive fields", async () => {
+  const db = makeDb();
+  const service = computadoresService.createComputadoresService({ db });
+  db.state.baseline = { id: 1, computadorId: 162, equipamentoNumero: "77", processadorEsperado: "CPU" };
+  db.state.excelSyncs.push({ id: 1, baselineId: 1, status: "FAILED", operation: "UPSERT_INVENTORY" });
+  const result = await service.getInventoryComparison(162);
+  assert.deepEqual(result.excelSync, { id: 1, status: "FAILED" });
+  assert.equal(JSON.stringify(result).includes(fakeFullOfficeKey), false);
 });
 
 test("rejects technical fields from the Dashboard request", async () => {
