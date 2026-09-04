@@ -36,6 +36,7 @@ const
   TargetVersion = '{#TargetVersion}';
   AgentHash = '{#AgentHash}';
   NotifierHash = '{#NotifierHash}';
+  MetadataHash = '{#MetadataHash}';
 
 var
   PayloadPath: string;
