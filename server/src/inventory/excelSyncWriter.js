@@ -7,8 +7,8 @@ const { normalizeCpu } = require("./inventoryComparison");
 const { getInventoryExcelPath } = require("../config");
 
 const SYNC_OPERATION = "UPSERT_INVENTORY";
-const AUTHORIZED_COLUMNS = new Set(["A", "B", "C", "D", "F", "G", "I", "J"]);
-const PRESERVED_COLUMNS = new Set(["E", "H"]);
+const AUTHORIZED_COLUMNS = new Set(["B", "C", "D", "G", "I", "J"]);
+const PRESERVED_COLUMNS = new Set(["A", "E", "F", "H"]);
 const OFFICE_PARTIAL_KEY_RE = /^[A-Za-z0-9]{5}$/;
 
 class ExcelSyncError extends Error {
@@ -88,19 +88,20 @@ function normalizeOfficeForExcel(value) {
   return raw;
 }
 
-function baselineValues(baseline) {
+function baselineValues(baseline, snapshot) {
   if (!baseline || !baseline.equipamentoNumero) throw new ExcelSyncError("INVALID_BASELINE", "Baseline inválido.");
+  const snapshotValues = snapshot && snapshot.values ? snapshot.values : snapshot || {};
+  const hasSnapshot = snapshot !== undefined && snapshot !== null;
   const partial = String(baseline.officePartialKeyEsperada || "").toUpperCase();
   if (partial && !OFFICE_PARTIAL_KEY_RE.test(partial)) throw new ExcelSyncError("INVALID_BASELINE", "Partial Office inválida.");
   return {
     A: String(baseline.equipamentoNumero),
-    B: normalizeCpuForExcel(baseline.processadorEsperado),
-    C: normalizeRamForExcel(baseline.ramEsperada),
-    D: String(baseline.windowsEsperado || "").trim(),
-    F: String(baseline.apelidoEsperado || "").trim(),
-    G: normalizeStorageForExcel(baseline.armazenamentoEsperado),
-    I: partial,
-    J: normalizeOfficeForExcel(baseline.officeEsperado)
+    B: snapshotValues.B !== undefined ? String(snapshotValues.B) : (hasSnapshot ? undefined : normalizeCpuForExcel(baseline.processadorEsperado)),
+    C: snapshotValues.C !== undefined ? String(snapshotValues.C) : (hasSnapshot ? undefined : normalizeRamForExcel(baseline.ramEsperada)),
+    D: snapshotValues.D !== undefined ? String(snapshotValues.D).trim() : (hasSnapshot ? undefined : String(baseline.windowsEsperado || "").trim()),
+    G: snapshotValues.G !== undefined ? String(snapshotValues.G) : (hasSnapshot ? undefined : normalizeStorageForExcel(baseline.armazenamentoEsperado)),
+    I: snapshotValues.I !== undefined ? String(snapshotValues.I || "").slice(-5).toUpperCase() : (hasSnapshot ? undefined : partial),
+    J: snapshotValues.J !== undefined ? String(snapshotValues.J || "") : (hasSnapshot ? undefined : normalizeOfficeForExcel(baseline.officeEsperado))
   };
 }
 
@@ -133,10 +134,10 @@ function updateRow(rowXml, rowNumber, values, strings) {
   const records = cellRecords(rowXml, strings);
   const byColumn = new Map(records.map((record) => [record.column, record]));
   const officeCurrent = byColumn.get("I")?.value || "";
-  values.I = officeAction(officeCurrent, values.I);
+  if (values.I !== undefined) values.I = officeAction(officeCurrent, values.I);
   const replacements = [];
   for (const column of AUTHORIZED_COLUMNS) {
-    if (column === "F" && byColumn.get("F")?.value) continue;
+    if (values[column] === undefined) continue;
     if (column === "I" && values.I === officeCurrent) continue;
     const record = byColumn.get(column);
     if (record) replacements.push({ start: record.start, end: record.end, value: column === "C" ? setRamCellValue(record.raw, values[column]) : setCellValue(record.raw, values[column]) });
@@ -147,7 +148,7 @@ function updateRow(rowXml, rowNumber, values, strings) {
   return result;
 }
 
-function transformWorkbook(buffer, baseline) {
+function transformWorkbook(buffer, baseline, snapshot) {
   const files = unzipSync(new Uint8Array(buffer));
   const workbookXml = strFromU8(files["xl/workbook.xml"] || new Uint8Array());
   const relationsXml = strFromU8(files["xl/_rels/workbook.xml.rels"] || new Uint8Array());
@@ -160,7 +161,7 @@ function transformWorkbook(buffer, baseline) {
   const headers = parsedRows[0];
   const equipmentColumn = Object.keys(headers).find((column) => headers[column] === "EQUIP. N°" || headers[column] === "EQUIP. Nº");
   if (!equipmentColumn) throw new ExcelSyncError("INVENTORY_HEADER_NOT_FOUND", "Header EQUIP. Nº não encontrado.");
-  const values = baselineValues(baseline);
+  const values = baselineValues(baseline, snapshot);
   const rowMatches = [];
   const xmlRows = Array.from(sheetXml.matchAll(/<row\b[^>]*>[\s\S]*?<\/row>/g));
   for (let index = 1; index < parsedRows.length; index++) {
@@ -206,19 +207,19 @@ function safeError(error) {
   return `${error?.code || "EXCEL_SYNC_ERROR"}: ${String(error?.message || "Falha na sincronização").replace(/[A-Za-z0-9]{5}(?:-[A-Za-z0-9]{5}){4}/g, "[redacted]").slice(0, 240)}`;
 }
 
-function syncBaselineToExcel({ baseline, filePath = getInventoryExcelPath(), backupDir = path.join(path.dirname(filePath), "backups"), now = Date.now } = {}) {
+function syncBaselineToExcel({ baseline, snapshot, filePath = getInventoryExcelPath(), backupDir = path.join(path.dirname(filePath), "backups"), now = Date.now } = {}) {
   const release = acquireLock(filePath);
   let tempPath;
   try {
     if (!fs.existsSync(filePath)) throw new ExcelSyncError("EXCEL_NOT_FOUND", "Arquivo de inventário não encontrado.");
     const source = fs.readFileSync(filePath);
-    const transformed = transformWorkbook(source, baseline);
+    const transformed = transformWorkbook(source, baseline, snapshot);
     tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`);
     fs.writeFileSync(tempPath, transformed.buffer, { flag: "wx" });
     const check = readInventoryRows(tempPath).filter((row) => row.equipamentoNumero === String(baseline.equipamentoNumero));
     const writtenOfficePartial = check[0]?.officePartialKeyEsperada || "";
     const expectedOfficePartial = String(transformed.values.I || "").slice(-5);
-    if (check.length !== 1 || (writtenOfficePartial !== expectedOfficePartial && writtenOfficePartial !== transformed.values.I) || check[0].armazenamentoEsperado !== transformed.values.G) {
+    if (check.length !== 1 || (transformed.values.I !== undefined && writtenOfficePartial !== expectedOfficePartial && writtenOfficePartial !== transformed.values.I) || (transformed.values.G !== undefined && check[0].armazenamentoEsperado !== transformed.values.G)) {
       throw new ExcelSyncError("EXCEL_VALIDATION_FAILED", `Workbook temporário inválido: rows=${check.length}, officePartial=${writtenOfficePartial}, expectedOfficePartial=${expectedOfficePartial}, storage=${check[0]?.armazenamentoEsperado || ""}.`);
     }
     const backupPath = nextBackupPath(backupDir, path.basename(filePath, path.extname(filePath)), now);

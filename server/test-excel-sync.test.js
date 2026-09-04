@@ -86,14 +86,14 @@ test("preserves equal partial/full Office keys and rejects conflicts or invalid 
   }
 });
 
-test("preserves a non-empty atual and fills an empty atual from the approved nickname", () => {
+test("preserves a non-empty or empty atual value", () => {
   const existing = tempWorkbook({ office: "empty", user: "Sheila - Fiscal" });
   const empty = tempWorkbook({ office: "empty", user: "" });
   try {
     syncBaselineToExcel({ baseline: baseline(), filePath: existing.filePath, backupDir: path.join(existing.directory, "backups") });
     syncBaselineToExcel({ baseline: baseline(), filePath: empty.filePath, backupDir: path.join(empty.directory, "backups") });
     assert.equal(readInventoryRows(existing.filePath).find((row) => row.equipamentoNumero === "77").apelidoEsperado, "Sheila - Fiscal");
-    assert.equal(readInventoryRows(empty.filePath).find((row) => row.equipamentoNumero === "77").apelidoEsperado, "Sheila");
+    assert.equal(readInventoryRows(empty.filePath).find((row) => row.equipamentoNumero === "77").apelidoEsperado, null);
   } finally { existing.cleanup(); empty.cleanup(); }
 });
 

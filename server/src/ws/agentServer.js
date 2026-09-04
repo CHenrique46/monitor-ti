@@ -6,6 +6,7 @@ const avisosService = require("../services/avisos.service");
 const remoteActionsService = require("../services/remoteActions.service");
 const { validateInventoryMessage } = require("../inventory/office");
 const { persistOfficeInventory } = require("../inventory/persistence");
+const { queueComputerInventorySync } = require("../inventory/excelAutoSync");
 const logger = require("../logger");
 
 const HEARTBEAT_INTERVAL = 30000;
@@ -216,6 +217,7 @@ function handleMetrics(d, db = prisma) {
           ultimaMetrica: new Date()
         }
       });
+      queueComputerInventorySync({ db, computadorId: existente.id, includeStorage: false, mergeWithLatest: false, log: (message) => logger.logEvent(`[Monitor TI] ${message}`) }).catch(() => {});
 
       const state = {
         computadorId: existente.id,
@@ -316,6 +318,7 @@ function setupWebSocket(server, dependencies = {}) {
         }
         try {
           await persistOfficeInventory({ db, computadorId: computador.id, office: msg.data.office });
+          await queueComputerInventorySync({ db, computadorId: computador.id, includeOffice: true, log: (message) => logger.logEvent(`[Monitor TI] ${message}`) });
           logger.logEvent(`[Monitor TI] inventory received computerId=${computador.id} officeInstallationsCount=${validation.installationCount}`);
         } catch (error) {
           logger.logEvent(`[Monitor TI] inventory persistence failed computerId=${computador.id} reason=${String(error && (error.code || error.message) || "unknown").replace(/[\r\n]+/g, " ").slice(0, 160)}`);
@@ -518,6 +521,7 @@ function setupWebSocket(server, dependencies = {}) {
                 });
               }
             });
+            queueComputerInventorySync({ db, computadorId: computador.id, log: (message) => logger.logEvent(`[Monitor TI] ${message}`) }).catch(() => {});
           } catch (err) {
             console.error("[Monitor TI] erro ao sincronizar discos:", err.message);
           }

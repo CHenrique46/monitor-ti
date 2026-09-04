@@ -2,6 +2,7 @@ const prisma = require("../prisma");
 const { normalizeOfficeInstallations } = require("../inventory/officeNormalization");
 const { compareInventory } = require("../inventory/inventoryComparison");
 const { enqueueExcelSync } = require("../inventory/excelSyncOutbox");
+const { snapshotFromBaseline } = require("../inventory/excelSyncSnapshot");
 
 const OFFICE_PARTIAL_KEY_RE = /^[A-Za-z0-9]{5}$/;
 
@@ -266,7 +267,7 @@ async function addInventoryBaseline(value, input, db = prisma, enqueue = enqueue
           source: "ADMIN_APPROVED_SNAPSHOT"
         }
       });
-      const excelSync = await enqueue({ db: tx, computerId: id, baselineId: baseline.id, equipamentoNumero: baseline.equipamentoNumero });
+      const excelSync = await enqueue({ db: tx, computerId: id, baselineId: baseline.id, equipamentoNumero: baseline.equipamentoNumero, snapshot: snapshotFromBaseline(baseline) });
       return {
         computadorId: updated.id,
         equipamentoNumero: updated.equipamentoNumero,
