@@ -356,13 +356,13 @@ function createNoticeRuntime(opts) {
     scheduleSave();
   }
 
-  function emitCapability() {
+  function emitCapability(reason = "state_change") {
     const now = Date.now();
     const eligible = hasNoticesCapability(state.connections.values(), now, heartbeatTimeoutMs);
     if (eligible === state.capability) return;
     state.capability = eligible;
     if (typeof onCapabilityChange === "function") {
-      onCapabilityChange(eligible ? ["notices"] : []);
+      onCapabilityChange(eligible ? ["notices"] : [], reason);
     }
   }
 
@@ -421,7 +421,7 @@ function createNoticeRuntime(opts) {
     conn.state = next;
     conn.updatedAt = Date.now();
     if (reason) log("notifier_state " + conn.sessionId + ":" + conn.pid + " -> " + next + " (" + reason + ")");
-    emitCapability();
+    emitCapability(reason);
   }
 
   function routeNext() {
@@ -800,7 +800,7 @@ function createNoticeRuntime(opts) {
     const now = Date.now();
     for (const conn of state.connections.values()) {
       if (!isFreshHeartbeat(conn.lastHeartbeat, now, heartbeatTimeoutMs) && conn.state !== NOTIFIER_STATES.DISCONNECTED) {
-        setConnectionState(conn, NOTIFIER_STATES.STALE, "heartbeat timeout");
+        setConnectionState(conn, NOTIFIER_STATES.STALE, "heartbeat_timeout");
         log("stale " + conn.sessionId + ":" + conn.pid);
         try { conn.socket.end(); } catch {}
       }

@@ -3,6 +3,12 @@ const { createNoticeRuntime: defaultCreateNoticeRuntime } = require("./runtime")
 const { queryTaskState: defaultQueryTaskState, runTask: defaultRunTask } = require("./task");
 
 const COMPANION_TASK_NAME = "MonitorTI-Notifier";
+const RECOVERY_GRACE_PERIOD_MS = 5000;
+const RECOVERY_COOLDOWN_MS = 60000;
+const RECOVERY_BACKOFF_INITIAL_MS = 15000;
+const RECOVERY_BACKOFF_MAX_MS = 300000;
+const RECOVERY_WINDOW_MS = 15 * 60 * 1000;
+const RECOVERY_MAX_ATTEMPTS = 3;
 
 function compareVersion(a, b) {
   const pa = String(a || "0").split(/[.+-]/).map((n) => parseInt(n, 10) || 0);
@@ -33,7 +39,13 @@ function createNoticeBridge(opts, deps = {}) {
     version,
     getInteractiveUser,
     processInfoLookup,
-    companionEnabled = isCompanionEnabled(process.env.MTI_NOTICES_COMPANION, version)
+    companionEnabled = isCompanionEnabled(process.env.MTI_NOTICES_COMPANION, version),
+    recoveryGracePeriodMs = RECOVERY_GRACE_PERIOD_MS,
+    recoveryCooldownMs = RECOVERY_COOLDOWN_MS,
+    recoveryBackoffInitialMs = RECOVERY_BACKOFF_INITIAL_MS,
+    recoveryBackoffMaxMs = RECOVERY_BACKOFF_MAX_MS,
+    recoveryWindowMs = RECOVERY_WINDOW_MS,
+    recoveryMaxAttempts = RECOVERY_MAX_ATTEMPTS
   } = opts;
 
   const createNotifier = deps.createNotifier || defaultCreateNotifier;
@@ -48,7 +60,15 @@ function createNoticeBridge(opts, deps = {}) {
   let legacyEnsureStarted = false;
   let runtime = null;
   let legacyNotifier = null;
-  let taskRunAttempted = false;
+  const recovery = {
+    timer: null,
+    inFlight: false,
+    cooldownUntil: 0,
+    windowStartedAt: 0,
+    attempts: 0,
+    backoffMs: recoveryBackoffInitialMs,
+    ready: false
+  };
 
   function log(message) {
     if (typeof logEvent === "function") logEvent(message);
@@ -96,7 +116,100 @@ function createNoticeBridge(opts, deps = {}) {
     }
   }
 
-  function handleRuntimeCapabilityChange() {
+  function clearRecoveryTimer() {
+    if (recovery.timer) clearTimeout(recovery.timer);
+    recovery.timer = null;
+  }
+
+  function resetRecovery() {
+    clearRecoveryTimer();
+    recovery.inFlight = false;
+    recovery.cooldownUntil = 0;
+    recovery.windowStartedAt = 0;
+    recovery.attempts = 0;
+    recovery.backoffMs = recoveryBackoffInitialMs;
+  }
+
+  function scheduleRecovery(reason, delayMs = recoveryGracePeriodMs, allowCooldown = false) {
+    if (!companionEnabled || recovery.ready || recovery.inFlight || recovery.timer) return false;
+    if (typeof getInteractiveUser === "function" && !String(getInteractiveUser() || "").trim()) {
+      log("companion_recovery_skipped reason=no_interactive_session");
+      return false;
+    }
+    const now = Date.now();
+    if (!allowCooldown && now < recovery.cooldownUntil) {
+      log("companion_recovery_skipped reason=cooldown");
+      return false;
+    }
+    if (recovery.windowStartedAt && now - recovery.windowStartedAt >= recoveryWindowMs) {
+      recovery.windowStartedAt = 0;
+      recovery.attempts = 0;
+      recovery.backoffMs = recoveryBackoffInitialMs;
+    }
+    if (recovery.attempts >= recoveryMaxAttempts) {
+      log("companion_recovery_skipped reason=max_attempts");
+      return false;
+    }
+    log("companion_recovery_scheduled reason=" + reason);
+    if (delayMs === 0) return recoverCompanion(reason);
+    recovery.timer = setTimeout(() => {
+      recovery.timer = null;
+      recoverCompanion(reason);
+    }, Math.max(0, delayMs));
+    if (recovery.timer && typeof recovery.timer.unref === "function") recovery.timer.unref();
+    return true;
+  }
+
+  function recoverCompanion(reason) {
+    if (recovery.ready || recovery.inFlight) return false;
+    if (typeof getInteractiveUser === "function" && !String(getInteractiveUser() || "").trim()) {
+      log("companion_recovery_skipped reason=no_interactive_session");
+      return false;
+    }
+    const now = Date.now();
+    if (now < recovery.cooldownUntil) {
+      log("companion_recovery_skipped reason=cooldown");
+      return false;
+    }
+    if (!recovery.windowStartedAt || now - recovery.windowStartedAt >= recoveryWindowMs) {
+      recovery.windowStartedAt = now;
+      recovery.attempts = 0;
+      recovery.backoffMs = recoveryBackoffInitialMs;
+    }
+    if (recovery.attempts >= recoveryMaxAttempts) {
+      log("companion_recovery_skipped reason=max_attempts");
+      return false;
+    }
+    const q = queryCompanionTask();
+    if (!q.ok) {
+      log("companion_recovery_failed reason=task_unavailable");
+      return false;
+    }
+    recovery.inFlight = true;
+    recovery.attempts += 1;
+    log("companion_recovery_attempt reason=" + reason);
+    try {
+      runTask();
+      recovery.cooldownUntil = Date.now() + recoveryCooldownMs;
+      log("companion_recovery_success reason=" + reason);
+      recovery.inFlight = false;
+      scheduleRecovery(reason, recoveryCooldownMs, true);
+      return true;
+    } catch (err) {
+      recovery.inFlight = false;
+      log("companion_recovery_failed reason=task_run_error");
+      const delay = recovery.backoffMs;
+      recovery.backoffMs = Math.min(recoveryBackoffMaxMs, recovery.backoffMs * 2);
+      scheduleRecovery(reason, delay);
+      return false;
+    }
+  }
+
+  function handleRuntimeCapabilityChange(nextCapabilities, reason) {
+    const ready = Array.isArray(nextCapabilities) && nextCapabilities.includes("notices");
+    recovery.ready = ready;
+    if (ready) resetRecovery();
+    else scheduleRecovery(reason === "heartbeat_timeout" ? "heartbeat_timeout" : "disconnect");
     announceCapabilities(false);
   }
 
@@ -188,21 +301,7 @@ function createNoticeBridge(opts, deps = {}) {
   }
 
   function attemptCompanionTaskRunIfNeeded() {
-    if (taskRunAttempted || !companionEnabled) return false;
-    taskRunAttempted = true;
-    if (typeof getInteractiveUser === "function" && !String(getInteractiveUser() || "").trim()) {
-      return false;
-    }
-    const q = queryCompanionTask();
-    if (!q.ok) return false;
-    try {
-      runTask();
-      log("scheduled task run solicitado: " + COMPANION_TASK_NAME);
-      return true;
-    } catch (err) {
-      log("falha ao solicitar task run: " + err.message);
-      return false;
-    }
+    return scheduleRecovery("startup", 0);
   }
 
   function isNotifierReady() {
@@ -240,6 +339,7 @@ function createNoticeBridge(opts, deps = {}) {
     shutdownForUpdate,
     attemptCompanionTaskRunIfNeeded,
     queryCompanionTask,
+    getRecoveryState: () => ({ ...recovery }),
     shutdown,
     isNotifierReady,
     getReadinessStatus,
