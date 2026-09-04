@@ -1,6 +1,10 @@
 #define MyAppName "HenriTech Control Agent"
-#define MyAppVersion "1.1.18"
-#define MyAppSourceDir "agent-1.1.18"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.1.18"
+#endif
+#ifndef MyAppSourceDir
+  #define MyAppSourceDir "agent-1.1.18"
+#endif
 #define MyPublisher "Monitor TI"
 #define MyUrl "https://monitor-ti.local"
 
@@ -24,6 +28,7 @@ OutputBaseFilename=HenriTech-Control-Agent-Setup-{#MyAppVersion}
 [Files]
 Source: "..\release\{#MyAppSourceDir}\MonitorTI-Agent.exe"; DestDir: "{app}"; Flags: ignoreversion; BeforeInstall: PrepareExistingInstall
 Source: "..\release\{#MyAppSourceDir}\MonitorTI-Notifier.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\release\{#MyAppSourceDir}\notifier-integrity.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\agent\config.json"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
 Source: "..\release\{#MyAppSourceDir}\WinSW.exe"; DestName: "MonitorTIAgent.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "MonitorTIAgent.xml"; DestDir: "{app}"; Flags: ignoreversion

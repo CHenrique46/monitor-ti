@@ -18,6 +18,7 @@ const UUID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 const PIPE_PREFIX = "MonitorTI-Notice-";
 const RECEIVED_TIMEOUT_MS = 60000;
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const LOCAL_INTEGRITY_FILE = "notifier-integrity.json";
 
 function isValidLevel(level) {
   return ["info", "aviso", "urgente"].includes(String(level || "").toLowerCase());
@@ -147,14 +148,34 @@ function createNotifier(opts) {
   }
 
   function validateInstalledNotifier() {
-    const existing = findNotifierExe();
-    const expected = expectedNotifierSha();
-    if (!existing || !expected) return false;
+    return getReadinessStatus().status === "READY";
+  }
+
+  function readLocalIntegrity() {
     try {
-      return sha256File(existing).toLowerCase() === expected.toLowerCase();
+      const file = path.join(getAppDir(), LOCAL_INTEGRITY_FILE);
+      const metadata = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (!metadata || typeof metadata.notifierSha256 !== "string") return null;
+      return metadata;
     } catch (e) {
-      return false;
+      return null;
     }
+  }
+
+  function getReadinessStatus() {
+    const existing = findNotifierExe();
+    if (!existing) return { status: "NOT_INSTALLED", path: null };
+    const metadata = readLocalIntegrity();
+    if (!metadata) return { status: "LOCAL_METADATA_MISSING", path: existing };
+    try {
+      const actual = sha256File(existing).toLowerCase();
+      if (actual !== metadata.notifierSha256.toLowerCase()) {
+        return { status: "INTEGRITY_FAILED", path: existing };
+      }
+    } catch (e) {
+      return { status: "INTEGRITY_FAILED", path: existing };
+    }
+    return { status: "READY", path: existing, version: metadata.version || null };
   }
 
   function loadCache() {
@@ -457,6 +478,11 @@ function createNotifier(opts) {
     if (installedSha.toLowerCase() !== String(f.sha256).toLowerCase()) {
       throw new Error("SHA do Notifier instalado nao confere");
     }
+    fs.writeFileSync(path.join(getAppDir(), LOCAL_INTEGRITY_FILE), JSON.stringify({
+      version: releaseMeta.version,
+      notifierSha256: f.sha256,
+      notifierSize: f.size || fs.statSync(dest).size
+    }, null, 2));
     logEvent("Notifier obtido e validado: " + dest);
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
   }
@@ -469,7 +495,7 @@ function createNotifier(opts) {
     });
   }
 
-  return { handleNoticeShow, start, ensureNotifierPresent, isNotifierReady };
+  return { handleNoticeShow, start, ensureNotifierPresent, isNotifierReady, getReadinessStatus };
 }
 
-module.exports = { createNotifier, normalizeNoticeShowPayload };
+module.exports = { createNotifier, normalizeNoticeShowPayload, LOCAL_INTEGRITY_FILE };

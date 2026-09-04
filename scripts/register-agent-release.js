@@ -25,6 +25,7 @@ const RELEASES_ROOT = path.join(__dirname, "..", "releases", "agent");
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const AGENT_NAME = "MonitorTI-Agent.exe";
 const NOTIFIER_NAME = "MonitorTI-Notifier.exe";
+const INTEGRITY_NAME = "notifier-integrity.json";
 
 function sha256Of(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
@@ -35,7 +36,7 @@ function buildZip(dir, version) {
   const zipPath = path.join(dir, zipName);
   const r = spawnSync(
     "tar",
-    ["-a", "-cf", zipPath, "-C", dir, AGENT_NAME, NOTIFIER_NAME, "manifest.json"],
+    ["-a", "-cf", zipPath, "-C", dir, AGENT_NAME, NOTIFIER_NAME, "manifest.json", INTEGRITY_NAME],
     { windowsHide: true }
   );
   if (r.status !== 0) {
@@ -98,6 +99,11 @@ async function main() {
       ]
     };
     fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
+    fs.writeFileSync(path.join(dir, INTEGRITY_NAME), JSON.stringify({
+      version,
+      notifierSha256: notSha256,
+      notifierSize: notSize
+    }, null, 2));
     console.log("Manifest gravado.");
 
     const { zipName, zipSha256, zipSize } = buildZip(dir, version);

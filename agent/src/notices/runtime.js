@@ -892,6 +892,20 @@ function createNoticeRuntime(opts) {
     return hasNoticesCapability(state.connections.values(), Date.now(), heartbeatTimeoutMs);
   }
 
+  function getReadinessStatus() {
+    if (!state.listening) return { status: "IPC_UNAVAILABLE" };
+    const interactiveUser = typeof getInteractiveUser === "function" ? getInteractiveUser() : null;
+    if (typeof getInteractiveUser === "function" && !interactiveUser) {
+      return { status: "NO_INTERACTIVE_SESSION" };
+    }
+    const now = Date.now();
+    const active = selectNotifier(state.connections.values(), now, heartbeatTimeoutMs);
+    if (!active) {
+      return { status: "COMPANION_NOT_RUNNING" };
+    }
+    return { status: "READY", sessionId: active.sessionId, pid: active.pid };
+  }
+
   function getState() {
     return {
       pipePath,
@@ -914,6 +928,7 @@ function createNoticeRuntime(opts) {
     requestShutdown,
     enqueueFromServer: enqueueNotice,
     isNotifierReady,
+    getReadinessStatus,
     getConnectionSnapshot,
     getDeliveriesSnapshot,
     hasNoticesCapability: () => isNotifierReady(),

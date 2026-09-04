@@ -99,6 +99,11 @@ async function main() {
   console.log("Notifier gerado: " + notifierExe);
   console.log("Notifier tamanho: " + fs.statSync(notifierExe).size + " bytes");
   console.log("Notifier SHA256: " + notifierHash);
+  fs.writeFileSync(path.join(releaseAgentTest, "notifier-integrity.json"), JSON.stringify({
+    version: agentPackage.version,
+    notifierSha256: notifierHash,
+    notifierSize: fs.statSync(notifierExe).size
+  }, null, 2));
 
   const versionMatch = String(agentPackage.version || "").match(/^(\d+\.\d+\.\d+)/);
   if (!versionMatch) throw new Error("Versao do Agent invalida: " + agentPackage.version);

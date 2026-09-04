@@ -209,6 +209,17 @@ function createNoticeBridge(opts, deps = {}) {
     return capabilities().length > 0;
   }
 
+  function getReadinessStatus() {
+    if (companionEnabled) {
+      return runtime && typeof runtime.getReadinessStatus === "function"
+        ? runtime.getReadinessStatus()
+        : { status: "UNKNOWN" };
+    }
+    return legacyNotifier && typeof legacyNotifier.getReadinessStatus === "function"
+      ? legacyNotifier.getReadinessStatus()
+      : { status: "UNKNOWN" };
+  }
+
   function applyWallpaper(payload) {
     if (!companionEnabled || !runtime || typeof runtime.requestWallpaper !== "function") {
       return Promise.reject(new Error("Companion indisponível."));
@@ -231,6 +242,7 @@ function createNoticeBridge(opts, deps = {}) {
     queryCompanionTask,
     shutdown,
     isNotifierReady,
+    getReadinessStatus,
     applyWallpaper,
     getRuntimeState
   };

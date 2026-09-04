@@ -144,7 +144,10 @@ const remoteActionRuntime = remoteActions.createRemoteActionRuntime({
       return { ok: false, message: "Notifier indisponível ou Agent desconectado." };
     }
     if (!noticesBridge.isNotifierReady()) {
-      return { ok: false, message: "Notifier indisponível." };
+      const readiness = typeof noticesBridge.getReadinessStatus === "function"
+        ? noticesBridge.getReadinessStatus()
+        : { status: "UNKNOWN" };
+      return { ok: false, message: "Notifier indisponível.", reason: readiness.status };
     }
     const accepted = noticesBridge.handleServerMessage(activeWs, {
       type: "notice_show",

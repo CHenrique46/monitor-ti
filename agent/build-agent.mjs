@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = __dirname;
@@ -58,6 +59,15 @@ if (fs.existsSync(csc) && fs.existsSync(notifierSrc)) {
   });
 } else {
   console.warn("csc ou fonte do Notifier ausente; pulando compilacao do Notifier.");
+}
+
+if (fs.existsSync(notifierOut)) {
+  const notifierBytes = fs.readFileSync(notifierOut);
+  fs.writeFileSync(path.join(rel, "notifier-integrity.json"), JSON.stringify({
+    version: agentPackage.version,
+    notifierSha256: crypto.createHash("sha256").update(notifierBytes).digest("hex"),
+    notifierSize: notifierBytes.length
+  }, null, 2));
 }
 
 console.log("Build concluido: " + path.join(rel, "MonitorTI-Agent.exe"));

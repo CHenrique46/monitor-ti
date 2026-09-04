@@ -205,10 +205,14 @@ function parseApplyUpdatePackageArgs(argv) {
   }
   const agentSrc = path.join(packageDir, "MonitorTI-Agent.exe");
   const notifierSrc = path.join(packageDir, "MonitorTI-Notifier.exe");
+  const integritySrc = path.join(packageDir, "notifier-integrity.json");
   const appDir = path.dirname(installExe);
   const files = [{ src: agentSrc, dst: installExe }];
   if (fs.existsSync(notifierSrc)) {
     files.push({ src: notifierSrc, dst: path.join(appDir, "MonitorTI-Notifier.exe") });
+  }
+  if (fs.existsSync(integritySrc)) {
+    files.push({ src: integritySrc, dst: path.join(appDir, "notifier-integrity.json") });
   }
   return { installExe, serviceName, sourceExe: agentSrc, files };
 }
@@ -338,9 +342,12 @@ async function run(argv, deps = {}) {
     }
     for (const b of backups) {
       try {
-        if (fs.existsSync(b.previous)) {
+        if (b.previous && fs.existsSync(b.previous)) {
           fs.copyFileSync(b.previous, b.dst);
           log("restaurado: " + b.previous);
+        } else if (!b.previous && fs.existsSync(b.dst)) {
+          fs.rmSync(b.dst, { force: true });
+          log("removido arquivo criado durante atualizacao: " + b.dst);
         }
       } catch (e) {
         log("falha ao restaurar " + b.dst + ": " + e.message);
@@ -407,6 +414,8 @@ async function run(argv, deps = {}) {
         } catch (e) {
           throw new Error("falha ao criar backup de " + f.dst + ": " + e.message);
         }
+      } else {
+        backups.push({ dst: f.dst, previous: null });
       }
     }
 

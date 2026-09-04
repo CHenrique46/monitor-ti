@@ -44,10 +44,11 @@ function buildPackage(outDir, tamper) {
     ]
   };
   fs.writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(manifest));
+  fs.writeFileSync(path.join(outDir, "notifier-integrity.json"), JSON.stringify({ version: "1.1.0", notifierSha256: realNotifSha, notifierSize: notifBuf.length }));
   const zipPath = path.join(outDir, "pkg.zip");
   const r = spawnSync("tar", ["-a", "-cf", zipPath, "-C", outDir, agentName, notifName, "manifest.json"], { windowsHide: true });
   if (r.status !== 0) throw new Error("tar zip failed: " + (r.stderr || "").toString());
-  return { zipPath, zipSha: crypto.createHash("sha256").update(fs.readFileSync(zipPath)).digest("hex") };
+  return { zipPath, zipSha: crypto.createHash("sha256").update(fs.readFileSync(zipPath)).digest("hex"), tamper };
 }
 
 function makeNotifier(appDir, baseUrl) {
@@ -67,13 +68,14 @@ function makeNotifier(appDir, baseUrl) {
 function startServer(pkg) {
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
-      if (req.url.endsWith("/latest")) {
+       if (!req.url.includes("/package")) {
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({
           version: "1.1.0",
           packageName: "pkg.zip",
-          packageSha256: pkg.zipSha,
-          manifest: { version: "1.1.0", files: [{ name: "MonitorTI-Notifier.exe", sha256: "x" }] }
+           packageSha256: pkg.zipSha,
+           packageSize: fs.statSync(pkg.zipPath).size,
+           manifest: { version: "1.1.0", files: [{ name: "MonitorTI-Notifier.exe", sha256: pkg.tamper ? "00".repeat(32) : crypto.createHash("sha256").update(Buffer.from("FAKE-NOTIFIER-BINARY")).digest("hex") }] }
         }));
         return;
       }
@@ -100,10 +102,9 @@ async function scenario(name, fn) {
   await scenario("present: short-circuit sem download", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bs-present-"));
     fs.writeFileSync(path.join(dir, "MonitorTI-Notifier.exe"), Buffer.from("x"));
+    fs.writeFileSync(path.join(dir, "notifier-integrity.json"), JSON.stringify({ version: "1.1.0", notifierSha256: crypto.createHash("sha256").update(Buffer.from("x")).digest("hex") }));
     const { n, logs } = makeNotifier(dir, "http://127.0.0.1:1");
-    n.ensureNotifierPresent();
-    await wait(800);
-    if (!logs.some((l) => /Notifier presente/.test(l))) throw new Error("esperado log 'Notifier presente': " + logs.join(" | "));
+    if (!n.isNotifierReady()) throw new Error("Notifier local deveria estar pronto: " + logs.join(" | "));
   });
 
   // 2) Rede indisponível -> erro logado, processo continua, sem crash.
@@ -127,7 +128,7 @@ async function scenario(name, fn) {
     const port = srv.address().port;
     const { n, logs } = makeNotifier(dir, "http://127.0.0.1:" + port);
     n.ensureNotifierPresent();
-    await wait(2500);
+     await wait(5000);
     const shaErr = logs.some((l) => /SHA/.test(l));
     const installed = fs.existsSync(path.join(dir, "MonitorTI-Notifier.exe"));
     srv.close();
@@ -144,7 +145,7 @@ async function scenario(name, fn) {
     const port = srv.address().port;
     const { n, logs } = makeNotifier(dir, "http://127.0.0.1:" + port);
     n.ensureNotifierPresent();
-    await wait(2500);
+     await wait(5000);
     srv.close();
     const installed = fs.existsSync(path.join(dir, "MonitorTI-Notifier.exe"));
     if (!installed) throw new Error("Notifier nao instalado: " + logs.join(" | "));

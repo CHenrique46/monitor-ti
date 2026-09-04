@@ -33,6 +33,11 @@ function buildPackage(outDir, tamper) {
     { name: "MonitorTI-Notifier.exe", sha256: notifSha, size: notifBuf.length }
   ] };
   fs.writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(manifest));
+  fs.writeFileSync(path.join(outDir, "notifier-integrity.json"), JSON.stringify({
+    version: "1.1.0",
+    notifierSha256: realNotifSha,
+    notifierSize: notifBuf.length
+  }));
   const zipPath = path.join(outDir, "pkg.zip");
   spawnSync("tar", ["-a", "-cf", zipPath, "-C", outDir, "MonitorTI-Agent.exe", "MonitorTI-Notifier.exe", "manifest.json"], { windowsHide: true });
   return { zipPath, zipSha: crypto.createHash("sha256").update(fs.readFileSync(zipPath)).digest("hex") };
@@ -53,12 +58,26 @@ function makeNotifier(appDir, baseUrl, onReady) {
   return { n, logs };
 }
 
+function writeIntegrity(appDir, content = "x") {
+  const hash = crypto.createHash("sha256").update(Buffer.from(content)).digest("hex");
+  fs.writeFileSync(path.join(appDir, "notifier-integrity.json"), JSON.stringify({
+    version: "1.1.0",
+    notifierSha256: hash,
+    notifierSize: Buffer.byteLength(content)
+  }));
+}
+
 function startServer(pkg) {
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
-      if (req.url.endsWith("/latest")) {
+      if (!req.url.includes("/package")) {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ version: "1.1.0", packageName: "pkg.zip", packageSha256: pkg.zipSha, manifest: { files: [] } }));
+        res.end(JSON.stringify({ version: "1.1.0", packageName: "pkg.zip", packageSha256: pkg.zipSha, packageSize: fs.statSync(pkg.zipPath).size, manifest: {
+          files: [
+            { name: "MonitorTI-Agent.exe", sha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(path.dirname(pkg.zipPath), "MonitorTI-Agent.exe"))).digest("hex") },
+            { name: "MonitorTI-Notifier.exe", sha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(path.dirname(pkg.zipPath), "MonitorTI-Notifier.exe"))).digest("hex") }
+          ]
+        } }));
       } else if (req.url.includes("/package")) {
         res.setHeader("content-type", "application/octet-stream");
         res.end(fs.readFileSync(pkg.zipPath));
@@ -76,11 +95,25 @@ function check(n, c, extra) { if (c) { pass++; console.log("PASS " + n); } else 
   // 1) isNotifierReady reflete presença
   const d1 = fs.mkdtempSync(path.join(os.tmpdir(), "cap-present-"));
   fs.writeFileSync(path.join(d1, "MonitorTI-Notifier.exe"), Buffer.from("x"));
+  writeIntegrity(d1);
   const { n: n1 } = makeNotifier(d1, "", () => {});
-  check("isNotifierReady=true quando presente", n1.isNotifierReady() === true);
+  check("isNotifierReady=true com integridade local valida", n1.isNotifierReady() === true);
+  check("release remoto ausente nao bloqueia readiness", n1.getReadinessStatus().status === "READY");
   const d2 = fs.mkdtempSync(path.join(os.tmpdir(), "cap-absent-"));
   const { n: n2 } = makeNotifier(d2, "", () => {});
   check("isNotifierReady=false quando ausente", n2.isNotifierReady() === false);
+  check("ausente retorna NOT_INSTALLED", n2.getReadinessStatus().status === "NOT_INSTALLED");
+
+  const dMissingMetadata = fs.mkdtempSync(path.join(os.tmpdir(), "cap-metadata-missing-"));
+  fs.writeFileSync(path.join(dMissingMetadata, "MonitorTI-Notifier.exe"), Buffer.from("x"));
+  const { n: nMissingMetadata } = makeNotifier(dMissingMetadata, "", () => {});
+  check("metadata local ausente retorna estado proprio", nMissingMetadata.getReadinessStatus().status === "LOCAL_METADATA_MISSING");
+
+  const dTampered = fs.mkdtempSync(path.join(os.tmpdir(), "cap-tampered-"));
+  fs.writeFileSync(path.join(dTampered, "MonitorTI-Notifier.exe"), Buffer.from("x"));
+  fs.writeFileSync(path.join(dTampered, "notifier-integrity.json"), JSON.stringify({ version: "1.1.0", notifierSha256: "00".repeat(32) }));
+  const { n: nTampered } = makeNotifier(dTampered, "", () => {});
+  check("integridade invalida retorna INTEGRITY_FAILED", nTampered.getReadinessStatus().status === "INTEGRITY_FAILED");
 
   // 2) sucesso -> onNotifierReady disparado
   let readyFired = false;
@@ -90,10 +123,11 @@ function check(n, c, extra) { if (c) { pass++; console.log("PASS " + n); } else 
   const port = srv.address().port;
   const { n: n3, logs: l3 } = makeNotifier(d3, "http://127.0.0.1:" + port, () => { readyFired = true; });
   n3.ensureNotifierPresent();
-  await wait(2500);
+   await wait(5000);
   srv.close();
-  check("sucesso: onNotifierReady disparado", readyFired === true);
-  check("sucesso: Notifier instalado", fs.existsSync(path.join(d3, "MonitorTI-Notifier.exe")));
+   check("sucesso: onNotifierReady disparado", readyFired === true, l3.join(" | "));
+   check("sucesso: Notifier instalado", fs.existsSync(path.join(d3, "MonitorTI-Notifier.exe")), l3.join(" | "));
+   check("sucesso: metadata local instalado", fs.existsSync(path.join(d3, "notifier-integrity.json")), l3.join(" | "));
 
   // 3) falha de rede -> onNotifierReady NÃO disparado, sem crash
   let readyFail = false;
