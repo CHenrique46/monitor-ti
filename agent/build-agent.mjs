@@ -44,6 +44,7 @@ execSync(
 
 // 5) arquivos de apoio
 fs.copyFileSync(path.join(root, "config.json"), path.join(rel, "config.json"));
+fs.copyFileSync(path.join(root, "..", "installer", "notifier-companion-task.ps1"), path.join(rel, "notifier-companion-task.ps1"));
 if (fs.existsSync(path.join(root, "LEIA-ME.txt"))) {
   fs.copyFileSync(path.join(root, "LEIA-ME.txt"), path.join(rel, "LEIA-ME.txt"));
 }
