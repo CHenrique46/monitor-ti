@@ -69,6 +69,10 @@ function createMockDb() {
         if (take != null) items = items.slice(0, take);
         return items.map(clone);
       },
+      findFirst: async ({ where }) => {
+        const found = executions.find((e) => e.computadorId === Number(where.computadorId) && e.action === where.action && where.status.in.includes(e.status));
+        return found ? { actionExecutionId: found.actionExecutionId } : null;
+      },
       findUnique: async ({ where }) => {
         const found = executions.find((e) => e.actionExecutionId === String(where.actionExecutionId));
         return found ? clone(found) : null;
@@ -267,6 +271,48 @@ test("server system_maintenance usa acao fixa e rejeita computador offline", asy
   assert.equal(online.body.execution.payload, null);
   assert.equal(sent[0].payload.action, "system_maintenance");
   assert.deepEqual(sent[0].payload.payload, {});
+});
+
+test("server disk_cleanup_analyze usa ação fixa, ignora payload arbitrário e evita duplicidade", async () => {
+  const db = createMockDb();
+  const service = createRemoteActionsService(db);
+  const sent = [];
+  const controller = createRemoteActionsController({
+    prisma: db,
+    agentServer: { hasCapability: () => true, sendToAgent: (deviceId, payload) => { sent.push({ deviceId, payload }); return true; } },
+    remoteActionsService: service
+  });
+  const response = makeRes();
+  await controller.diskCleanupAnalyze({ params: { id: 1 }, body: { path: "C:\\Users\\*", command: "del" } }, response);
+  assert.equal(response.statusCode, 202);
+  assert.equal(response.body.execution.action, "disk_cleanup_analyze");
+  assert.deepEqual(sent[0].payload.payload, {});
+
+  const duplicate = makeRes();
+  await controller.diskCleanupAnalyze({ params: { id: 1 }, body: {} }, duplicate);
+  assert.equal(duplicate.statusCode, 409);
+  assert.equal(db.executions.length, 1);
+});
+
+test("server bloqueia disk_cleanup_analyze sem capability antes de criar ou enviar", async () => {
+  const db = createMockDb();
+  let createCalls = 0;
+  let sendCalls = 0;
+  const controller = createRemoteActionsController({
+    prisma: db,
+    agentServer: { hasCapability: () => false, sendToAgent: () => { sendCalls += 1; return true; } },
+    remoteActionsService: {
+      hasActiveExecution: async () => false,
+      createExecution: async () => { createCalls += 1; throw new Error("nao deveria criar"); }
+    }
+  });
+  const response = makeRes();
+  await controller.diskCleanupAnalyze({ params: { id: 1 }, body: {} }, response);
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(response.body, { error: "AGENT_CAPABILITY_UNSUPPORTED", capability: "disk_cleanup_analyze" });
+  assert.equal(createCalls, 0);
+  assert.equal(sendCalls, 0);
+  assert.equal(db.executions.length, 0);
 });
 
 test("server persiste status terminal quando result e invalido ou grande", async () => {

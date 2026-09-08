@@ -1,6 +1,7 @@
 const { createNotifier: defaultCreateNotifier } = require("../notifier");
 const { createNoticeRuntime: defaultCreateNoticeRuntime } = require("./runtime");
 const { queryTaskState: defaultQueryTaskState, runTask: defaultRunTask } = require("./task");
+const { composeCapabilities } = require("../capabilities");
 
 const COMPANION_TASK_NAME = "MonitorTI-Notifier";
 const RECOVERY_GRACE_PERIOD_MS = 5000;
@@ -75,10 +76,8 @@ function createNoticeBridge(opts, deps = {}) {
   }
 
   function capabilities() {
-    const ready = companionEnabled
-      ? !!(runtime && typeof runtime.isNotifierReady === "function" && runtime.isNotifierReady())
-      : !!(legacyNotifier && typeof legacyNotifier.isNotifierReady === "function" && legacyNotifier.isNotifierReady());
-    return ready ? ["notices"] : [];
+    const notifier = companionEnabled ? runtime : legacyNotifier;
+    return composeCapabilities({ version, notifier });
   }
 
   function sendServerEvent(evt) {

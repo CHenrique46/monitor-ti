@@ -227,6 +227,46 @@ async function systemMaintenance(req, res) {
   }
 }
 
+ async function diskCleanupAnalyze(req, res) {
+   try {
+     const computadorId = Number(req.params.id);
+     const computador = await db.computador.findUnique({
+       where: { id: computadorId },
+       select: { id: true, deviceId: true, hostname: true, status: true }
+      });
+      if (!computador) return res.status(404).json({ erro: "Computador nao encontrado." });
+      if (computador.status !== "online") return res.status(409).json({ erro: "Computador offline." });
+      if (!ws.hasCapability(computador.deviceId, "disk_cleanup_analyze")) {
+        return res.status(409).json({ error: "AGENT_CAPABILITY_UNSUPPORTED", capability: "disk_cleanup_analyze" });
+      }
+      if (await remoteActionsService.hasActiveExecution(computador.id, "disk_cleanup_analyze")) {
+        return res.status(409).json({ erro: "Ja existe uma analise de disco em execucao." });
+      }
+
+     const execution = await remoteActionsService.createExecution({
+       computadorId: computador.id,
+       action: "disk_cleanup_analyze",
+       payload: {}
+     });
+     const ok = ws.sendToAgent(computador.deviceId, {
+       type: "remote_action",
+       protocolVersion: 1,
+       deviceId: computador.deviceId,
+       actionExecutionId: execution.actionExecutionId,
+       action: execution.action,
+       payload: {}
+     });
+     if (!ok) {
+       await remoteActionsService.markRejected(execution.actionExecutionId, "Agent nao conectado no momento.", "Agent nao conectado no momento.");
+       return res.status(409).json({ erro: "Agent nao conectado no momento.", execution: await remoteActionsService.getByActionExecutionId(execution.actionExecutionId) });
+     }
+     await remoteActionsService.markDispatched(execution.actionExecutionId);
+     return res.status(202).json({ ok: true, execution: await remoteActionsService.getByActionExecutionId(execution.actionExecutionId) });
+   } catch (err) {
+     return res.status(400).json({ erro: err.message });
+   }
+ }
+
 async function list(req, res) {
   try {
     const computadorId = Number(req.params.id);
@@ -249,6 +289,7 @@ async function list(req, res) {
     spoolerReset,
     serviceRestart,
     systemMaintenance,
+    diskCleanupAnalyze,
     setWallpaper,
     list
   };

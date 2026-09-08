@@ -6,6 +6,7 @@ const WebSocket = require("ws");
 const checkDiskSpace = require("check-disk-space").default;
 const { execFile, spawn } = require("child_process");
 const { createNoticeBridge } = require("./notices/bridge");
+const { composeCapabilities } = require("./capabilities");
 const remoteActions = require("./remoteActions");
 const { createRemoteActionStore } = require("./remoteActionStore");
 const { collectOfficeInventory } = require("./inventory/office");
@@ -230,8 +231,7 @@ function getMachineInfo(deviceId) {
     cpusLogicas: cpus.length,
     sistemaRelease: os.release(),
     agentVersion: AGENT_VERSION,
-    // Capacidades reportadas ao servidor. "notices" depende do modo ativo.
-    capabilities: noticesBridge && noticesBridge.isNotifierReady() ? ["notices"] : []
+    capabilities: composeCapabilities({ version: AGENT_VERSION, notifier: noticesBridge })
   };
 }
 

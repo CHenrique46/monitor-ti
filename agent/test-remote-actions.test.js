@@ -67,6 +67,22 @@ test("remote_action desconhecida vira REJECTED sem executar", async () => {
   assert.equal(ws.sent[0].status, "REJECTED");
 });
 
+test("disk_cleanup_analyze é allowlisted, read-only e retorna análise", async () => {
+  let runs = 0;
+  const runtime = createRemoteActionRuntime({
+    analyzeDiskCleanup: async () => {
+      runs += 1;
+      return { analysisOnly: true, estimatedRecoverableBytes: 12, actualFreedBytes: null };
+    },
+    getDeviceId: () => "dev-disk"
+  });
+  const state = await runtime.handleRemoteAction(makeWs(), { actionExecutionId: "disk-1", action: "DISK_CLEANUP_ANALYZE", payload: { path: "C:\\" } });
+  assert.equal(runs, 1);
+  assert.equal(state.status, "SUCCESS");
+  assert.equal(state.result.analysisOnly, true);
+  assert.equal(state.result.actualFreedBytes, null);
+});
+
 test("duplicidade de actionExecutionId nao reexecuta", async () => {
   let runs = 0;
   const runtime = createRemoteActionRuntime({

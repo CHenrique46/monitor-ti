@@ -1122,6 +1122,21 @@ body {
   }
 }
 
+.disk-cleanup-panel {
+  display: grid;
+  gap: 12px;
+  grid-column: 1 / -1;
+}
+
+.disk-cleanup-panel > .muted {
+  margin: 0;
+}
+
+.disk-cleanup-result {
+  display: grid;
+  gap: 9px 24px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
 .alertas-ativos {
   margin: 16px 0 8px;
 }

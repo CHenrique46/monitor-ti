@@ -22,6 +22,15 @@ function Field({ label, children }) {
   return <div className="detail-field"><span className="detail-key">{label}</span><span className="detail-val">{children ?? 'Não informado'}</span></div>
 }
 
+function formatDiskBytes(bytes) {
+  if (bytes === null || bytes === undefined || !Number.isFinite(Number(bytes))) return '-'
+  const value = Number(bytes)
+  if (value < 1024) return `${value} B`
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`
+  return `${(value / 1024 ** 3).toFixed(1)} GB`
+}
+
 function Section({ title, children }) {
   return <section className="detail-section"><h3>{title}</h3><div className="detail-grid">{children}</div></section>
 }
@@ -152,6 +161,8 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const [addInventoryForm, setAddInventoryForm] = useState({ equipamentoNumero: '', apelido: '' })
   const [addInventorySaving, setAddInventorySaving] = useState(false)
   const [addInventoryError, setAddInventoryError] = useState(null)
+  const [diskCleanupError, setDiskCleanupError] = useState(null)
+  const [diskCapabilities, setDiskCapabilities] = useState([])
 
   useEffect(() => {
     let active = true
@@ -167,6 +178,22 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
     load(); const interval = setInterval(load, 5000)
     return () => { active = false; clearInterval(interval) }
   }, [id])
+
+  useEffect(() => {
+    if (tab !== 'disk_cleanup') return undefined
+    let active = true
+    const loadCapabilities = async () => {
+      try {
+        const response = await apiFetch(`${API_URL}/api/computadores/${id}/capabilities`)
+        const body = response.ok ? await response.json() : {}
+        if (active) setDiskCapabilities(Array.isArray(body.capabilities) ? body.capabilities : [])
+      } catch {
+        if (active) setDiskCapabilities([])
+      }
+    }
+    loadCapabilities()
+    return () => { active = false }
+  }, [id, tab])
 
   useEffect(() => {
     let active = true
@@ -236,6 +263,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const triggerSpoolerReset = async () => { setSpoolerConfirm(false); await request('/actions/spooler-reset', { method: 'POST' }, () => {}) }
   const triggerServiceRestart = async () => { setServiceRestartConfirm(false); setServiceRestartError(null); await request('/actions/service-restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceKey: 'spooler' }) }, setServiceRestartError) }
   const triggerSystemMaintenance = async () => { setSystemMaintenanceConfirm(false); setSystemMaintenanceError(null); await request('/actions/system-maintenance', { method: 'POST' }, setSystemMaintenanceError) }
+  const triggerDiskCleanupAnalysis = async () => { setDiskCleanupError(null); await request('/actions/disk-cleanup-analyze', { method: 'POST' }, setDiskCleanupError) }
   const triggerWallpaper = async () => { setWallpaperConfirm(false); setWallpaperError(null); await request('/actions/set-wallpaper', { method: 'POST' }, setWallpaperError) }
   const beginIdentityEdit = () => { setIdentityForm({ apelido: c.apelido || '', equipamentoNumero: c.equipamentoNumero || '' }); setIdentityError(null); setEditingIdentity(true) }
   const saveIdentity = async () => {
@@ -283,7 +311,13 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const remoteInProgress = remoteActions.some((a) => ['PENDING', 'DISPATCHED', 'RUNNING'].includes(a.status))
   const serviceInProgress = serviceActions.some((a) => ['PENDING', 'DISPATCHED', 'RUNNING'].includes(a.status))
   const maintenanceInProgress = maintenanceActions.some((a) => ['PENDING', 'DISPATCHED', 'RUNNING'].includes(a.status))
-  const tabs = [['summary', 'Resumo'], ['hardware', 'Hardware'], ['alerts', `Alertas${alerts.length ? ` (${alerts.length})` : ''}`], ['actions', 'Ações'], ['maintenance', 'Manutenção']]
+  const diskCleanupActions = remoteActions.filter((a) => a.action === 'disk_cleanup_analyze')
+  const supportsDiskCleanupAnalyze = diskCapabilities.includes('disk_cleanup_analyze')
+  const latestDiskCleanup = diskCleanupActions[0] || null
+  const diskAnalysis = latestDiskCleanup?.resultado || null
+  const diskAnalysisInProgress = latestDiskCleanup && ['PENDING', 'DISPATCHED', 'RUNNING'].includes(latestDiskCleanup.status)
+  const diskCategoryBytes = (id) => diskAnalysis?.categories?.find((category) => category.id === id)?.eligibleBytes
+  const tabs = [['summary', 'Resumo'], ['hardware', 'Hardware'], ['alerts', `Alertas${alerts.length ? ` (${alerts.length})` : ''}`], ['actions', 'Ações'], ['maintenance', 'Manutenção'], ['disk_cleanup', 'Limpeza de Disco']]
   const body = <div className={isAdmin ? '' : 'viewer-mode'}>
     <header className={`drawer-header ${cardClass}`}>
       <div><span className="section-kicker">Detalhes do computador</span><h1>{c.apelido || c.hostname || '(sem nome)'}</h1><div className="drawer-meta"><span>{c.hostname || 'Hostname não informado'}</span>{c.equipamentoNumero && <span>Equip. {c.equipamentoNumero}</span>}<span className={online ? 'online' : 'offline'}>{online ? '● Online' : '● Offline'}</span><span>{c.ip || 'IP não informado'}</span><span>Agent v{c.agentVersion || '?'}</span><span>Última comunicação: {fmtDate(c.ultimaConexao)}</span></div></div>
@@ -312,7 +346,8 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
       </>}
       {tab === 'alerts' && <><Section title="Alertas ativos">{alerts.length ? alerts.map((a, i) => <div key={i} className={`alert ${a.severity}`}>⚠ {a.msg}</div>) : <div className="muted">Nenhum alerta ativo.</div>}</Section><Section title="Histórico de alertas">{alertas.length ? <div className="alert-history">{alertas.map((a) => { const end = a.resolvidoEm ? new Date(a.resolvidoEm) : new Date(); const minutes = Math.max(0, Math.floor((end - new Date(a.iniciadoEm)) / 60000)); const duration = minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`; return <div key={a.id} className={`alert-history-item ${a.ativo ? 'ativo' : 'resolvido'}`}><div className="ah-top"><span className={`alert ${a.nivel}`}>{a.mensagem}</span><span className="ah-badge">{a.ativo ? 'ATIVO' : 'RESOLVIDO'}</span></div><div className="ah-meta">Início: {fmtDate(a.iniciadoEm)}{a.resolvidoEm ? ` · Fim: ${fmtDate(a.resolvidoEm)}` : ''} · Duração: {duration}</div></div> })}</div> : <div className="muted">Nenhum alerta registrado para este equipamento.</div>}</Section></>}
         {tab === 'actions' && <><Section title="Ações remotas"><div className="remote-actions-layout"><div className="remote-actions-available"><div className="action-toolbar"><span className="muted">Ações genéricas, incluindo serviços do Windows.</span>{online && !remoteInProgress && <button type="button" className="btn-update" onClick={() => setSpoolerConfirm(true)}>Reiniciar spooler</button>}{!online && <span className="muted">Computador offline: ação remota indisponível.</span>}</div>{spoolerConfirm && <ConfirmBox onCancel={() => setSpoolerConfirm(false)} onConfirm={triggerSpoolerReset} confirmLabel="Reiniciar">Reiniciar o spooler de impressão de <strong>{c.hostname}</strong>?</ConfirmBox>}{serviceRestartError && <div className="update-status failed">{serviceRestartError}</div>}{online && !serviceInProgress && <button type="button" className="btn-update" onClick={() => setServiceRestartConfirm(true)}>Reiniciar serviço Spooler</button>}{serviceRestartConfirm && <ConfirmBox onCancel={() => setServiceRestartConfirm(false)} onConfirm={triggerServiceRestart} confirmLabel="Reiniciar serviço">Reiniciar o serviço Spooler de <strong>{c.hostname}</strong>?</ConfirmBox>}{online && !remoteInProgress && <button type="button" className="btn-update" onClick={() => setWallpaperConfirm(true)}>Aplicar papel de parede padrão</button>}{wallpaperError && <div className="update-status failed">{wallpaperError}</div>}{wallpaperConfirm && <ConfirmBox onCancel={() => setWallpaperConfirm(false)} onConfirm={triggerWallpaper} confirmLabel="Aplicar">Aplicar o papel de parede padrão neste computador?<br /><small>Hostname: {c.hostname} · Status: {online ? 'Online' : 'Offline'} · Asset: WallPaperVava.jpg · Resolução: 1920x1080</small></ConfirmBox>}</div><div className="remote-actions-history">{genericActions.length ? <div className="action-list">{genericActions.map((a) => <ActionItem key={a.actionExecutionId} action={a} />)}</div> : <div className="muted">Nenhuma ação remota registrada.</div>}</div></div></Section></>}
-      {tab === 'maintenance' && <Section title="Manutenção do sistema"><div className="action-toolbar"><span className="muted">Histórico de system_maintenance.</span>{online && !maintenanceInProgress && <button type="button" className="btn-update" onClick={() => setSystemMaintenanceConfirm(true)}>Executar manutenção</button>}{!online && <span className="muted">Computador offline: ação remota indisponível.</span>}</div>{systemMaintenanceError && <div className="update-status failed">{systemMaintenanceError}</div>}{systemMaintenanceConfirm && <ConfirmBox onCancel={() => setSystemMaintenanceConfirm(false)} onConfirm={triggerSystemMaintenance} confirmLabel="Executar manutenção">Executar a manutenção preventiva do Windows na máquina <strong>{c.hostname}</strong>?</ConfirmBox>}{maintenanceActions.length ? <div className="action-list">{maintenanceActions.map((action) => <details className="action-item" key={action.actionExecutionId}><summary><span><strong>{fmtDate(action.solicitadaEm)}</strong><small>{action.mensagem || 'Manutenção do sistema'}</small></span><StatusTag status={action.status} /></summary><div className="maintenance-result">{action.resultado?.overallStatus && <Field label="Resultado">{action.resultado.overallStatus}</Field>}{action.resultado?.rebootRecommended != null && <Field label="Reinicialização recomendada">{action.resultado.rebootRecommended ? 'Sim' : 'Não'}</Field>}{action.resultado?.steps?.length ? action.resultado.steps.map((step) => <div className="maintenance-step" key={step.key}><span>{({ temp_cleanup: 'Temporários', sfc: 'SFC', dism: 'DISM', dns_flush: 'DNS' }[step.key] || step.key)}</span><StatusTag status={step.status} /><small>{step.durationMs != null ? `${step.durationMs} ms` : 'Sem duração informada'}</small></div>) : <div className="muted">Resultado detalhado não disponível.</div>}</div></details>)}</div> : <div className="muted">Nenhuma execução de manutenção registrada.</div>}</Section>}
+       {tab === 'maintenance' && <Section title="Manutenção do sistema"><div className="action-toolbar"><span className="muted">Histórico de system_maintenance.</span>{online && !maintenanceInProgress && <button type="button" className="btn-update" onClick={() => setSystemMaintenanceConfirm(true)}>Executar manutenção</button>}{!online && <span className="muted">Computador offline: ação remota indisponível.</span>}</div>{systemMaintenanceError && <div className="update-status failed">{systemMaintenanceError}</div>}{systemMaintenanceConfirm && <ConfirmBox onCancel={() => setSystemMaintenanceConfirm(false)} onConfirm={triggerSystemMaintenance} confirmLabel="Executar manutenção">Executar a manutenção preventiva do Windows na máquina <strong>{c.hostname}</strong>?</ConfirmBox>}{maintenanceActions.length ? <div className="action-list">{maintenanceActions.map((action) => <details className="action-item" key={action.actionExecutionId}><summary><span><strong>{fmtDate(action.solicitadaEm)}</strong><small>{action.mensagem || 'Manutenção do sistema'}</small></span><StatusTag status={action.status} /></summary><div className="maintenance-result">{action.resultado?.overallStatus && <Field label="Resultado">{action.resultado.overallStatus}</Field>}{action.resultado?.rebootRecommended != null && <Field label="Reinicialização recomendada">{action.resultado.rebootRecommended ? 'Sim' : 'Não'}</Field>}{action.resultado?.steps?.length ? action.resultado.steps.map((step) => <div className="maintenance-step" key={step.key}><span>{({ temp_cleanup: 'Temporários', sfc: 'SFC', dism: 'DISM', dns_flush: 'DNS' }[step.key] || step.key)}</span><StatusTag status={step.status} /><small>{step.durationMs != null ? `${step.durationMs} ms` : 'Sem duração informada'}</small></div>) : <div className="muted">Resultado detalhado não disponível.</div>}</div></details>)}</div> : <div className="muted">Nenhuma execução de manutenção registrada.</div>}</Section>}
+          {tab === 'disk_cleanup' && <Section title="Limpeza de Disco"><div className="disk-cleanup-panel"><p className="muted">Somente análise. Nenhum arquivo é removido.</p>{diskCleanupError && <div className="update-status failed">{diskCleanupError}</div>}{diskAnalysisInProgress && <div className="muted">Analisando espaço potencialmente recuperável...</div>}{diskAnalysis && <div className="disk-cleanup-result"><Field label="Espaço livre atual">{formatDiskBytes(diskAnalysis.freeBytesBefore)}</Field><Field label="Temporários do usuário">{formatDiskBytes(diskCategoryBytes('USER_TEMP'))}</Field><Field label="Temporários do Windows">{formatDiskBytes(diskCategoryBytes('WINDOWS_TEMP'))}</Field><Field label="Lixeira">{formatDiskBytes(diskCategoryBytes('RECYCLE_BIN'))}</Field><Field label="Potencialmente recuperável"><strong>{formatDiskBytes(diskAnalysis.estimatedRecoverableBytes)}</strong></Field><Field label="Última análise">{fmtDate(latestDiskCleanup.concluidaEm || latestDiskCleanup.solicitadaEm)}</Field><Field label="Duração">{diskAnalysis.durationMs != null ? `${(Number(diskAnalysis.durationMs) / 1000).toFixed(1)} s` : '-'}</Field>{diskAnalysis.truncated && <div className="update-status failed">Análise parcial: alguns itens não puderam ser contabilizados.</div>}</div>}{!diskAnalysis && !diskAnalysisInProgress && <div className="muted">Nenhuma análise realizada.</div>}{isAdmin && !supportsDiskCleanupAnalyze && <p className="muted">Disponível após atualização do Agent.</p>}<button type="button" className="btn-update" onClick={triggerDiskCleanupAnalysis} disabled={!isAdmin || !online || !supportsDiskCleanupAnalyze || !!diskAnalysisInProgress}>{!isAdmin ? 'Disponível apenas para ADMIN' : diskAnalysisInProgress ? 'Analisando...' : 'Analisar'}</button></div></Section>}
     </div>
   </div>
 

@@ -12,6 +12,9 @@ const ACTIONS = {
   system_maintenance: {
     label: "Manutenção preventiva do Windows"
   },
+  disk_cleanup_analyze: {
+    label: "Analisar espaço recuperável"
+  },
   set_wallpaper: {
     label: "Aplicar papel de parede padrão"
   }
@@ -246,6 +249,18 @@ function createRemoteActionsService(db = prisma) {
     return items.map(mapExecution);
   }
 
+  async function hasActiveExecution(computadorId, action) {
+    const record = await db.acaoRemotaExecucao.findFirst({
+      where: {
+        computadorId: Number(computadorId),
+        action: normalizeAction(action),
+        status: { in: TRANSIENT_STATUSES }
+      },
+      select: { actionExecutionId: true }
+    });
+    return !!record;
+  }
+
   async function getByActionExecutionId(actionExecutionId) {
     const record = await db.acaoRemotaExecucao.findUnique({
       where: { actionExecutionId: String(actionExecutionId) }
@@ -399,6 +414,7 @@ function createRemoteActionsService(db = prisma) {
   return {
     createExecution,
     listByComputador,
+    hasActiveExecution,
     getByActionExecutionId,
     markDispatched,
     markRejected,

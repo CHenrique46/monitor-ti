@@ -1,8 +1,27 @@
-function getCurrentCapabilities(notifier) {
-  if (notifier && typeof notifier.isNotifierReady === "function") {
-    return Promise.resolve(notifier.isNotifierReady()).then((ready) => (ready ? ["notices"] : []));
+const NATIVE_CAPABILITIES = Object.freeze(["disk_cleanup_analyze"]);
+
+function compareVersion(a, b) {
+  const pa = String(a || "0").split(/[.+-]/).map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || "0").split(/[.+-]/).map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0) ? 1 : -1;
   }
-  return Promise.resolve([]);
+  return 0;
+}
+
+function getNativeCapabilities(version) {
+  return compareVersion(version, "1.1.20") >= 0 ? [...NATIVE_CAPABILITIES] : [];
+}
+
+function composeCapabilities({ version, notifier } = {}) {
+  const dynamic = notifier && typeof notifier.isNotifierReady === "function" && notifier.isNotifierReady()
+    ? ["notices"]
+    : [];
+  return [...new Set([...getNativeCapabilities(version), ...dynamic])];
+}
+
+function getCurrentCapabilities(notifier) {
+  return Promise.resolve(composeCapabilities({ notifier }));
 }
 
 async function sendCurrentCapabilities(ws, deviceId, notifier, logEvent) {
@@ -29,4 +48,4 @@ async function sendCurrentCapabilities(ws, deviceId, notifier, logEvent) {
   }
 }
 
-module.exports = { getCurrentCapabilities, sendCurrentCapabilities };
+module.exports = { NATIVE_CAPABILITIES, getNativeCapabilities, composeCapabilities, getCurrentCapabilities, sendCurrentCapabilities };

@@ -116,6 +116,7 @@ test("viewer direct API attempts are rejected before administrative controllers"
       ["POST", "/api/computadores/1/actions/spooler-reset"],
       ["POST", "/api/computadores/1/actions/service-restart"],
       ["POST", "/api/computadores/1/actions/system-maintenance"],
+      ["POST", "/api/computadores/1/actions/disk-cleanup-analyze"],
       ["POST", "/api/computadores/1/actions/set-wallpaper"],
       ["DELETE", "/api/computadores/1"],
       ["PATCH", "/api/computadores/1/inventory-metadata"],
