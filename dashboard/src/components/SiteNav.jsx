@@ -40,7 +40,7 @@ export default function SiteNav() {
           </NavLink>
         ))}
       </nav>
-      <div className="site-account"><span>{user.username}</span><button type="button" onClick={logout}>Sair</button></div>
+      <div className="site-account"><span>{user.username}{user.role === 'VIEWER' && <small>Somente visualização</small>}</span><button type="button" onClick={logout}>Sair</button></div>
     </header>
   )
 }

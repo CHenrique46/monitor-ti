@@ -15,7 +15,7 @@ const maintenanceSchedulerRoutes = require("./routes/maintenanceScheduler.routes
 const maintenanceSchedulerCanaryRoutes = require("./routes/maintenanceSchedulerCanary.routes");
 const { createAuthRouter } = require("./routes/auth.routes");
 const { createAuthService } = require("./auth/service");
-const { requireHumanSession } = require("./auth/middleware");
+const { requireHumanSession, requireAdmin } = require("./auth/middleware");
 const { setupWebSocket } = require("./ws/agentServer");
 const prisma = require("./prisma");
 const { logEvent } = require("./logger");
@@ -44,7 +44,7 @@ app.use("/api/avisos", humanSession, avisosRoutes);
 app.use("/api/computadores", humanSession, remoteActionsRoutes);
 app.use("/api/assets", wallpaperAssetRoutes);
 app.use("/api/maintenance-schedules", humanSession, maintenanceSchedulerRoutes);
-app.use("/internal/maintenance-scheduler/canary", maintenanceSchedulerCanaryRoutes);
+app.use("/internal/maintenance-scheduler/canary", requireHumanSession, requireAdmin(), maintenanceSchedulerCanaryRoutes);
 
 const DIST_DIR = path.join(__dirname, "..", "..", "dashboard", "dist");
 

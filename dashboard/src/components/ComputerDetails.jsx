@@ -5,6 +5,7 @@ import MetricChart from './MetricChart'
 import { computeAlerts } from '../utils/alerts'
 import { API_URL } from '../config'
 import { apiFetch } from '../api'
+import { useAuth } from '../auth/AuthContext'
 import { bytesToGB, formatUptime, formatPercent, sistemaLabel, fmtDate } from '../utils/formatters'
 import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from '../utils/uptime'
 import { compareVersions, isVersionNewer } from '../utils/version'
@@ -119,6 +120,8 @@ function AddInventoryModal({ computer, form, saving, error, onChange, onCancel, 
 }
 
 export default function ComputerDetails({ computerId, latestVersion, onClose }) {
+  const { user } = useAuth()
+  const isAdmin = user.role === 'ADMIN'
   const routeId = useParams().id
   const id = computerId || routeId
   const drawer = Boolean(computerId)
@@ -281,7 +284,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const serviceInProgress = serviceActions.some((a) => ['PENDING', 'DISPATCHED', 'RUNNING'].includes(a.status))
   const maintenanceInProgress = maintenanceActions.some((a) => ['PENDING', 'DISPATCHED', 'RUNNING'].includes(a.status))
   const tabs = [['summary', 'Resumo'], ['hardware', 'Hardware'], ['alerts', `Alertas${alerts.length ? ` (${alerts.length})` : ''}`], ['actions', 'Ações'], ['maintenance', 'Manutenção']]
-  const body = <>
+  const body = <div className={isAdmin ? '' : 'viewer-mode'}>
     <header className={`drawer-header ${cardClass}`}>
       <div><span className="section-kicker">Detalhes do computador</span><h1>{c.apelido || c.hostname || '(sem nome)'}</h1><div className="drawer-meta"><span>{c.hostname || 'Hostname não informado'}</span>{c.equipamentoNumero && <span>Equip. {c.equipamentoNumero}</span>}<span className={online ? 'online' : 'offline'}>{online ? '● Online' : '● Offline'}</span><span>{c.ip || 'IP não informado'}</span><span>Agent v{c.agentVersion || '?'}</span><span>Última comunicação: {fmtDate(c.ultimaConexao)}</span></div></div>
       <button type="button" className="drawer-close" onClick={onClose || (() => window.history.back())} aria-label="Fechar detalhes">×</button>
@@ -311,7 +314,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
         {tab === 'actions' && <><Section title="Ações remotas"><div className="remote-actions-layout"><div className="remote-actions-available"><div className="action-toolbar"><span className="muted">Ações genéricas, incluindo serviços do Windows.</span>{online && !remoteInProgress && <button type="button" className="btn-update" onClick={() => setSpoolerConfirm(true)}>Reiniciar spooler</button>}{!online && <span className="muted">Computador offline: ação remota indisponível.</span>}</div>{spoolerConfirm && <ConfirmBox onCancel={() => setSpoolerConfirm(false)} onConfirm={triggerSpoolerReset} confirmLabel="Reiniciar">Reiniciar o spooler de impressão de <strong>{c.hostname}</strong>?</ConfirmBox>}{serviceRestartError && <div className="update-status failed">{serviceRestartError}</div>}{online && !serviceInProgress && <button type="button" className="btn-update" onClick={() => setServiceRestartConfirm(true)}>Reiniciar serviço Spooler</button>}{serviceRestartConfirm && <ConfirmBox onCancel={() => setServiceRestartConfirm(false)} onConfirm={triggerServiceRestart} confirmLabel="Reiniciar serviço">Reiniciar o serviço Spooler de <strong>{c.hostname}</strong>?</ConfirmBox>}{online && !remoteInProgress && <button type="button" className="btn-update" onClick={() => setWallpaperConfirm(true)}>Aplicar papel de parede padrão</button>}{wallpaperError && <div className="update-status failed">{wallpaperError}</div>}{wallpaperConfirm && <ConfirmBox onCancel={() => setWallpaperConfirm(false)} onConfirm={triggerWallpaper} confirmLabel="Aplicar">Aplicar o papel de parede padrão neste computador?<br /><small>Hostname: {c.hostname} · Status: {online ? 'Online' : 'Offline'} · Asset: WallPaperVava.jpg · Resolução: 1920x1080</small></ConfirmBox>}</div><div className="remote-actions-history">{genericActions.length ? <div className="action-list">{genericActions.map((a) => <ActionItem key={a.actionExecutionId} action={a} />)}</div> : <div className="muted">Nenhuma ação remota registrada.</div>}</div></div></Section></>}
       {tab === 'maintenance' && <Section title="Manutenção do sistema"><div className="action-toolbar"><span className="muted">Histórico de system_maintenance.</span>{online && !maintenanceInProgress && <button type="button" className="btn-update" onClick={() => setSystemMaintenanceConfirm(true)}>Executar manutenção</button>}{!online && <span className="muted">Computador offline: ação remota indisponível.</span>}</div>{systemMaintenanceError && <div className="update-status failed">{systemMaintenanceError}</div>}{systemMaintenanceConfirm && <ConfirmBox onCancel={() => setSystemMaintenanceConfirm(false)} onConfirm={triggerSystemMaintenance} confirmLabel="Executar manutenção">Executar a manutenção preventiva do Windows na máquina <strong>{c.hostname}</strong>?</ConfirmBox>}{maintenanceActions.length ? <div className="action-list">{maintenanceActions.map((action) => <details className="action-item" key={action.actionExecutionId}><summary><span><strong>{fmtDate(action.solicitadaEm)}</strong><small>{action.mensagem || 'Manutenção do sistema'}</small></span><StatusTag status={action.status} /></summary><div className="maintenance-result">{action.resultado?.overallStatus && <Field label="Resultado">{action.resultado.overallStatus}</Field>}{action.resultado?.rebootRecommended != null && <Field label="Reinicialização recomendada">{action.resultado.rebootRecommended ? 'Sim' : 'Não'}</Field>}{action.resultado?.steps?.length ? action.resultado.steps.map((step) => <div className="maintenance-step" key={step.key}><span>{({ temp_cleanup: 'Temporários', sfc: 'SFC', dism: 'DISM', dns_flush: 'DNS' }[step.key] || step.key)}</span><StatusTag status={step.status} /><small>{step.durationMs != null ? `${step.durationMs} ms` : 'Sem duração informada'}</small></div>) : <div className="muted">Resultado detalhado não disponível.</div>}</div></details>)}</div> : <div className="muted">Nenhuma execução de manutenção registrada.</div>}</Section>}
     </div>
-  </>
+  </div>
 
   const addInventoryDialog = addInventoryOpen && <AddInventoryModal computer={c} form={addInventoryForm} saving={addInventorySaving} error={addInventoryError} onChange={(field, value) => setAddInventoryForm((current) => ({ ...current, [field]: value }))} onCancel={() => setAddInventoryOpen(false)} onConfirm={addToInventory} />
   if (drawer) return <div className="drawer-backdrop" onClick={onClose}><aside className="details-drawer" onClick={(event) => event.stopPropagation()}>{body}</aside>{addInventoryDialog}</div>

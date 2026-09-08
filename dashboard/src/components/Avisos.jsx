@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import SiteNav from './SiteNav'
 import { API_URL } from '../config'
 import { apiFetch } from '../api'
+import { useAuth } from '../auth/AuthContext'
 import {
   buildSelectionSummary,
   WEEKDAY_OPTIONS,
@@ -64,6 +65,8 @@ const defaultScheduleState = () => {
 }
 
 export default function Avisos() {
+  const { user } = useAuth()
+  const isAdmin = user.role === 'ADMIN'
   const [serverOk, setServerOk] = useState(true)
   const [computadores, setComputadores] = useState([])
   const [avisos, setAvisos] = useState([])
@@ -442,14 +445,14 @@ export default function Avisos() {
     }
   }
 
-  const formDisabled = saving
+  const formDisabled = !isAdmin || saving
   const canSubmit = mode === 'immediate' ? immediateCanSubmit : scheduleCanSubmit
 
   const scheduleLabel = editingScheduleId ? 'Salvar alterações' : 'Agendar'
   const scheduleSummary = scheduleDraft?.summary || '-'
 
   return (
-    <div className="container avisos-page">
+    <div className={`container avisos-page ${isAdmin ? '' : 'viewer-mode'}`}>
       <SiteNav />
       <div className="page-head">
         <div>

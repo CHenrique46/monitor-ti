@@ -15,13 +15,13 @@ function createAuthRouter({ authService = createAuthService() } = {}) {
       return res.status(result.status).json({ erro: result.code === "RATE_LIMITED" ? "Muitas tentativas. Tente novamente mais tarde." : "Credenciais inválidas." });
     }
     res.set("Set-Cookie", authService.sessionCookie(result.sessionId, req.secure || undefined));
-    return res.status(200).json({ username: result.username, expiresAt: new Date(result.expiresAt).toISOString() });
+    return res.status(200).json({ username: result.username, role: result.role, expiresAt: new Date(result.expiresAt).toISOString() });
   });
 
   router.get("/me", (req, res) => {
     const session = authService.getRequestSession(req);
     if (!session) return res.status(401).json({ erro: "Sessão necessária." });
-    return res.status(200).json({ username: session.username, expiresAt: new Date(session.expiresAt).toISOString() });
+    return res.status(200).json({ username: session.username, role: session.role || "ADMIN", expiresAt: new Date(session.expiresAt).toISOString() });
   });
 
   router.post("/logout", (req, res) => {

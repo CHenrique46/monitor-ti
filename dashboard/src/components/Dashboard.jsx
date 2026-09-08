@@ -11,8 +11,11 @@ import DeleteComputerDialog from './DeleteComputerDialog'
 import { computerMatchesFilter, sortComputadoresByPriority } from '../utils/computerAttention'
 import { buildOperationalSummary } from '../utils/operationalSummary.js'
 import { apiFetch } from '../api'
+import { useAuth } from '../auth/AuthContext'
 
 export default function Dashboard() {
+  const { user } = useAuth()
+  const isAdmin = user.role === 'ADMIN'
   const [serverOk, setServerOk] = useState(true)
   const [computadores, setComputadores] = useState([])
   const [search, setSearch] = useState('')
@@ -218,7 +221,7 @@ export default function Dashboard() {
       ) : (
         <div className="grid">
              {filtered.map((c) => (
-              <ComputerCard key={c.id} c={c} latestVersion={latestVersion} onOpen={setSelectedComputerId} onDelete={(computer) => { setDeleteError(null); setDeleteTarget(computer) }} hasActiveAlert={alertasAtivos.some((alert) => alert.computadorId === c.id)} />
+               <ComputerCard key={c.id} c={c} latestVersion={latestVersion} onOpen={setSelectedComputerId} onDelete={isAdmin ? (computer) => { setDeleteError(null); setDeleteTarget(computer) } : undefined} hasActiveAlert={alertasAtivos.some((alert) => alert.computadorId === c.id)} />
             ))}
          </div>
        )}

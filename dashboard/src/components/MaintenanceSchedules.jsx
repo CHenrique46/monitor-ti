@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import SiteNav from './SiteNav'
 import { API_URL } from '../config'
 import { apiFetch } from '../api'
+import { useAuth } from '../auth/AuthContext'
 
 const weekdays = [
   'Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira',
@@ -25,6 +26,8 @@ function formatDate(value) {
 }
 
 export default function MaintenanceSchedules() {
+  const { user } = useAuth()
+  const isAdmin = user.role === 'ADMIN'
   const [schedules, setSchedules] = useState([])
   const [computers, setComputers] = useState([])
   const [form, setForm] = useState(emptyForm)
@@ -96,7 +99,7 @@ export default function MaintenanceSchedules() {
   }))
 
   return (
-    <div className="container">
+    <div className={`container ${isAdmin ? '' : 'viewer-mode'}`}>
       <SiteNav />
       <div className="page-heading">
         <div>

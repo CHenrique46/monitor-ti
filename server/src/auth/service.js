@@ -52,6 +52,12 @@ function parseCookies(header) {
 function createAuthService(options = {}) {
   const username = String(options.username !== undefined ? options.username : process.env.HT_ADMIN_USERNAME || "").trim();
   const passwordHash = String(options.passwordHash !== undefined ? options.passwordHash : process.env.HT_ADMIN_PASSWORD_HASH || "").trim();
+  const viewerUsername = String(options.viewerUsername !== undefined ? options.viewerUsername : process.env.HT_VIEWER_USERNAME || "").trim();
+  const viewerPasswordHash = String(options.viewerPasswordHash !== undefined ? options.viewerPasswordHash : process.env.HT_VIEWER_PASSWORD_HASH || "").trim();
+  const users = [
+    ...(username && isValidPasswordHash(passwordHash) ? [{ username, passwordHash, role: "ADMIN" }] : []),
+    ...(viewerUsername && isValidPasswordHash(viewerPasswordHash) && viewerUsername !== username ? [{ username: viewerUsername, passwordHash: viewerPasswordHash, role: "VIEWER" }] : [])
+  ];
   const now = options.now || (() => Date.now());
   const randomBytes = options.randomBytes || ((size) => crypto.randomBytes(size));
   const sessions = new Map();
@@ -64,7 +70,7 @@ function createAuthService(options = {}) {
   }
 
   function isConfigured() {
-    return !!username && isValidPasswordHash(passwordHash);
+    return users.length > 0;
   }
 
   function rateLimit(ip) {
@@ -89,15 +95,16 @@ function createAuthService(options = {}) {
     const ip = String(input.ip || "unknown");
     const limited = rateLimit(ip);
     if (limited.limited) return { ok: false, status: 429, code: "RATE_LIMITED", retryAfter: limited.retryAfter };
-    const valid = isConfigured() && String(input.username || "").trim() === username && String(input.password || "") !== "" && verifyPassword(input.password, passwordHash);
+    const account = users.find((item) => item.username === String(input.username || "").trim());
+    const valid = isConfigured() && account && String(input.password || "") !== "" && verifyPassword(input.password, account.passwordHash);
     if (!valid) {
       recordFailure(ip);
       return { ok: false, status: 401, code: "INVALID_CREDENTIALS" };
     }
     attempts.delete(ip);
     const id = randomBytes(32).toString("hex");
-    sessions.set(id, { username, createdAt: now(), expiresAt: now() + SESSION_TTL_MS });
-    return { ok: true, sessionId: id, expiresAt: now() + SESSION_TTL_MS, username };
+    sessions.set(id, { username: account.username, role: account.role, createdAt: now(), expiresAt: now() + SESSION_TTL_MS });
+    return { ok: true, sessionId: id, expiresAt: now() + SESSION_TTL_MS, username: account.username, role: account.role };
   }
 
   function getSession(sessionId) {
