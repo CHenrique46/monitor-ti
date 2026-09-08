@@ -19,6 +19,13 @@ function normalizeEquipmentNumber(value) {
   return match ? match[1] : null;
 }
 
+function normalizeIpv4(value) {
+  const ip = text(value);
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip)) return null;
+  const parts = ip.split(".").map(Number);
+  return parts.every((part) => part >= 0 && part <= 255) ? parts.join(".") : null;
+}
+
 function parseStorageCapacity(value) {
   const match = text(value).match(/^(\d+(?:[.,]\d+)?)\s*(GB|TB)$/i);
   if (!match) return null;
@@ -119,4 +126,4 @@ function readInventoryRows(filePath = getInventoryExcelPath()) {
   return rows.slice(1).map((row) => sanitizeInventoryRow(Object.fromEntries(Object.entries(row).map(([column, value]) => [headers[column] || column, value]))));
 }
 
-module.exports = { FULL_KEY_RE, normalizeEquipmentNumber, parseStorageCapacity, partialOfficeKey, sanitizeInventoryRow, parseCells, parseSheetRows, sheetPath, readInventoryRows };
+module.exports = { FULL_KEY_RE, normalizeEquipmentNumber, normalizeIpv4, parseStorageCapacity, partialOfficeKey, sanitizeInventoryRow, parseCells, parseSheetRows, sheetPath, readInventoryRows };

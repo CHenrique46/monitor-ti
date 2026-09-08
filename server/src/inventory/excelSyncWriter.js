@@ -2,14 +2,15 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { unzipSync, zipSync, strFromU8, strToU8 } = require("fflate");
-const { FULL_KEY_RE, parseSheetRows, readInventoryRows, sheetPath } = require("./excelInventory");
+const { FULL_KEY_RE, normalizeEquipmentNumber, normalizeIpv4, parseSheetRows, readInventoryRows, sheetPath } = require("./excelInventory");
 const { normalizeCpu } = require("./inventoryComparison");
 const { getInventoryExcelPath } = require("../config");
 
 const SYNC_OPERATION = "UPSERT_INVENTORY";
 const AUTHORIZED_COLUMNS = new Set(["B", "C", "D", "G", "I", "J"]);
-const PRESERVED_COLUMNS = new Set(["A", "E", "F", "H"]);
+const PRESERVED_COLUMNS = new Set(["A", "E", "F", "H", "K"]);
 const OFFICE_PARTIAL_KEY_RE = /^[A-Za-z0-9]{5}$/;
+const OFFICE_ACCOUNT_RE = /^(?:[^@\s]+\s+[-:]\s+)?[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 class ExcelSyncError extends Error {
   constructor(code, message) {
@@ -105,15 +106,23 @@ function baselineValues(baseline, snapshot) {
   };
 }
 
+function classifyOfficeKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "EMPTY";
+  if (OFFICE_PARTIAL_KEY_RE.test(raw) || FULL_KEY_RE.test(raw)) return "PARTIAL_PRODUCT_KEY";
+  if (OFFICE_ACCOUNT_RE.test(raw)) return "ACCOUNT_LINKED_LICENSE";
+  return "UNKNOWN_LEGACY_VALUE";
+}
+
 function officeAction(current, desired) {
   const raw = String(current || "").trim().toUpperCase();
-  if (!raw) return desired;
-  if (OFFICE_PARTIAL_KEY_RE.test(raw)) {
+  const classification = classifyOfficeKey(current);
+  if (classification === "EMPTY") return desired;
+  if (classification === "ACCOUNT_LINKED_LICENSE") return current;
+  if (classification === "PARTIAL_PRODUCT_KEY") {
     if (raw === desired) return current;
-    throw new ExcelSyncError("OFFICE_KEY_CONFLICT", "Office Key parcial existente diverge do baseline.");
-  }
-  if (FULL_KEY_RE.test(raw)) {
-    if (raw.slice(-5) === desired) return current;
+    if (FULL_KEY_RE.test(raw) && raw.slice(-5) === desired) return current;
+    if (OFFICE_PARTIAL_KEY_RE.test(raw)) throw new ExcelSyncError("OFFICE_KEY_CONFLICT", "Office Key parcial existente diverge do baseline.");
     throw new ExcelSyncError("OFFICE_KEY_CONFLICT", "Office Key histórica diverge do baseline.");
   }
   throw new ExcelSyncError("OFFICE_KEY_CONFLICT", "Office Key existente possui formato inválido.");
@@ -148,7 +157,7 @@ function updateRow(rowXml, rowNumber, values, strings) {
   return result;
 }
 
-function transformWorkbook(buffer, baseline, snapshot) {
+function transformWorkbook(buffer, baseline, snapshot, computer) {
   const files = unzipSync(new Uint8Array(buffer));
   const workbookXml = strFromU8(files["xl/workbook.xml"] || new Uint8Array());
   const relationsXml = strFromU8(files["xl/_rels/workbook.xml.rels"] || new Uint8Array());
@@ -162,14 +171,19 @@ function transformWorkbook(buffer, baseline, snapshot) {
   const equipmentColumn = Object.keys(headers).find((column) => headers[column] === "EQUIP. N°" || headers[column] === "EQUIP. Nº");
   if (!equipmentColumn) throw new ExcelSyncError("INVENTORY_HEADER_NOT_FOUND", "Header EQUIP. Nº não encontrado.");
   const values = baselineValues(baseline, snapshot);
+  const computerIp = normalizeIpv4(computer?.ip);
+  if (!computerIp) throw new ExcelSyncError("INVALID_COMPUTER_IP", "IP do computador inválido ou ausente.");
+  if (!computer.equipamentoNumero) throw new ExcelSyncError("EQUIPMENT_NUMBER_REQUIRED", "Computador sem equipamentoNumero não pode sincronizar.");
   const rowMatches = [];
   const xmlRows = Array.from(sheetXml.matchAll(/<row\b[^>]*>[\s\S]*?<\/row>/g));
   for (let index = 1; index < parsedRows.length; index++) {
-    if (String(parsedRows[index][equipmentColumn] || "").trim().replace(/\.$/, "") === values.A) rowMatches.push(index);
+    if (normalizeIpv4(parsedRows[index].K) === computerIp) rowMatches.push(index);
   }
-  if (!rowMatches.length) throw new ExcelSyncError("INVENTORY_ROW_NOT_FOUND", `Equipamento ${values.A} não encontrado no Excel.`);
-  if (rowMatches.length > 1) throw new ExcelSyncError("DUPLICATE_INVENTORY_ROW", `Equipamento ${values.A} possui linhas duplicadas no Excel.`);
+  if (!rowMatches.length) throw new ExcelSyncError("INVENTORY_IP_NOT_FOUND", `IP ${computerIp} não encontrado no Excel.`);
+  if (rowMatches.length > 1) throw new ExcelSyncError("DUPLICATE_INVENTORY_IP", `IP ${computerIp} possui linhas duplicadas no Excel.`);
   const rowIndex = rowMatches[0];
+  const rowEquipment = normalizeEquipmentNumber(parsedRows[rowIndex][equipmentColumn]);
+  if (!rowEquipment || rowEquipment !== String(computer.equipamentoNumero)) throw new ExcelSyncError("IP_EQUIPMENT_MISMATCH", `IP ${computerIp} aponta para equipamento divergente.`);
   const rowXml = xmlRows[rowIndex][0];
   const rowNumber = Number(/\br="[A-Z]+(\d+)"/i.exec(rowXml)?.[1] || rowIndex + 1);
   xmlRows[rowIndex].__replacement = updateRow(rowXml, rowNumber, values, strings);
@@ -207,19 +221,20 @@ function safeError(error) {
   return `${error?.code || "EXCEL_SYNC_ERROR"}: ${String(error?.message || "Falha na sincronização").replace(/[A-Za-z0-9]{5}(?:-[A-Za-z0-9]{5}){4}/g, "[redacted]").slice(0, 240)}`;
 }
 
-function syncBaselineToExcel({ baseline, snapshot, filePath = getInventoryExcelPath(), backupDir = path.join(path.dirname(filePath), "backups"), now = Date.now } = {}) {
+function syncBaselineToExcel({ baseline, snapshot, computer, filePath = getInventoryExcelPath(), backupDir = path.join(path.dirname(filePath), "backups"), now = Date.now } = {}) {
   const release = acquireLock(filePath);
   let tempPath;
   try {
     if (!fs.existsSync(filePath)) throw new ExcelSyncError("EXCEL_NOT_FOUND", "Arquivo de inventário não encontrado.");
     const source = fs.readFileSync(filePath);
-    const transformed = transformWorkbook(source, baseline, snapshot);
+    const transformed = transformWorkbook(source, baseline, snapshot, computer);
     tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`);
     fs.writeFileSync(tempPath, transformed.buffer, { flag: "wx" });
     const check = readInventoryRows(tempPath).filter((row) => row.equipamentoNumero === String(baseline.equipamentoNumero));
     const writtenOfficePartial = check[0]?.officePartialKeyEsperada || "";
     const expectedOfficePartial = String(transformed.values.I || "").slice(-5);
-    if (check.length !== 1 || (transformed.values.I !== undefined && writtenOfficePartial !== expectedOfficePartial && writtenOfficePartial !== transformed.values.I) || (transformed.values.G !== undefined && check[0].armazenamentoEsperado !== transformed.values.G)) {
+    const officeIsAccount = classifyOfficeKey(transformed.values.I) === "ACCOUNT_LINKED_LICENSE";
+    if (check.length !== 1 || (transformed.values.I !== undefined && !officeIsAccount && writtenOfficePartial !== expectedOfficePartial && writtenOfficePartial !== transformed.values.I) || (transformed.values.G !== undefined && check[0].armazenamentoEsperado !== transformed.values.G)) {
       throw new ExcelSyncError("EXCEL_VALIDATION_FAILED", `Workbook temporário inválido: rows=${check.length}, officePartial=${writtenOfficePartial}, expectedOfficePartial=${expectedOfficePartial}, storage=${check[0]?.armazenamentoEsperado || ""}.`);
     }
     const backupPath = nextBackupPath(backupDir, path.basename(filePath, path.extname(filePath)), now);
@@ -236,4 +251,4 @@ function syncBaselineToExcel({ baseline, snapshot, filePath = getInventoryExcelP
   }
 }
 
-module.exports = { AUTHORIZED_COLUMNS, PRESERVED_COLUMNS, SYNC_OPERATION, ExcelSyncError, baselineValues, normalizeCpuForExcel, normalizeOfficeForExcel, normalizeRamForExcel, normalizeStorageForExcel, transformWorkbook, syncBaselineToExcel, safeError };
+module.exports = { AUTHORIZED_COLUMNS, PRESERVED_COLUMNS, SYNC_OPERATION, ExcelSyncError, baselineValues, classifyOfficeKey, normalizeCpuForExcel, normalizeOfficeForExcel, normalizeRamForExcel, normalizeStorageForExcel, transformWorkbook, syncBaselineToExcel, safeError };

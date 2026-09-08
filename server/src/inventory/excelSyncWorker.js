@@ -40,7 +40,8 @@ function createExcelSyncWorker({ db, writer = syncBaselineToExcel, filePath = ge
       try {
         const baseline = await db.computerInventoryBaseline.findUnique({ where: { id: item.baselineId } });
         if (!baseline || String(baseline.equipamentoNumero) !== String(item.equipamentoNumero)) throw new Error("Baseline referenciado não encontrado ou divergente.");
-        await writer({ baseline, snapshot: item.snapshot, filePath });
+        const computer = db.computador && db.computador.findUnique ? await db.computador.findUnique({ where: { id: item.computerId }, select: { id: true, ip: true, equipamentoNumero: true } }) : null;
+        await writer({ baseline, snapshot: item.snapshot, computer, filePath });
         await db.excelInventorySync.update({ where: { id: item.id }, data: { status: SYNCED, processedAt: safeNow(), leaseUntil: null, lastError: null } });
         return { status: SYNCED, id: item.id };
       } catch (error) {

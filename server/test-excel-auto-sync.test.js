@@ -13,6 +13,7 @@ function computer(overrides = {}) {
   return {
     id: 162,
     equipamentoNumero: "77",
+    ip: "192.168.40.77",
     processador: "Intel(R) Core(TM) i5-14500 CPU @ 2.60GHz",
     ramTotal: 16 * 1024 ** 3,
     sistemaRelease: "10.0.26200",
@@ -132,7 +133,7 @@ test("baseline esperado não é alterado pelo estado atual", async () => {
 function workbook() {
   const shared = ["EQUIP. N°", "PROCESSADOR", " RAM", "SISTEMA OPERACIONAL", "marca", "atual", "ARMAZENAMENTO", "KEY WIN", "OFFICE KEY", "OFFICE", "77", "old CPU", "8 GB", "Windows 10", "MANUAL-MARCA", "MANUAL-USUARIO", "240 GB", "WIN-MANUAL", "DV3TM", "2013 H B"];
   const s = (i, ref) => `<c r="${ref}" t="s"><v>${i}</v></c>`;
-  const row = `<row r="2">${s(10, "A2")}${s(11, "B2")}${s(12, "C2")}${s(13, "D2")}${s(14, "E2")}${s(15, "F2")}${s(16, "G2")}${s(17, "H2")}${s(18, "I2")}${s(19, "J2")}</row>`;
+  const row = `<row r="2">${s(10, "A2")}${s(11, "B2")}${s(12, "C2")}${s(13, "D2")}${s(14, "E2")}${s(15, "F2")}${s(16, "G2")}${s(17, "H2")}${s(18, "I2")}${s(19, "J2")}<c r="K2" t="inlineStr"><is><t>192.168.40.77</t></is></c></row>`;
   const files = { "xl/workbook.xml": strToU8('<workbook><sheets><sheet name="INVENTARIO" r:id="rId1"/></sheets></workbook>'), "xl/_rels/workbook.xml.rels": strToU8('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'), "xl/sharedStrings.xml": strToU8(`<sst>${shared.map((v) => `<si><t>${v}</t></si>`).join("")}</sst>`), "xl/worksheets/sheet1.xml": strToU8(`<worksheet><sheetData><row r="1">${shared.slice(0, 10).map((_, i) => s(i, String.fromCharCode(65 + i) + "1")).join("")}</row>${row}</sheetData></worksheet>`) };
   return Buffer.from(zipSync(files));
 }
@@ -144,9 +145,9 @@ test("linha inexistente não altera outra linha e A/E/F/H permanecem iguais", ()
   const before = fs.readFileSync(file);
   const beforeXml = strFromU8(unzipSync(new Uint8Array(before))["xl/worksheets/sheet1.xml"]);
   const snap = snapshotFromComputer(computer(), { includeOffice: true });
-  assert.throws(() => syncBaselineToExcel({ baseline: { ...baseline(), equipamentoNumero: "99" }, snapshot: snap, filePath: file, backupDir: path.join(dir, "backups") }), /não encontrado/);
+  assert.throws(() => syncBaselineToExcel({ baseline: { ...baseline(), equipamentoNumero: "99" }, snapshot: snap, computer: computer({ ip: "192.168.40.99" }), filePath: file, backupDir: path.join(dir, "backups") }), /não encontrado/);
   assert.deepEqual(fs.readFileSync(file), before);
-  syncBaselineToExcel({ baseline: baseline(), snapshot: snap, filePath: file, backupDir: path.join(dir, "backups") });
+  syncBaselineToExcel({ baseline: baseline(), snapshot: snap, computer: computer(), filePath: file, backupDir: path.join(dir, "backups") });
   const row = readInventoryRows(file)[0];
   assert.equal(row.fabricanteModeloEsperado, "MANUAL-MARCA");
   assert.equal(row.apelidoEsperado, "MANUAL-USUARIO");
