@@ -7,6 +7,7 @@ const { zipSync, strFromU8, strToU8, unzipSync } = require("fflate");
 const { readInventoryRows } = require("./src/inventory/excelInventory");
 const { ExcelSyncError, classifyOfficeKey, syncBaselineToExcel, transformWorkbook, baselineValues } = require("./src/inventory/excelSyncWriter");
 const { enqueueExcelSync } = require("./src/inventory/excelSyncOutbox");
+const { snapshot } = require("./src/inventory/excelSyncSnapshot");
 const { createExcelSyncWorker } = require("./src/inventory/excelSyncWorker");
 
 const fakeFullSame = "AAAAA-BBBBB-CCCCC-DDDDD-DV3TM";
@@ -196,6 +197,72 @@ function outboxDb(initial = []) {
     }
   };
 }
+
+function consolidatingOutboxDb(initial = []) {
+  const items = initial.map((item) => ({ ...item }));
+  return {
+    items,
+    excelInventorySync: {
+      findFirst: async ({ where }) => items.filter((item) => item.baselineId === where.baselineId && item.operation === where.operation && (!where.status || where.status.in.includes(item.status))).sort((a, b) => b.id - a.id)[0] || null,
+      update: async ({ where, data }) => Object.assign(items.find((item) => item.id === where.id), data),
+      create: async ({ data }) => { const item = { ...data, id: items.length + 1 }; items.push(item); return item; }
+    }
+  };
+}
+
+const technical = (values) => snapshot(values);
+
+test("consolidates partial metrics without creating a redundant sync", async () => {
+  const db = consolidatingOutboxDb([{ id: 1, baselineId: 9, operation: "UPSERT_INVENTORY", status: "SYNCED", snapshot: technical({ B: "Intel Core i5-14500", C: "16 GB", D: "10.0.26200", G: "512 GB" }) }]);
+  const result = await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77", snapshot: technical({ B: "Intel Core i5-14500", C: "16 GB", D: "10.0.26200" }) });
+  assert.equal(result.id, 1);
+  assert.equal(db.items.length, 1);
+  assert.equal(db.items[0].snapshot.values.G, "512 GB");
+});
+
+test("creates a consolidated sync when metrics RAM changes", async () => {
+  const db = consolidatingOutboxDb([{ id: 1, baselineId: 9, operation: "UPSERT_INVENTORY", status: "SYNCED", snapshot: technical({ B: "CPU", C: "16 GB", D: "Windows 10", G: "512 GB" }) }]);
+  const result = await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77", snapshot: technical({ B: "CPU", C: "32 GB", D: "Windows 10" }) });
+  assert.equal(result.id, 2);
+  assert.deepEqual(result.snapshot.values, { B: "CPU", C: "32 GB", D: "Windows 10", G: "512 GB" });
+});
+
+test("creates a sync when register adds storage to a partial synced snapshot", async () => {
+  const db = consolidatingOutboxDb([{ id: 1, baselineId: 9, operation: "UPSERT_INVENTORY", status: "SYNCED", snapshot: technical({ B: "CPU", C: "16 GB", D: "Windows 10" }) }]);
+  const result = await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77", snapshot: technical({ B: "CPU", C: "16 GB", D: "Windows 10", G: "512 GB" }) });
+  assert.equal(result.id, 2);
+  assert.equal(result.snapshot.values.G, "512 GB");
+});
+
+test("does not create a sync when register storage is unchanged", async () => {
+  const db = consolidatingOutboxDb([{ id: 1, baselineId: 9, operation: "UPSERT_INVENTORY", status: "SYNCED", snapshot: technical({ B: "CPU", C: "16 GB", D: "Windows 10", G: "512 GB" }) }]);
+  const result = await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77", snapshot: technical({ B: "CPU", C: "16 GB", D: "Windows 10", G: "512 GB" }) });
+  assert.equal(result.id, 1);
+  assert.equal(db.items.length, 1);
+});
+
+test("preserves office on partial metrics and detects an office change", async () => {
+  const previous = technical({ B: "CPU", C: "16 GB", D: "Windows 10", I: "DV3TM", J: "Office 2013" });
+  const sameDb = consolidatingOutboxDb([{ id: 1, baselineId: 9, operation: "UPSERT_INVENTORY", status: "SYNCED", snapshot: previous }]);
+  const same = await enqueueExcelSync({ db: sameDb, computerId: 162, baselineId: 9, equipamentoNumero: "77", snapshot: technical({ B: "CPU", C: "16 GB", D: "Windows 10" }) });
+  assert.equal(same.id, 1);
+  assert.equal(sameDb.items[0].snapshot.values.I, "DV3TM");
+  const changedDb = consolidatingOutboxDb([{ id: 1, baselineId: 9, operation: "UPSERT_INVENTORY", status: "SYNCED", snapshot: previous }]);
+  const changed = await enqueueExcelSync({ db: changedDb, computerId: 162, baselineId: 9, equipamentoNumero: "77", snapshot: technical({ B: "CPU", C: "16 GB", D: "Windows 10", I: "GJCXD", J: "Office 2013" }) });
+  assert.equal(changed.id, 2);
+  assert.equal(changed.snapshot.values.I, "GJCXD");
+});
+
+test("merges complementary pending snapshots and allows a first partial sync", async () => {
+  const db = consolidatingOutboxDb([{ id: 1, baselineId: 9, operation: "UPSERT_INVENTORY", status: "PENDING", snapshot: technical({ B: "CPU", C: "16 GB", D: "Windows 10" }) }]);
+  const result = await enqueueExcelSync({ db, computerId: 162, baselineId: 9, equipamentoNumero: "77", snapshot: technical({ G: "512 GB" }) });
+  assert.equal(result.id, 1);
+  assert.equal(db.items[0].snapshot.values.G, "512 GB");
+  const firstDb = consolidatingOutboxDb();
+  const first = await enqueueExcelSync({ db: firstDb, computerId: 162, baselineId: 9, equipamentoNumero: "77", snapshot: technical({ B: "CPU", C: "16 GB", D: "Windows 10" }) });
+  assert.equal(firstDb.items.length, 1);
+  assert.deepEqual(first.snapshot.values, { B: "CPU", C: "16 GB", D: "Windows 10" });
+});
 
 test("outbox keeps one active run and preserves completed history", async () => {
   const db = outboxDb();

@@ -1,7 +1,7 @@
 const SYNC_OPERATION = "UPSERT_INVENTORY";
 const PENDING = "PENDING";
 
-const { mergeSnapshots, snapshotsEqual } = require("./excelSyncSnapshot");
+const { mergeExcelSyncSnapshots, snapshotsEqual } = require("./excelSyncSnapshot");
 
 async function enqueueExcelSync({ db, computerId, baselineId, equipamentoNumero, snapshot = null, mergeWithLatest = true, forceNewRun = false } = {}) {
   if (!db || !computerId || !baselineId || !equipamentoNumero) throw new Error("Dados da sincronização Excel inválidos.");
@@ -11,7 +11,7 @@ async function enqueueExcelSync({ db, computerId, baselineId, equipamentoNumero,
   });
   if (active) {
     if (snapshot && !snapshotsEqual(active.snapshot, snapshot) && db.excelInventorySync.update) {
-      return db.excelInventorySync.update({ where: { id: active.id }, data: { snapshot: mergeSnapshots(active.snapshot, snapshot) } });
+      return db.excelInventorySync.update({ where: { id: active.id }, data: { snapshot: mergeExcelSyncSnapshots(active.snapshot, snapshot) } });
     }
     return active;
   }
@@ -20,11 +20,12 @@ async function enqueueExcelSync({ db, computerId, baselineId, equipamentoNumero,
     latest = await db.excelInventorySync.findFirst({ where: { baselineId, operation: SYNC_OPERATION }, orderBy: { id: "desc" } });
   }
   if (!forceNewRun) {
-    if (latest && latest.status === "SYNCED" && (!snapshot || snapshotsEqual(latest.snapshot, snapshot))) return latest;
+    const consolidated = snapshot ? mergeExcelSyncSnapshots(latest?.snapshot, snapshot) : null;
+    if (latest && latest.status === "SYNCED" && (!snapshot || snapshotsEqual(latest.snapshot, consolidated))) return latest;
   }
   try {
     const data = { computerId, baselineId, equipamentoNumero: String(equipamentoNumero), operation: SYNC_OPERATION, status: PENDING };
-    if (snapshot) data.snapshot = mergeWithLatest ? mergeSnapshots(latest?.snapshot, snapshot) : snapshot;
+    if (snapshot) data.snapshot = mergeWithLatest ? mergeExcelSyncSnapshots(latest?.snapshot, snapshot) : snapshot;
     return await db.excelInventorySync.create({
       data
     });

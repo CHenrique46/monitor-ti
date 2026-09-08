@@ -88,4 +88,8 @@ function mergeSnapshots(left, right) {
   return snapshot(values);
 }
 
-module.exports = { TECHNICAL_COLUMNS, mergeSnapshots, snapshot, snapshotFromBaseline, snapshotFromComputer, snapshotsEqual };
+function mergeExcelSyncSnapshots(previous, incoming) {
+  return mergeSnapshots(previous, incoming);
+}
+
+module.exports = { TECHNICAL_COLUMNS, mergeSnapshots, mergeExcelSyncSnapshots, snapshot, snapshotFromBaseline, snapshotFromComputer, snapshotsEqual };
