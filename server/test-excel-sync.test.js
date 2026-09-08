@@ -255,3 +255,24 @@ test("worker claims, syncs, retries and recovers abandoned processing items", as
   assert.equal((await worker.recoverAbandoned()).count, 1);
   assert.equal(state.item.status, "PENDING");
 });
+
+test("production worker logs the real Office mismatch without failing the sync", async () => {
+  const temp = tempWorkbook({ office: "partial" });
+  const now = new Date("2026-09-03T15:00:00.000Z");
+  const state = { item: { id: 12, computerId: 162, baselineId: 9, equipamentoNumero: "77", operation: "UPSERT_INVENTORY", status: "PENDING", attempts: 0, nextAttemptAt: now }, updates: [] };
+  const db = {
+    $transaction: async (work) => work({ excelInventorySync: { findFirst: async () => state.item, updateMany: async ({ data }) => { Object.assign(state.item, data); return { count: 1 }; } } }),
+    excelInventorySync: { update: async ({ data }) => { Object.assign(state.item, data); state.updates.push(data); return state.item; }, updateMany: async () => ({ count: 0 }) },
+    computerInventoryBaseline: { findUnique: async () => baseline({ officePartialKeyEsperada: "GJCXD" }) },
+    computador: { findUnique: async () => computer() }
+  };
+  const logs = [];
+  try {
+    const worker = createExcelSyncWorker({ db, filePath: temp.filePath, log: (message) => logs.push(message), now: () => now });
+    assert.equal((await worker.processNext()).status, "SYNCED");
+    assert.equal(state.item.status, "SYNCED");
+    assert.equal(state.item.lastError, null);
+    assert.match(logs[0], /excel_sync_warning code=OFFICE_KEY_MISMATCH_PRESERVED computerId=162 equipamento=77 excelLast5=DV3TM detectedLast5=GJCXD/);
+    assert.equal(logs[0].includes(fakeFullSame), false);
+  } finally { temp.cleanup(); }
+});
