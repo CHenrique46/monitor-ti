@@ -1,10 +1,8 @@
 import { Link } from "react-router-dom";
 import { computeAlerts } from "../utils/alerts";
 import {
-  bytesToGB,
   formatPercent,
-  formatUptime,
-  fmtDate
+  formatUptime
 } from "../utils/formatters";
 import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from "../utils/uptime";
 import { isVersionNewer } from "../utils/version";
@@ -19,7 +17,7 @@ function MetricBar({ value }) {
   );
 }
 
-export default function ComputerCard({ c, latestVersion, onOpen, onDelete, hasActiveAlert = false }) {
+export default function ComputerCard({ c, latestVersion, onOpen, onDelete, showAdminActions = true, hasActiveAlert = false }) {
   const online = c.status === "online";
   const { alerts } = computeAlerts(c);
   const uptimeStatus = getUptimeStatus(c.uptime);
@@ -52,9 +50,13 @@ export default function ComputerCard({ c, latestVersion, onOpen, onDelete, hasAc
       className={`card compact-card ${cardClass}`}
       onClick={openDetails}
       onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") openDetails();
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openDetails();
+        }
       }}
       role={onOpen ? "button" : undefined}
+      aria-label={onOpen ? `Abrir detalhes de ${c.apelido || c.hostname || "computador"}` : undefined}
       tabIndex={onOpen ? 0 : undefined}
     >
       <div className="hostname">{c.apelido || c.hostname || "(sem nome)"}</div>
@@ -75,28 +77,15 @@ export default function ComputerCard({ c, latestVersion, onOpen, onDelete, hasAc
 
       {alerts.length > 0 && <div className="card-alert-summary">⚠ {alerts.length} alerta{alerts.length > 1 ? "s" : ""}</div>}
 
-      <div className="agent-line">
-        <span className="agent-version">
-          Agent v{c.agentVersion || "?"}
-        </span>
-        {updateAvailable && (
-          <span className="update-available">
-            ⚠ Nova versão: v{latestVersion}
-          </span>
-        )}
-      </div>
-
-      <div className="card-actions">
-        {onOpen ? <button type="button" className="details-link" onClick={(event) => { event.stopPropagation(); openDetails(); }}>Ver detalhes</button> : <Link className="details-link" to={`/computadores/${c.id}`}>Ver detalhes</Link>}
+      {showAdminActions && (updateAvailable && online || !online && onDelete) && <div className="card-actions">
         {updateAvailable && online && (
           <Link className="btn-update" onClick={(event) => event.stopPropagation()} to={`/computadores/${c.id}`}>
             Atualizar
           </Link>
         )}
         {!online && onDelete && <button type="button" className="btn-delete-subtle" onClick={(event) => { event.stopPropagation(); onDelete(c); }}>Excluir</button>}
-      </div>
-      <div className="card-uptime"><span>{online ? "Uptime" : "Último uptime registrado"}</span><strong>{formatUptime(c.uptime)}</strong>{uptimeStatus !== UPTIME_STATUS.UNKNOWN && uptimeStatus !== UPTIME_STATUS.NORMAL && <small>{uptimeStatusLabel(uptimeStatus)}</small>}</div>
-      {!online && <div className="card-last-seen">Última comunicação: {fmtDate(c.ultimaConexao)}</div>}
+      </div>}
+      <div className="card-uptime"><span>Uptime</span><strong>{formatUptime(c.uptime)}</strong>{uptimeStatus !== UPTIME_STATUS.UNKNOWN && uptimeStatus !== UPTIME_STATUS.NORMAL && <small>{uptimeStatusLabel(uptimeStatus)}</small>}</div>
     </article>
   );
 }

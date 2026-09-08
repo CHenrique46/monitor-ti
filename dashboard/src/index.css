@@ -1158,6 +1158,156 @@ body {
   cursor: pointer;
   font-size: 0.85rem;
 }
+/* Visao geral: prioriza a densidade sem esconder informacao operacional. */
+.quick-filters {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0 0 14px;
+}
+
+.quick-filters button,
+.alerts-toggle,
+.quick-filter-more {
+  background: rgba(30, 41, 59, 0.72);
+  border: 1px solid #334155;
+  border-radius: 999px;
+  color: #cbd5e1;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 5px 10px;
+}
+
+.quick-filter-more {
+  min-height: 30px;
+}
+
+.quick-filters button:hover,
+.quick-filters button:focus-visible,
+.quick-filters button.active,
+.alerts-toggle:hover,
+.alerts-toggle:focus-visible {
+  border-color: #38bdf8;
+  color: #e0f2fe;
+  outline: 2px solid rgba(56, 189, 248, 0.18);
+  outline-offset: 1px;
+}
+
+.quick-filters button.active {
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.quick-filters strong {
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+  margin-left: 3px;
+}
+
+.alerts-summary-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.alerts-summary-head h2 {
+  margin: 0;
+}
+
+.alerts-summary-counts {
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.alerts-summary-counts strong {
+  color: #fca5a5;
+}
+
+.alerts-toggle {
+  margin-left: auto;
+}
+
+.grid {
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.compact-card {
+  min-height: 0;
+  padding: 12px;
+}
+
+.compact-card .hostname {
+  font-size: 0.98rem;
+  margin-bottom: 5px;
+}
+
+.compact-card .card-status-row {
+  padding-bottom: 8px;
+}
+
+.compact-card .card-metrics {
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.compact-card .card-metric strong {
+  font-size: 0.8rem;
+  margin-bottom: 3px;
+}
+
+.compact-card .card-alert-summary,
+.compact-card .agent-line,
+.compact-card .card-actions,
+.compact-card .card-uptime,
+.compact-card .card-last-seen {
+  margin-top: 8px;
+}
+
+.compact-card .card-actions {
+  padding-top: 8px;
+}
+
+@media (min-width: 1200px) {
+  .operational-summary .summary-item {
+    padding: 9px 10px;
+  }
+
+  .operational-summary .summary-num {
+    font-size: 1.35rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .quick-filters {
+    margin-bottom: 10px;
+  }
+
+  .alerts-summary-head {
+    align-items: flex-start;
+  }
+
+  .alerts-toggle {
+    margin-left: 0;
+  }
+
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .compact-card {
+    padding: 10px;
+  }
+
+  .compact-card .card-metrics {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+}
+
 
 .period-btn.active {
   background: #38bdf8;

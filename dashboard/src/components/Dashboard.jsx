@@ -29,6 +29,7 @@ export default function Dashboard() {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteError, setDeleteError] = useState(null)
   const [deleting, setDeleting] = useState(false)
+  const [alertsExpanded, setAlertsExpanded] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -170,8 +171,8 @@ export default function Dashboard() {
 
       {alertasAtivos.length > 0 && (
         <div className="alertas-ativos">
-          <h2>Alertas ativos</h2>
-          {alertasAtivos.map((a) => (
+          <div className="alerts-summary-head"><h2>Alertas ativos ({alertasAtivos.length})</h2><span className="alerts-summary-counts"><strong>{alertasAtivos.filter((a) => a.nivel === 'critical').length} crítico{alertasAtivos.filter((a) => a.nivel === 'critical').length === 1 ? '' : 's'}</strong> · {alertasAtivos.filter((a) => a.nivel !== 'critical').length} atenção</span><button type="button" className="alerts-toggle" onClick={() => setAlertsExpanded((expanded) => !expanded)}>{alertsExpanded ? 'Ocultar' : 'Ver alertas'}</button></div>
+          {alertsExpanded && alertasAtivos.map((a) => (
             <div key={a.id} className={`alert ${a.nivel}`}>
               <strong>
                 {a.computador?.hostname || a.computador?.usuario || "Computador"}
@@ -185,18 +186,6 @@ export default function Dashboard() {
 
        <div className="computer-toolbar">
          <SearchBar value={search} onChange={setSearch} />
-         <label className="toolbar-field">
-           <span>Mostrar</span>
-           <select value={computerFilter} onChange={(event) => setComputerFilter(event.target.value)}>
-             <option value="all">Todos</option>
-             <option value="online">Online</option>
-             <option value="offline">Offline</option>
-             <option value="attention">Requer atenção{summaryLoading ? '' : ` (${summary.attention})`}</option>
-             <option value="reboot">Reinício recomendado</option>
-             <option value="critical">Críticos</option>
-             <option value="normal">Normais</option>
-           </select>
-         </label>
          <label className="toolbar-field">
            <span>Ordenar</span>
            <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
@@ -221,7 +210,7 @@ export default function Dashboard() {
       ) : (
         <div className="grid">
              {filtered.map((c) => (
-               <ComputerCard key={c.id} c={c} latestVersion={latestVersion} onOpen={setSelectedComputerId} onDelete={isAdmin ? (computer) => { setDeleteError(null); setDeleteTarget(computer) } : undefined} hasActiveAlert={alertasAtivos.some((alert) => alert.computadorId === c.id)} />
+               <ComputerCard key={c.id} c={c} latestVersion={latestVersion} showAdminActions={isAdmin} onOpen={setSelectedComputerId} onDelete={isAdmin ? (computer) => { setDeleteError(null); setDeleteTarget(computer) } : undefined} hasActiveAlert={alertasAtivos.some((alert) => alert.computadorId === c.id)} />
             ))}
          </div>
        )}
