@@ -114,7 +114,7 @@ function classifyOfficeKey(value) {
   return "UNKNOWN_LEGACY_VALUE";
 }
 
-function officeAction(current, desired) {
+function officeAction(current, desired, warnings) {
   const raw = String(current || "").trim().toUpperCase();
   const classification = classifyOfficeKey(current);
   if (classification === "EMPTY") return desired;
@@ -122,10 +122,11 @@ function officeAction(current, desired) {
   if (classification === "PARTIAL_PRODUCT_KEY") {
     if (raw === desired) return current;
     if (FULL_KEY_RE.test(raw) && raw.slice(-5) === desired) return current;
-    if (OFFICE_PARTIAL_KEY_RE.test(raw)) throw new ExcelSyncError("OFFICE_KEY_CONFLICT", "Office Key parcial existente diverge do baseline.");
-    throw new ExcelSyncError("OFFICE_KEY_CONFLICT", "Office Key histórica diverge do baseline.");
+    warnings.push({ code: "OFFICE_KEY_MISMATCH_PRESERVED", classification, excelLast5: raw.slice(-5), detectedLast5: desired || "" });
+    return current;
   }
-  throw new ExcelSyncError("OFFICE_KEY_CONFLICT", "Office Key existente possui formato inválido.");
+  warnings.push({ code: "OFFICE_KEY_MISMATCH_PRESERVED", classification, excelLast5: raw.slice(-5), detectedLast5: desired || "" });
+  return current;
 }
 
 function setCellValue(rawCell, value) {
@@ -139,11 +140,11 @@ function setRamCellValue(rawCell, value) {
   return `<c${attributes}><v>${xmlEscape(String(value).replace(/\s*GB$/i, ""))}</v></c>`;
 }
 
-function updateRow(rowXml, rowNumber, values, strings) {
+function updateRow(rowXml, rowNumber, values, strings, warnings) {
   const records = cellRecords(rowXml, strings);
   const byColumn = new Map(records.map((record) => [record.column, record]));
   const officeCurrent = byColumn.get("I")?.value || "";
-  if (values.I !== undefined) values.I = officeAction(officeCurrent, values.I);
+  if (values.I !== undefined) values.I = officeAction(officeCurrent, values.I, warnings);
   const replacements = [];
   for (const column of AUTHORIZED_COLUMNS) {
     if (values[column] === undefined) continue;
@@ -171,6 +172,7 @@ function transformWorkbook(buffer, baseline, snapshot, computer) {
   const equipmentColumn = Object.keys(headers).find((column) => headers[column] === "EQUIP. N°" || headers[column] === "EQUIP. Nº");
   if (!equipmentColumn) throw new ExcelSyncError("INVENTORY_HEADER_NOT_FOUND", "Header EQUIP. Nº não encontrado.");
   const values = baselineValues(baseline, snapshot);
+  const warnings = [];
   const computerIp = normalizeIpv4(computer?.ip);
   if (!computerIp) throw new ExcelSyncError("INVALID_COMPUTER_IP", "IP do computador inválido ou ausente.");
   if (!computer.equipamentoNumero) throw new ExcelSyncError("EQUIPMENT_NUMBER_REQUIRED", "Computador sem equipamentoNumero não pode sincronizar.");
@@ -186,7 +188,7 @@ function transformWorkbook(buffer, baseline, snapshot, computer) {
   if (!rowEquipment || rowEquipment !== String(computer.equipamentoNumero)) throw new ExcelSyncError("IP_EQUIPMENT_MISMATCH", `IP ${computerIp} aponta para equipamento divergente.`);
   const rowXml = xmlRows[rowIndex][0];
   const rowNumber = Number(/\br="[A-Z]+(\d+)"/i.exec(rowXml)?.[1] || rowIndex + 1);
-  xmlRows[rowIndex].__replacement = updateRow(rowXml, rowNumber, values, strings);
+  xmlRows[rowIndex].__replacement = updateRow(rowXml, rowNumber, values, strings, warnings);
   let output = "";
   let cursor = 0;
   for (const match of xmlRows) {
@@ -197,7 +199,7 @@ function transformWorkbook(buffer, baseline, snapshot, computer) {
   output += sheetXml.slice(cursor);
   files[inventoryPath] = strToU8(output);
   const result = zipSync(files);
-  return { buffer: Buffer.from(result), values };
+  return { buffer: Buffer.from(result), values, warnings };
 }
 
 function acquireLock(filePath) {
@@ -234,14 +236,15 @@ function syncBaselineToExcel({ baseline, snapshot, computer, filePath = getInven
     const writtenOfficePartial = check[0]?.officePartialKeyEsperada || "";
     const expectedOfficePartial = String(transformed.values.I || "").slice(-5);
     const officeIsAccount = classifyOfficeKey(transformed.values.I) === "ACCOUNT_LINKED_LICENSE";
-    if (check.length !== 1 || (transformed.values.I !== undefined && !officeIsAccount && writtenOfficePartial !== expectedOfficePartial && writtenOfficePartial !== transformed.values.I) || (transformed.values.G !== undefined && check[0].armazenamentoEsperado !== transformed.values.G)) {
+    const officeWasPreserved = officeIsAccount || transformed.warnings.some((warning) => warning.code === "OFFICE_KEY_MISMATCH_PRESERVED");
+    if (check.length !== 1 || (transformed.values.I !== undefined && !officeWasPreserved && writtenOfficePartial !== expectedOfficePartial && writtenOfficePartial !== transformed.values.I) || (transformed.values.G !== undefined && check[0].armazenamentoEsperado !== transformed.values.G)) {
       throw new ExcelSyncError("EXCEL_VALIDATION_FAILED", `Workbook temporário inválido: rows=${check.length}, officePartial=${writtenOfficePartial}, expectedOfficePartial=${expectedOfficePartial}, storage=${check[0]?.armazenamentoEsperado || ""}.`);
     }
     const backupPath = nextBackupPath(backupDir, path.basename(filePath, path.extname(filePath)), now);
     fs.copyFileSync(filePath, backupPath, fs.constants.COPYFILE_EXCL);
     fs.renameSync(tempPath, filePath);
     tempPath = null;
-    return { status: "SYNCED", backupPath, equipamentoNumero: transformed.values.A };
+    return { status: "SYNCED", backupPath, equipamentoNumero: transformed.values.A, warnings: transformed.warnings };
   } catch (error) {
     if (error instanceof ExcelSyncError) throw error;
     throw new ExcelSyncError("EXCEL_SYNC_FAILED", safeError(error));

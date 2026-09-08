@@ -33,10 +33,10 @@ function computer(overrides = {}) {
 }
 
 function fixture({ office = "empty", user = "Sheila - Fiscal", duplicate = false, ip = "192.168.40.77" } = {}) {
-  const shared = ["EQUIP. N°", "PROCESSADOR", " RAM", "SISTEMA OPERACIONAL", "marca", "atual", "ARMAZENAMENTO", "KEY WIN", "OFFICE KEY", "OFFICE", "77", "Intel Core old", "8 GB", "Windows old", "LEGACY-MARKER", "WIN-FIXTURE", "512 GB", "2013 H B", "DV3TM", fakeFullSame, fakeFullDifferent, "ZZZZZ", ip, "HT - usuario@empresa.com.br"];
+  const shared = ["EQUIP. N°", "PROCESSADOR", " RAM", "SISTEMA OPERACIONAL", "marca", "atual", "ARMAZENAMENTO", "KEY WIN", "OFFICE KEY", "OFFICE", "77", "Intel Core old", "8 GB", "Windows old", "LEGACY-MARKER", "WIN-FIXTURE", "512 GB", "2013 H B", "DV3TM", fakeFullSame, fakeFullDifferent, "ZZZZZ", ip, "HT - usuario@empresa.com.br", "legacy reference"];
   const s = (index, ref) => `<c r="${ref}" t="s"><v>${index}</v></c>`;
   const empty = (ref) => `<c r="${ref}"/>`;
-  const officeCell = office === "empty" ? empty("I2") : office === "partial" ? s(18, "I2") : office === "full-same" ? s(19, "I2") : office === "full-different" ? s(20, "I2") : office === "account" ? s(23, "I2") : s(21, "I2");
+  const officeCell = office === "empty" ? empty("I2") : office === "partial" ? s(18, "I2") : office === "full-same" ? s(19, "I2") : office === "full-different" ? s(20, "I2") : office === "account" ? s(23, "I2") : office === "unknown" ? s(24, "I2") : s(21, "I2");
   const userCell = user === "" ? empty("F2") : `<c r="F2" t="inlineStr"><is><t>${user}</t></is></c>`;
   const ipCell = ip === "" ? empty("K2") : s(22, "K2");
   const row = `<row r="2">${s(10, "A2")}${s(11, "B2")}${s(12, "C2")}${s(13, "D2")}${s(14, "E2")}${userCell}${s(16, "G2")}${s(15, "H2")}${officeCell}${s(17, "J2")}${ipCell}</row>`;
@@ -104,16 +104,25 @@ test("localiza por IP exato com espaços e bloqueia IP ausente, inválido, dupli
   }
 });
 
-test("preserves equal partial/full Office keys and rejects conflicts or invalid values", () => {
+test("preserves equal product keys and reports mismatches without blocking technical sync", () => {
   for (const office of ["partial", "full-same"]) {
     const temp = tempWorkbook({ office });
     try { assert.equal(syncBaselineToExcel({ baseline: baseline(), computer: computer(), filePath: temp.filePath, backupDir: path.join(temp.directory, "backups") }).status, "SYNCED"); } finally { temp.cleanup(); }
   }
-  for (const office of ["full-different", "invalid"]) {
+  for (const office of ["full-different", "invalid", "unknown"]) {
     const temp = tempWorkbook({ office });
-    const before = fs.readFileSync(temp.filePath);
-    try { assert.throws(() => syncBaselineToExcel({ baseline: baseline(), computer: computer(), filePath: temp.filePath, backupDir: path.join(temp.directory, "backups") }), (error) => error instanceof ExcelSyncError && error.code === "OFFICE_KEY_CONFLICT"); assert.deepEqual(fs.readFileSync(temp.filePath), before); } finally { temp.cleanup(); }
+    try { const result = syncBaselineToExcel({ baseline: baseline(), computer: computer(), filePath: temp.filePath, backupDir: path.join(temp.directory, "backups") }); assert.equal(result.status, "SYNCED"); assert.equal(result.warnings[0].code, "OFFICE_KEY_MISMATCH_PRESERVED"); } finally { temp.cleanup(); }
   }
+});
+
+test("preserves a different partial key while updating technical columns", () => {
+  const temp = tempWorkbook({ office: "partial" });
+  try {
+    const result = syncBaselineToExcel({ baseline: baseline({ officePartialKeyEsperada: "GJCXD", processadorEsperado: "Intel Core i7-12700" }), computer: computer(), filePath: temp.filePath, backupDir: path.join(temp.directory, "backups") });
+    assert.equal(result.status, "SYNCED");
+    assert.deepEqual(result.warnings[0], { code: "OFFICE_KEY_MISMATCH_PRESERVED", classification: "PARTIAL_PRODUCT_KEY", excelLast5: "DV3TM", detectedLast5: "GJCXD" });
+    assert.equal(readInventoryRows(temp.filePath).find((row) => row.equipamentoNumero === "77").processador, "Intel Core i7-12700");
+  } finally { temp.cleanup(); }
 });
 
 test("classifies account-linked Office values without weakening product-key protection", () => {
@@ -228,17 +237,19 @@ test("normalizes baseline presentation for Excel", () => {
 
 test("worker claims, syncs, retries and recovers abandoned processing items", async () => {
   const now = new Date("2026-09-03T15:00:00.000Z");
-  const state = { item: { id: 1, baselineId: 9, equipamentoNumero: "77", operation: "UPSERT_INVENTORY", status: "PENDING", attempts: 0, nextAttemptAt: now }, baseline: baseline(), updates: [] };
+  const state = { item: { id: 1, computerId: 162, baselineId: 9, equipamentoNumero: "77", operation: "UPSERT_INVENTORY", status: "PENDING", attempts: 0, nextAttemptAt: now }, baseline: baseline(), updates: [] };
   const db = {
     $transaction: async (work) => work({ excelInventorySync: { findFirst: async () => state.item.status === "PENDING" ? state.item : null, updateMany: async ({ data }) => { Object.assign(state.item, data, { attempts: state.item.attempts + (data.attempts ? 1 : 0) }); return { count: 1 }; } } }),
     excelInventorySync: { update: async ({ data }) => { Object.assign(state.item, data); state.updates.push(data); return state.item; }, updateMany: async () => ({ count: 0 }) },
     computerInventoryBaseline: { findUnique: async () => state.baseline }
   };
   let writes = 0;
-  const worker = createExcelSyncWorker({ db, writer: async () => { writes++; }, now: () => now });
+  const logs = [];
+  const worker = createExcelSyncWorker({ db, writer: async () => { writes++; return { warnings: [{ code: "OFFICE_KEY_MISMATCH_PRESERVED", excelLast5: "DV3TM", detectedLast5: "GJCXD" }] }; }, log: (message) => logs.push(message), now: () => now });
   assert.equal((await worker.processNext()).status, "SYNCED");
   assert.equal(writes, 1);
   assert.equal(state.item.status, "SYNCED");
+  assert.match(logs[0], /excel_sync_warning code=OFFICE_KEY_MISMATCH_PRESERVED computerId=162 equipamento=77 excelLast5=DV3TM detectedLast5=GJCXD/);
   state.item.status = "PROCESSING"; state.item.leaseUntil = new Date(now.getTime() - 1); state.item.attempts = 1;
   db.excelInventorySync.updateMany = async ({ data }) => { Object.assign(state.item, data); return { count: 1 }; };
   assert.equal((await worker.recoverAbandoned()).count, 1);
