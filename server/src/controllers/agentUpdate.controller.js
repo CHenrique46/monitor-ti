@@ -2,22 +2,19 @@ const prisma = require("../prisma");
 const releasesService = require("../services/releases.service");
 const agentServer = require("../ws/agentServer");
 const { compareVersion, buildUpdateCommand } = require("../services/updateCommand");
-
-const IN_PROGRESS = [
-  "update_pending",
-  "update_downloading",
-  "update_validating",
-  "update_installing"
-];
+const agentUpdates = require("../services/agentUpdates.service");
 
 // Versão mínima do Agent que suporta auto-update remoto (preparado para uso futuro).
 // Quando definida (ex.: via env MIN_UPDATE_VERSION=1.0.0), agents abaixo dela são rejeitados.
 const MIN_UPDATE_VERSION = process.env.MIN_UPDATE_VERSION || null;
 
-async function trigger(req, res) {
+async function trigger(req, res, deps = {}) {
+  const db = deps.prisma || prisma;
+  const releases = deps.releasesService || releasesService;
+  const server = deps.agentServer || agentServer;
   try {
     const id = Number(req.params.id);
-    const c = await prisma.computador.findUnique({ where: { id } });
+    const c = await db.computador.findUnique({ where: { id } });
     if (!c) return res.status(404).json({ erro: "Computador nao encontrado." });
 
     if (!c.agentVersion) {
@@ -31,31 +28,37 @@ async function trigger(req, res) {
       });
     }
 
-    const release = await releasesService.getActiveRelease();
+    const release = await releases.getActiveRelease();
     if (!release)
       return res.status(409).json({ erro: "Nenhuma release disponivel no servidor." });
     if (c.status !== "online")
       return res.status(409).json({ erro: "Computador offline." });
-    if (c.agentVersion === release.version)
-      return res.status(409).json({ erro: "Ja esta na versao mais recente." });
+    const versionComparison = compareVersion(c.agentVersion, release.version);
+    if (versionComparison === null)
+      return res.status(409).json({ erro: "Versao atual ou destino invalida." });
+    if (versionComparison >= 0)
+      return res.status(409).json({ erro: versionComparison === 0 ? "Ja esta na versao mais recente." : "Downgrade de Agent nao permitido." });
 
-    const st = agentServer.getUpdateState(c.deviceId);
-    if (st && IN_PROGRESS.includes(st.status))
-      return res.status(409).json({ erro: "Atualizacao ja em andamento." });
+    if (!releases.hasArtifact(release, c.agentVersion))
+      return res.status(409).json({ erro: "Release registrada, mas artefato fisico indisponivel." });
+
+    const created = await agentUpdates.createPending(db, {
+      computadorId: c.id,
+      deviceId: c.deviceId,
+      hostname: c.hostname,
+      versaoAnterior: c.agentVersion,
+      versaoDestino: release.version,
+      iniciadoPor: req.humanUser && req.humanUser.username,
+      releaseId: release.id
+    });
+    if (!created.ok) return res.status(409).json({ erro: "UPDATE_ALREADY_IN_PROGRESS" });
 
     const command = buildUpdateCommand(c.agentVersion, release);
-    const ok = agentServer.sendToAgent(c.deviceId, command);
-    if (!ok)
+    const ok = server.sendToAgent(c.deviceId, command);
+    if (!ok) {
+      await db.agentUpdate.update({ where: { id: created.update.id }, data: { status: "FAILED", erro: "Agent nao conectado no momento.", finalizadoEm: new Date() } });
       return res.status(409).json({ erro: "Agent nao conectado no momento." });
-
-    agentServer.setUpdateState(c.deviceId, {
-      status: "update_pending",
-      currentVersion: c.agentVersion,
-      version: release.version,
-      targetVersion: release.version,
-      message: "Solicitacao enviada ao agent.",
-      updatedAt: new Date()
-    });
+    }
 
     console.log(
       `[Monitor TI] atualizacao solicitada: ${c.hostname} -> ${release.version}`
@@ -66,12 +69,14 @@ async function trigger(req, res) {
   }
 }
 
-async function status(req, res) {
+async function status(req, res, deps = {}) {
+  const db = deps.prisma || prisma;
   try {
     const id = Number(req.params.id);
-    const c = await prisma.computador.findUnique({ where: { id } });
+    const c = await db.computador.findUnique({ where: { id } });
     if (!c) return res.status(404).json({ erro: "Computador nao encontrado." });
-    return res.status(200).json(agentServer.getUpdateState(c.deviceId) || null);
+    const update = await agentUpdates.latest(db, c.id);
+    return res.status(200).json(agentUpdates.toPublic(update));
   } catch (err) {
     return res.status(500).json({ erro: err.message });
   }

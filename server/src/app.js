@@ -22,6 +22,7 @@ const prisma = require("./prisma");
 const { logEvent } = require("./logger");
 const { normalizeComputersOfflineOnStartup } = require("./services/presence.service");
 const { recoverOrphanedExecutions } = require("./services/remoteActions.service");
+const agentUpdatesService = require("./services/agentUpdates.service");
 const historicoService = require("./services/historico.service");
 const avisosService = require("./services/avisos.service");
 const maintenanceScheduler = require("./services/maintenanceScheduler.service");
@@ -96,6 +97,12 @@ if (require.main === module) {
       logEvent(`[Monitor TI] execuções remotas órfãs recuperadas: ${recovered}`);
     } catch (err) {
       logEvent(`[Monitor TI] erro ao recuperar execuções remotas órfãs: ${err.message}`);
+    }
+    try {
+      const recoveredUpdates = await agentUpdatesService.recoverExpired(prisma);
+      logEvent(`[Monitor TI] atualizações órfãs recuperadas: ${recoveredUpdates.count}`);
+    } catch (err) {
+      logEvent(`[Monitor TI] erro ao recuperar atualizações órfãs: ${err.message}`);
     }
 
     await maintenanceScheduler.ensureDefaultSchedule();

@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const prisma = require("../prisma");
+const { compareVersion } = require("./updateCommand");
 
 // Raiz das releases: <repo>/releases/agent
 const RELEASES_ROOT = path.join(__dirname, "..", "..", "..", "releases", "agent");
@@ -28,6 +29,7 @@ async function getRelease(version) {
 
 function toPublic(r) {
   return {
+    id: r.id,
     version: r.version,
     fileName: r.fileName,
     sha256: r.sha256,
@@ -38,6 +40,13 @@ function toPublic(r) {
     manifest: r.manifest || null,
     releaseDate: r.releaseDate
   };
+}
+
+function hasArtifact(r, agentVersion) {
+  const fileName = agentVersion && compareVersion(agentVersion, "1.1.1") >= 0 && r.packageName
+    ? r.packageName
+    : r.fileName;
+  return !!fileName && !!fs.existsSync(resolveFile(r.version, fileName));
 }
 
 // Resolve o caminho do arquivo de forma segura (sem path traversal).
@@ -81,5 +90,6 @@ module.exports = {
   toPublic,
   resolveFile,
   streamRelease,
-  streamPackage
+  streamPackage,
+  hasArtifact
 };

@@ -8,6 +8,7 @@ const { validateInventoryMessage } = require("../inventory/office");
 const { persistOfficeInventory } = require("../inventory/persistence");
 const { queueComputerInventorySync } = require("../inventory/excelAutoSync");
 const logger = require("../logger");
+const agentUpdates = require("../services/agentUpdates.service");
 
 const HEARTBEAT_INTERVAL = 30000;
 
@@ -293,8 +294,19 @@ function setupWebSocket(server, dependencies = {}) {
         return;
       }
 
-      if (msg && msg.type === "update_status" && msg.deviceId) {
-        const state = applyUpdateStatusMessage(msg);
+      if (msg && msg.type === "update_status") {
+        if (!ws.deviceId) {
+          logger.logEvent("[Monitor TI] update_status rejeitado: conexão não registrada");
+          return;
+        }
+        if (msg.deviceId && msg.deviceId !== ws.deviceId) {
+          logger.logEvent(`[Monitor TI] security_event=update_status_device_mismatch connectionDeviceId=${ws.deviceId} payloadDeviceId=${msg.deviceId}`);
+          return;
+        }
+        const state = applyUpdateStatusMessage({ ...msg, deviceId: ws.deviceId });
+        agentUpdates.applyAgentStatus(db, ws.deviceId, msg).catch((err) => {
+          logger.logEvent(`[Monitor TI] update_status persistence failed deviceId=${ws.deviceId} reason=${err.message}`);
+        });
         console.log(
           `[Monitor TI] update_status ${msg.deviceId}: ${msg.status}` +
             (msg.message || msg.error ? ` (${msg.message || msg.error})` : "")
@@ -421,6 +433,13 @@ function setupWebSocket(server, dependencies = {}) {
       if (msg && msg.type === "register" && msg.data && msg.data.deviceId) {
         const d = msg.data;
         try {
+          if (d.updateStatusOnly === true) {
+            const existing = await db.computador.findUnique({ where: { deviceId: d.deviceId }, select: { id: true } });
+            if (!existing) return;
+            ws.deviceId = d.deviceId;
+            ws.send(JSON.stringify({ type: "register_ack", deviceId: d.deviceId, updateStatusOnly: true }));
+            return;
+          }
           const computador = await db.computador.upsert({
             where: { deviceId: d.deviceId },
             create: {
@@ -500,6 +519,9 @@ function setupWebSocket(server, dependencies = {}) {
               `[Monitor TI] atualizacao concluida: ${d.hostname} -> ${d.agentVersion}`
             );
           }
+          agentUpdates.markSuccessOnRegister(db, d.deviceId, d.agentVersion).catch((err) => {
+            logger.logEvent(`[Monitor TI] update success persistence failed deviceId=${d.deviceId} reason=${err.message}`);
+          });
 
           // Sincroniza os discos fisicos (delete + insert) em transacao
           try {

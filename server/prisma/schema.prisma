@@ -51,6 +51,7 @@ model Computador {
   officeInstallations OfficeInstallation[]
   inventoryBaseline ComputerInventoryBaseline?
   excelInventorySyncs ExcelInventorySync[]
+  agentUpdates      AgentUpdate[]
 }
 
 model ComputerInventoryBaseline {
@@ -170,6 +171,31 @@ model AgentRelease {
   manifest       Json?
 
   @@index([active])
+
+  updates          AgentUpdate[]
+}
+
+model AgentUpdate {
+  id              Int      @id @default(autoincrement())
+  computadorId    Int
+  deviceId        String
+  hostname        String
+  versaoAnterior  String?
+  versaoDestino   String
+  status          String   @default("PENDING")
+  iniciadoEm      DateTime @default(now())
+  atualizadoEm    DateTime @updatedAt
+  finalizadoEm    DateTime?
+  iniciadoPor     String
+  erro            String?
+  releaseId       Int?
+
+  computador      Computador  @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  release         AgentRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+
+  @@index([deviceId, iniciadoEm])
+  @@index([computadorId, status])
+  @@index([status, atualizadoEm])
 }
 
 model Aviso {

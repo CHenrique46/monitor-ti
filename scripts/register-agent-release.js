@@ -19,6 +19,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const { PrismaClient } = require("@prisma/client");
+const { persistReleaseRecord } = require("../server/src/services/agentReleaseRegistration.service");
 const prisma = new PrismaClient();
 
 const RELEASES_ROOT = path.join(__dirname, "..", "releases", "agent");
@@ -46,6 +47,7 @@ function buildZip(dir, version) {
   return { zipName, zipSha256: sha256Of(buf), zipSize: buf.length };
 }
 
+
 async function main() {
   const args = process.argv.slice(2);
   const version = args[0];
@@ -65,6 +67,10 @@ async function main() {
     console.error("Agent nao encontrado: " + agentExe);
     process.exit(1);
   }
+  if (notifierExe && !fs.existsSync(notifierExe)) {
+    console.error("Notifier nao encontrado: " + notifierExe);
+    process.exit(1);
+  }
 
   // Agent (arquivo único legado + parte do pacote).
   const agentBuf = fs.readFileSync(agentExe);
@@ -79,10 +85,6 @@ async function main() {
   console.log("          size " + agentSize);
 
   if (notifierExe) {
-    if (!fs.existsSync(notifierExe)) {
-      console.error("Notifier nao encontrado: " + notifierExe);
-      process.exit(1);
-    }
     const notBuf = fs.readFileSync(notifierExe);
     const notSha256 = sha256Of(notBuf);
     const notSize = notBuf.length;
@@ -118,32 +120,11 @@ async function main() {
     );
     console.log("Arquivos copiados para " + dir);
 
-    if (activate) {
-      await prisma.agentRelease.updateMany({ where: { active: true }, data: { active: false } });
-    }
-    await prisma.agentRelease.upsert({
-      where: { version },
-      create: {
-        version,
-        fileName: AGENT_NAME,
-        sha256: agentSha256,
-        size: agentSize,
-        packageName: zipName,
-        packageSha256: zipSha256,
-        packageSize: zipSize,
-        manifest,
-        active: activate
-      },
-      update: {
-        fileName: AGENT_NAME,
-        sha256: agentSha256,
-        size: agentSize,
-        packageName: zipName,
-        packageSha256: zipSha256,
-        packageSize: zipSize,
-        manifest,
-        ...(activate ? { active: true } : {})
-      }
+    await persistReleaseRecord(prisma, {
+      version,
+      activate,
+      create: { version, fileName: AGENT_NAME, sha256: agentSha256, size: agentSize, packageName: zipName, packageSha256: zipSha256, packageSize: zipSize, manifest, active: activate },
+      update: { fileName: AGENT_NAME, sha256: agentSha256, size: agentSize, packageName: zipName, packageSha256: zipSha256, packageSize: zipSize, manifest, active: activate }
     });
   } else {
     // Release legada (1.0.x): somente Agent.
@@ -152,18 +133,11 @@ async function main() {
       JSON.stringify({ version, file: AGENT_NAME, sha256: agentSha256, size: agentSize }, null, 2)
     );
     console.log("Release legada (somente Agent) em " + dir);
-    if (activate) {
-      await prisma.agentRelease.updateMany({ where: { active: true }, data: { active: false } });
-    }
-    await prisma.agentRelease.upsert({
-      where: { version },
+    await persistReleaseRecord(prisma, {
+      version,
+      activate,
       create: { version, fileName: AGENT_NAME, sha256: agentSha256, size: agentSize, active: activate },
-      update: {
-        fileName: AGENT_NAME,
-        sha256: agentSha256,
-        size: agentSize,
-        ...(activate ? { active: true } : {})
-      }
+      update: { fileName: AGENT_NAME, sha256: agentSha256, size: agentSize, active: activate }
     });
   }
 
@@ -171,7 +145,7 @@ async function main() {
   await prisma.$disconnect();
 }
 
-main().catch(async (e) => {
+if (require.main === module) main().catch(async (e) => {
   console.error("Erro ao registrar release:", e.message);
   try { await prisma.$disconnect(); } catch (x) {}
   process.exit(1);
