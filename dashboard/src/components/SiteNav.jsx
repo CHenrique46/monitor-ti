@@ -4,7 +4,8 @@ import { useAuth } from '../auth/AuthContext'
 const navigationItems = [
   { key: 'overview', to: '/', label: 'Visão Geral', end: true },
   { key: 'alerts', to: '/avisos', label: 'Avisos' },
-  { key: 'maintenance', to: '/manutencao-programada', label: 'Manutenção Programada' }
+  { key: 'maintenance', to: '/manutencao-programada', label: 'Manutenção Programada' },
+  { key: 'inventory', to: '/inventario', label: 'Inventário' }
 ]
 
 export default function SiteNav() {

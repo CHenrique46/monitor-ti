@@ -1,4 +1,5 @@
 const computadoresService = require("../services/computadores.service");
+const { logEvent } = require("../logger");
 
 function createComputadoresController({ service = computadoresService.createComputadoresService() } = {}) {
   async function deleteComputer(req, res) {
@@ -15,7 +16,17 @@ function createComputadoresController({ service = computadoresService.createComp
 
   async function updateInventoryMetadata(req, res) {
     try {
+      const before = service.getById ? await service.getById(req.params.id) : null;
       const item = await service.updateInventoryMetadata(req.params.id, req.body);
+      if (before) {
+        const changes = [
+          ["equipamentoNumero", before.equipamentoNumero, item.equipamentoNumero],
+          ["responsavel", before.apelido || before.usuario, item.apelido || item.usuario]
+        ].filter(([, oldValue, newValue]) => oldValue !== newValue);
+        for (const [field, oldValue, newValue] of changes) {
+          logEvent(`[Monitor TI] inventory_admin_update computerId=${item.id} field=${field} old=${JSON.stringify(oldValue ?? null)} new=${JSON.stringify(newValue ?? null)} actor=${JSON.stringify(req.humanUser?.username || "unknown")} role=${req.humanUser?.role || "unknown"}`);
+        }
+      }
       return res.status(200).json(item);
     } catch (err) {
       if (err && err.code === "INVALID_ID") return res.status(400).json({ erro: err.message });
@@ -50,14 +61,23 @@ function createComputadoresController({ service = computadoresService.createComp
     }
   }
 
- return {
+  return {
     deleteComputer,
+    listInventory: (req, res) => listInventoryWithService(req, res, service),
     updateInventoryMetadata,
     getInventoryComparison,
     addInventoryBaseline,
    list: (req, res) => listWithService(req, res, service),
    getById: (req, res) => getByIdWithService(req, res, service)
  };
+}
+
+async function listInventoryWithService(req, res, service) {
+  try {
+    return res.status(200).json(await service.listInventory());
+  } catch (err) {
+    return res.status(500).json({ status: "error", message: err.message });
+  }
 }
 
 async function list(req, res) {
@@ -101,4 +121,4 @@ async function getCapabilities(req, res) {
   }
 }
 
-module.exports = { list, getById, getCapabilities, updateInventoryMetadata: createComputadoresController().updateInventoryMetadata, getInventoryComparison: createComputadoresController().getInventoryComparison, addInventoryBaseline: createComputadoresController().addInventoryBaseline, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };
+module.exports = { list, getById, getCapabilities, listInventory: (req, res) => listInventoryWithService(req, res, computadoresService), updateInventoryMetadata: createComputadoresController().updateInventoryMetadata, getInventoryComparison: createComputadoresController().getInventoryComparison, addInventoryBaseline: createComputadoresController().addInventoryBaseline, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };

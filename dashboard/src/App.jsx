@@ -4,6 +4,7 @@ import Dashboard from './components/Dashboard'
 import ComputerDetails from './components/ComputerDetails'
 import Avisos from './components/Avisos'
 import MaintenanceSchedules from './components/MaintenanceSchedules'
+import Inventory from './components/Inventory'
 import Login from './components/Login'
 import { API_URL } from './config'
 import { AuthContext } from './auth/AuthContext'
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/avisos" element={<Avisos />} />
         <Route path="/manutencao-programada" element={<MaintenanceSchedules />} />
+        <Route path="/inventario" element={<Inventory />} />
         <Route path="/computadores/:id" element={<ComputerDetails />} />
       </Routes>
     </AuthContext.Provider>

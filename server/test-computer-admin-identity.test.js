@@ -35,6 +35,25 @@ test("administrative identity fields can be cleared and invalid input is rejecte
   await assert.rejects(() => service.updateInventoryMetadata(161, { unknown: "x" }), (error) => error.code === "INVALID_METADATA");
 });
 
+test("responsável aceita o alias usuario e preserva número com zero à esquerda", async () => {
+  const calls = [];
+  const db = { computador: { update: async ({ data }) => { calls.push(data); return computer({ apelido: data.apelido, equipamentoNumero: data.equipamentoNumero }); } } };
+  const service = computadoresService.createComputadoresService({ db });
+  const result = await service.updateInventoryMetadata(161, { usuario: "  Sheila  ", equipamentoNumero: "04" });
+  assert.equal(result.apelido, "Sheila");
+  assert.equal(result.equipamentoNumero, "04");
+  assert.deepEqual(calls[0], { apelido: "Sheila", equipamentoNumero: "04" });
+});
+
+test("duplicate equipment is rejected before update with the conflicting computer label", async () => {
+  const db = { computador: {
+    findFirst: async () => ({ hostname: "CONT-55", apelido: null, usuario: null }),
+    update: async () => { throw new Error("must not update"); }
+  } };
+  const service = computadoresService.createComputadoresService({ db });
+  await assert.rejects(() => service.updateInventoryMetadata(161, { equipamentoNumero: "55" }), (error) => error.code === "DUPLICATE_EQUIPMENT" && error.message.includes("CONT-55"));
+});
+
 test("duplicate equipment number is mapped to a conflict", async () => {
   const db = { computador: { update: async () => { const error = new Error("unique"); error.code = "P2002"; throw error; } } };
   await assert.rejects(() => computadoresService.updateInventoryMetadata(161, { equipamentoNumero: "47" }, db), (error) => error.code === "DUPLICATE_EQUIPMENT");

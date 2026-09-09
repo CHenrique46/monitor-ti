@@ -5,6 +5,7 @@ const path = require("path");
 
 const healthRoutes = require("./routes/health.routes");
 const computadoresRoutes = require("./routes/computadores.routes");
+const inventarioRoutes = require("./routes/inventario.routes");
 const metricasRoutes = require("./routes/metricas.routes");
 const alertasRoutes = require("./routes/alertas.routes");
 const agentRoutes = require("./routes/agent.routes");
@@ -36,6 +37,7 @@ app.use("/health", healthRoutes);
 app.use("/api/auth", createAuthRouter({ authService }));
 const humanSession = requireHumanSession(authService);
 app.use("/api/computadores", humanSession, computadoresRoutes);
+app.use("/api/inventario", humanSession, inventarioRoutes);
 app.use("/api/computadores", humanSession, metricasRoutes);
 app.use("/api/alertas", humanSession, alertasRoutes);
 app.use("/api/computadores", humanSession, alertasRoutes);

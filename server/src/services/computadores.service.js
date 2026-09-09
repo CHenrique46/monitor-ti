@@ -22,7 +22,7 @@ class InventoryBaselineError extends Error {
   }
 }
 
-const ADMIN_IDENTITY_FIELDS = new Set(["apelido", "equipamentoNumero"]);
+const ADMIN_IDENTITY_FIELDS = new Set(["apelido", "usuario", "equipamentoNumero"]);
 const MAX_APELIDO_LENGTH = 120;
 const MAX_EQUIPMENT_NUMBER_LENGTH = 64;
 
@@ -111,6 +111,67 @@ async function list(db = prisma) {
   });
 
   return items.map((item) => mapComputador(item));
+}
+
+async function listInventory(db = prisma) {
+  const items = await db.computador.findMany({
+    orderBy: { hostname: "asc" },
+    select: {
+      id: true,
+      equipamentoNumero: true,
+      apelido: true,
+      usuario: true,
+      hostname: true,
+      ip: true,
+      processador: true,
+      ramTotal: true,
+      discoTotal: true,
+      discoLivre: true,
+      sistema: true,
+      sistemaRelease: true,
+      officeInstallations: {
+        where: { isPresent: true },
+        orderBy: { id: "asc" },
+        select: {
+          productName: true,
+          edition: true,
+          version: true,
+          updateChannel: true,
+          partialProductKey: true,
+          source: true,
+          licenseName: true,
+          licenseDescription: true,
+          productReleaseId: true
+        }
+      }
+    }
+  });
+
+  return items.map((item) => {
+    const office = normalizeOfficeInstallations(item.officeInstallations);
+    const product = office.products[0] || null;
+    const license = product?.primaryLicense || office.uncorrelatedLicenseRecords[0] || null;
+    const redactOfficeText = (value) => String(value || "").replace(/\b[A-Za-z0-9]{5}(?:-[A-Za-z0-9]{5}){4}\b/g, "[redacted]") || null;
+    return {
+      id: item.id,
+      equipamentoNumero: item.equipamentoNumero || null,
+      responsavel: item.usuario || item.apelido || null,
+      hostname: item.hostname || null,
+      ip: item.ip || null,
+      processador: item.processador || null,
+      ramTotal: item.ramTotal,
+      discoTotal: item.discoTotal,
+      discoLivre: item.discoLivre,
+      windows: item.sistemaRelease || item.sistema || null,
+      office: item.officeInstallations.length ? {
+        productName: redactOfficeText(product?.productName || license?.productName),
+        edition: product?.editionFamily || null,
+        version: product?.version || null,
+        updateChannel: product?.updateChannel || null,
+        partialProductKey: license?.partialProductKey ? String(license.partialProductKey).slice(-5) : null
+      } : null
+    };
+  });
 }
 
 async function getById(id, db = prisma) {
@@ -332,14 +393,28 @@ async function updateInventoryMetadata(value, input, db = prisma) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new ComputerDeletionError("INVALID_METADATA", "Dados de identificação inválidos.");
   if (Object.keys(input).some((field) => !ADMIN_IDENTITY_FIELDS.has(field))) throw new ComputerDeletionError("INVALID_METADATA", "Campo de identificação inválido.");
   if (!Object.keys(input).length) throw new ComputerDeletionError("INVALID_METADATA", "Informe ao menos um campo.");
+  if (input.apelido !== undefined && input.usuario !== undefined) {
+    throw new ComputerDeletionError("INVALID_METADATA", "Informe apenas um campo de responsável.");
+  }
   const data = {
-    apelido: normalizeAdminField(input.apelido, MAX_APELIDO_LENGTH, "Apelido"),
+    apelido: normalizeAdminField(input.usuario !== undefined ? input.usuario : input.apelido, MAX_APELIDO_LENGTH, "Responsável"),
     equipamentoNumero: normalizeAdminField(input.equipamentoNumero, MAX_EQUIPMENT_NUMBER_LENGTH, "Número do equipamento")
   };
   Object.keys(data).forEach((field) => data[field] === undefined && delete data[field]);
   try {
+    if (data.equipamentoNumero && db.computador.findFirst) {
+      const other = await db.computador.findFirst({
+        where: { equipamentoNumero: data.equipamentoNumero, NOT: { id } },
+        select: { hostname: true, apelido: true, usuario: true }
+      });
+      if (other) {
+        const label = other.apelido || other.usuario || other.hostname || "outro computador";
+        throw new ComputerDeletionError("DUPLICATE_EQUIPMENT", `Nº de equipamento ${data.equipamentoNumero} já está vinculado a ${label}.`);
+      }
+    }
     return mapComputador(await db.computador.update({ where: { id }, data }));
   } catch (error) {
+    if (error instanceof ComputerDeletionError) throw error;
     if (error && error.code === "P2025") throw new ComputerDeletionError("NOT_FOUND", "Computador não encontrado.");
     if (error && error.code === "P2002") throw new ComputerDeletionError("DUPLICATE_EQUIPMENT", "Número do equipamento já está vinculado a outro computador.");
     throw error;
@@ -396,8 +471,9 @@ async function deleteOfflineComputer(value, db = prisma) {
 
 module.exports = {
   list,
+  listInventory,
   getById,
-  createComputadoresService: ({ db = prisma, enqueue = enqueueExcelSync } = {}) => ({ list: () => list(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db), getInventoryComparison: (id) => getInventoryComparison(id, db), addInventoryBaseline: (id, input) => addInventoryBaseline(id, input, db, enqueue) }),
+  createComputadoresService: ({ db = prisma, enqueue = enqueueExcelSync } = {}) => ({ list: () => list(db), listInventory: () => listInventory(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db), getInventoryComparison: (id) => getInventoryComparison(id, db), addInventoryBaseline: (id, input) => addInventoryBaseline(id, input, db, enqueue) }),
   updateInventoryMetadata,
   getCapabilitiesById,
   deleteOfflineComputer,
