@@ -45,6 +45,55 @@ test("responsável aceita o alias usuario e preserva número com zero à esquerd
   assert.deepEqual(calls[0], { apelido: "Sheila", equipamentoNumero: "04" });
 });
 
+test("Inventário mantém responsável administrativo separado do usuário técnico após reload", async () => {
+  const computer = {
+    id: 161,
+    hostname: "VAVA67",
+    usuario: "windows-user",
+    apelido: "Pessoa A",
+    equipamentoNumero: "04",
+    ip: null,
+    officeInstallations: [],
+    discosFisicos: []
+  };
+  const db = { computador: {
+    findMany: async () => [computer],
+    update: async ({ data }) => Object.assign(computer, data)
+  } };
+  const service = computadoresService.createComputadoresService({ db });
+
+  assert.equal((await service.listInventory())[0].responsavel, "Pessoa A");
+  const updated = await service.updateInventoryMetadata(161, { usuario: "Pessoa B" });
+  assert.equal(updated.apelido, "Pessoa B");
+  assert.equal(computer.usuario, "windows-user");
+  assert.equal((await service.listInventory())[0].responsavel, "Pessoa B");
+  assert.equal((await service.listInventory())[0].equipamentoNumero, "04");
+
+  computer.apelido = null;
+  assert.equal((await service.listInventory())[0].responsavel, null);
+});
+
+test("Agent pode atualizar usuario sem sobrescrever apelido administrativo", async () => {
+  const source = fs.readFileSync(require.resolve("./src/ws/agentServer"), "utf8");
+  assert.match(source, /usuario: d\.usuario \|\| null/);
+  assert.doesNotMatch(source, /apelido: d\.usuario/);
+
+  const computer = {
+    id: 161,
+    hostname: "VAVA67",
+    usuario: "usuario-antigo",
+    apelido: "Noemi",
+    equipamentoNumero: "04",
+    officeInstallations: [],
+    discosFisicos: []
+  };
+  const db = { computador: { update: async ({ data }) => Object.assign(computer, data) } };
+  await computadoresService.updateInventoryMetadata(161, { apelido: "Noemi" }, db);
+  await db.computador.update({ data: { usuario: "usuario-novo" } });
+  assert.equal(computer.usuario, "usuario-novo");
+  assert.equal(computer.apelido, "Noemi");
+});
+
 test("duplicate equipment is rejected before update with the conflicting computer label", async () => {
   const db = { computador: {
     findFirst: async () => ({ hostname: "CONT-55", apelido: null, usuario: null }),

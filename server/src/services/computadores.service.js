@@ -155,7 +155,9 @@ async function listInventory(db = prisma) {
     return {
       id: item.id,
       equipamentoNumero: item.equipamentoNumero || null,
-      responsavel: item.usuario || item.apelido || null,
+      // O PATCH legado recebe "usuario", mas esse valor é persistido em apelido.
+      // usuario continua sendo exclusivamente a identidade técnica do Agent.
+      responsavel: item.apelido || null,
       hostname: item.hostname || null,
       ip: item.ip || null,
       processador: item.processador || null,
@@ -397,6 +399,8 @@ async function updateInventoryMetadata(value, input, db = prisma) {
     throw new ComputerDeletionError("INVALID_METADATA", "Informe apenas um campo de responsável.");
   }
   const data = {
+    // Compatibilidade: o formulário do Inventário ainda envia usuario; o campo
+    // administrativo persistido continua sendo apelido.
     apelido: normalizeAdminField(input.usuario !== undefined ? input.usuario : input.apelido, MAX_APELIDO_LENGTH, "Responsável"),
     equipamentoNumero: normalizeAdminField(input.equipamentoNumero, MAX_EQUIPMENT_NUMBER_LENGTH, "Número do equipamento")
   };
