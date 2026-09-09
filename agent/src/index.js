@@ -11,6 +11,7 @@ const remoteActions = require("./remoteActions");
 const { createRemoteActionStore } = require("./remoteActionStore");
 const { collectOfficeInventory } = require("./inventory/office");
 const { createOfficeInventorySender, scheduleOfficeInventory } = require("./inventory/officeProtocol");
+const { selectLanIPv4 } = require("./network");
 
 // Atualizador: se iniciado com --apply-update (arquivo unico) ou
 // --apply-update-package (pacote Agent+Notifier), executa apenas a troca e
@@ -205,17 +206,7 @@ function getDeviceId() {
 }
 
 function getMachineInfo(deviceId) {
-  let ip = null;
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === "IPv4" && !iface.internal) {
-        ip = iface.address;
-        break;
-      }
-    }
-    if (ip) break;
-  }
+  const ip = selectLanIPv4(os.networkInterfaces());
 
   const cpus = os.cpus();
 
