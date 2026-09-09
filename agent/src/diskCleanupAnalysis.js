@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { execFile } = require("child_process");
 
 const MINIMUM_FILE_AGE_DAYS = 7;
 const MAX_DEPTH = 32;
@@ -24,6 +25,9 @@ function createDiskCleanupAnalyzer(deps = {}) {
   const maxItems = deps.maxItems ?? MAX_ITEMS;
   const timeoutMs = deps.timeoutMs ?? GLOBAL_TIMEOUT_MS;
   const minimumAgeDays = deps.minimumFileAgeDays ?? MINIMUM_FILE_AGE_DAYS;
+  const registryDiscovery = deps.registryDiscovery ?? process.platform === "win32";
+  const environment = deps.environment || process.env;
+  const systemRoot = /^[A-Za-z]:[\\/]$/.test(systemDrive) ? systemDrive : path.parse(systemDrive).root;
 
   function category(id) {
     return {
@@ -37,6 +41,88 @@ function createDiskCleanupAnalyzer(deps = {}) {
       truncated: false,
       warnings: []
     };
+  }
+
+  function normalizePath(value, profileRoot = "") {
+    let candidate = String(value || "").trim();
+    if (!candidate) return null;
+    candidate = candidate.replace(/%([^%]+)%/g, (_, name) => {
+      if (name.toUpperCase() === "USERPROFILE" && profileRoot) return profileRoot;
+      return environment[name] || environment[name.toUpperCase()] || `%${name}%`;
+    });
+    if (!path.isAbsolute(candidate) || candidate.startsWith("\\\\") || candidate.startsWith("//")) return null;
+    const normalized = path.normalize(candidate);
+    const root = path.parse(normalized).root;
+    if (!root || normalized.toLowerCase() === root.toLowerCase()) return null;
+    const lower = normalized.toLowerCase();
+    const dangerous = [
+      path.normalize(path.join(systemRoot, "Windows")).toLowerCase(),
+      path.normalize(path.join(systemRoot, "Users")).toLowerCase(),
+      path.normalize(path.join(systemRoot, "Program Files")).toLowerCase(),
+      path.normalize(path.join(systemRoot, "Program Files (x86)")).toLowerCase()
+    ];
+    if (dangerous.some((rootPath) => lower === rootPath || lower.startsWith(rootPath + path.sep))) return null;
+    return normalized;
+  }
+
+  function uniquePaths(paths) {
+    const seen = new Set();
+    return paths.filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function runRegistry(args) {
+    return new Promise((resolve) => {
+      execFile("reg.exe", args, { windowsHide: true, timeout: 5000, maxBuffer: 256 * 1024 }, (error, stdout) => {
+        resolve(error ? "" : String(stdout || ""));
+      });
+    });
+  }
+
+  function parseRegistryValues(output) {
+    const values = {};
+    for (const line of String(output || "").split(/\r?\n/)) {
+      const match = line.match(/^\s+(TEMP|TMP)\s+REG_\w+\s+(.+?)\s*$/i);
+      if (match) values[match[1].toUpperCase()] = match[2];
+    }
+    return values;
+  }
+
+  function parseRegistryValue(output, name) {
+    const match = String(output || "").split(/\r?\n/).map((line) => line.match(new RegExp(`^\\s*${name}\\s+REG_\\w+\\s+(.+?)\\s*$`, "i"))).find(Boolean);
+    return match ? match[1] : "";
+  }
+
+  function parseProfileList(output) {
+    return String(output || "").split(/\r?\n/)
+      .map((line) => line.match(/^HKEY_LOCAL_MACHINE\\.*\\([^\\\s]+)\s*$/i))
+      .filter(Boolean)
+      .map((match) => match[1]);
+  }
+
+  async function configuredTempPaths() {
+    const sources = [
+      { values: environment, profileRoot: "" },
+      { values: deps.machineEnvironment || {}, profileRoot: "" }
+    ];
+    if (registryDiscovery) {
+      const machine = deps.machineEnvironment ? deps.machineEnvironment : parseRegistryValues(await runRegistry(["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"]));
+      sources[1] = { values: machine, profileRoot: "" };
+      const profilesOutput = await runRegistry(["query", "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList"]);
+      for (const sid of parseProfileList(profilesOutput)) {
+        const profileRoot = parseRegistryValue(await runRegistry(["query", `HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\${sid}`]), "ProfileImagePath");
+        const profileName = path.basename(profileRoot);
+        const userKey = deps.userEnvironmentKeys?.[profileName];
+        const values = userKey || parseRegistryValues(await runRegistry(["query", `HKU\\${sid}\\Environment`]));
+        sources.push({ values, profileRoot });
+      }
+    }
+    for (const user of deps.userEnvironments || []) sources.push(user);
+    return uniquePaths(sources.flatMap(({ values, profileRoot }) => [values.TEMP, values.TMP].map((item) => normalizePath(item, profileRoot)).filter(Boolean)));
   }
 
   function addWarning(result, warning) {
@@ -205,6 +291,29 @@ function createDiskCleanupAnalyzer(deps = {}) {
     return result;
   }
 
+  async function analyzeOtherTemp(context, existingPaths) {
+    const result = category("OTHER_TEMP");
+    const discovered = [];
+    for (const item of await configuredTempPaths()) {
+      if (existingPaths.has(item.toLowerCase())) continue;
+      const info = await statEntry(item);
+      if (info.error) continue;
+      if (info.isSymbolicLink()) {
+        result.skippedItems += 1;
+        markWarning(result, "reparse_point_skipped");
+        continue;
+      }
+      if (!info.isDirectory()) continue;
+      discovered.push(item);
+    }
+    result.additionalTempDirectoriesDetected = discovered.length;
+    for (const tempPath of discovered) {
+      if (context.truncated) break;
+      await walkFiles(tempPath, result, context);
+    }
+    return result;
+  }
+
   async function analyzeWindowsTemp(context) {
     const result = category("WINDOWS_TEMP");
     await walkFiles(path.join(windowsDir, "Temp"), result, context);
@@ -258,8 +367,16 @@ function createDiskCleanupAnalyzer(deps = {}) {
     const context = createContext();
     const categories = [];
     const freeBytesBefore = await freeBytes();
-    categories.push(await analyzeUserTemp(context));
+    const userTemp = await analyzeUserTemp(context);
+    const existingPaths = new Set();
+    for (const profile of await fsPromises.readdir(usersDir, { withFileTypes: true }).catch(() => [])) {
+      if (!profile.isDirectory() || SKIPPED_PROFILE_NAMES.has(profile.name.toLowerCase()) || profile.name.toLowerCase().startsWith("defaultuser")) continue;
+      existingPaths.add(path.normalize(path.join(usersDir, profile.name, "AppData", "Local", "Temp")).toLowerCase());
+    }
+    existingPaths.add(path.normalize(path.join(windowsDir, "Temp")).toLowerCase());
+    categories.push(userTemp);
     categories.push(await analyzeWindowsTemp(context));
+    categories.push(await analyzeOtherTemp(context, existingPaths));
     categories.push(await analyzeRecycleBin(context));
     if (context.truncated) {
       categories.forEach((item) => {
@@ -275,6 +392,7 @@ function createDiskCleanupAnalyzer(deps = {}) {
       freeBytesBefore,
       minimumFileAgeDays: minimumAgeDays,
       categories,
+      additionalTempDirectoriesDetected: categories.find((item) => item.id === "OTHER_TEMP")?.additionalTempDirectoriesDetected || 0,
       estimatedRecoverableBytes,
       actualFreedBytes: null,
       durationMs: Math.max(0, now() - context.startedAt),

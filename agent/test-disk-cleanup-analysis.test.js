@@ -18,9 +18,11 @@ async function fixture() {
     systemDrive: root,
     usersDir: users,
     windowsDir: path.join(root, "Windows"),
-    now: () => now,
-    timeoutMs: 90000,
-    ...overrides
+      now: () => now,
+      timeoutMs: 90000,
+      registryDiscovery: false,
+      environment: {},
+      ...overrides
   });
   return { root, users, windows, recycle, now, analyze };
 }
@@ -121,4 +123,78 @@ test("total recuperável é a soma de eligibleBytes", async (t) => {
   const result = await f.analyze()();
   assert.equal(result.estimatedRecoverableBytes, result.categories.reduce((sum, item) => sum + item.eligibleBytes, 0));
   assert.equal(result.estimatedRecoverableBytes, 12);
+});
+
+test("TEMP e TMP configurados localmente entram como OTHER_TEMP", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "configured-temp");
+  const tmp = path.join(f.root, "configured-tmp");
+  await fs.promises.mkdir(temp);
+  await fs.promises.mkdir(tmp);
+  const old = new Date(f.now - 8 * 86400000);
+  for (const target of [path.join(temp, "a.tmp"), path.join(tmp, "b.tmp")]) {
+    await fs.promises.writeFile(target, Buffer.alloc(4));
+    await fs.promises.utimes(target, old, old);
+  }
+  const result = await f.analyze({ environment: { TEMP: temp, TMP: tmp } })();
+  const category = result.categories.find((item) => item.id === "OTHER_TEMP");
+  assert.equal(category.additionalTempDirectoriesDetected, 2);
+  assert.equal(category.eligibleBytes, 8);
+  assert.equal(result.estimatedRecoverableBytes, 8);
+});
+
+test("caminhos TEMP/TMP iguais são deduplicados", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "same-temp");
+  await fs.promises.mkdir(temp);
+  const result = await f.analyze({ environment: { TEMP: temp, TMP: temp } })();
+  assert.equal(result.categories.find((item) => item.id === "OTHER_TEMP").additionalTempDirectoriesDetected, 1);
+});
+
+test("caminhos já cobertos por USER_TEMP e WINDOWS_TEMP não duplicam", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const userTemp = path.join(f.users, "alice", "AppData", "Local", "Temp");
+  const result = await f.analyze({ environment: { TEMP: userTemp, TMP: f.windows } })();
+  assert.equal(result.categories.find((item) => item.id === "OTHER_TEMP").additionalTempDirectoriesDetected, 0);
+});
+
+test("caminhos UNC, relativos e raiz de volume são rejeitados", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const result = await f.analyze({
+    environment: { TEMP: "\\\\server\\share", TMP: "relative" },
+    machineEnvironment: { TEMP: "C:\\", TMP: "C:\\Windows" }
+  })();
+  const category = result.categories.find((item) => item.id === "OTHER_TEMP");
+  assert.equal(category.additionalTempDirectoriesDetected, 0);
+  assert.equal(category.scannedBytes, 0);
+});
+
+test("arquivos recentes de OTHER_TEMP são escaneados sem elegibilidade", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "recent-temp");
+  await fs.promises.mkdir(temp);
+  await fs.promises.writeFile(path.join(temp, "recent.tmp"), Buffer.alloc(9));
+  const result = await f.analyze({ environment: { TMP: temp } })();
+  const category = result.categories.find((item) => item.id === "OTHER_TEMP");
+  assert.equal(category.scannedBytes, 9);
+  assert.equal(category.eligibleBytes, 0);
+});
+
+test("reparse point configurado em OTHER_TEMP não é seguido", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const target = path.join(f.root, "outside");
+  const other = path.join(f.root, "configured-reparse");
+  await fs.promises.mkdir(target);
+  await fs.promises.writeFile(path.join(target, "hidden.tmp"), Buffer.alloc(99));
+  await fs.promises.symlink(target, other, "junction");
+  const result = await f.analyze({ environment: { TMP: other } })();
+  const category = result.categories.find((item) => item.id === "OTHER_TEMP");
+  assert.equal(category.additionalTempDirectoriesDetected, 0);
+  assert.ok(category.warnings.includes("reparse_point_skipped"));
 });
