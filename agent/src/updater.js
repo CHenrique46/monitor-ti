@@ -110,6 +110,19 @@ async function sendUpdateFailedToServer(ctx, details) {
     if (typeof timer.unref === "function") timer.unref();
     ws.on("open", () => {
       try {
+        ws.send(JSON.stringify({
+          type: "register",
+          data: { deviceId: ctx.deviceId, agentVersion: ctx.currentVersion, updateStatusOnly: true }
+        }));
+      } catch (e) {
+        clearTimeout(timer);
+        finish(false);
+      }
+    });
+    ws.on("message", (raw) => {
+      try {
+        const message = JSON.parse(raw.toString());
+        if (message.type !== "register_ack" || message.deviceId !== ctx.deviceId) return;
         ws.send(JSON.stringify(payload), (err) => {
           clearTimeout(timer);
           if (err) return finish(false);
