@@ -76,7 +76,7 @@ function validateSpec(spec, installDir = getInstallDir()) {
 function buildPowerShellScript() {
   const lines = [
     'param(',
-    '  [ValidateSet("install","create","update","remove","run","query","queryxml","state")]',
+    '  [ValidateSet("install","create","update","remove","run","disable","enable","query","queryxml","state")]',
     '  [string]$Mode = "install",',
     '  [string]$InstallDir = $PSScriptRoot',
     ')',
@@ -198,6 +198,8 @@ function buildPowerShellScript() {
     '    triggerType = if (Test-NotifierTaskTrigger $current $xml) { "AtLogOn" } else { "Other" }',
     '    triggerClassName = $className',
     '    triggerUserId = [string]$trigger.UserId',
+    '    state = [string]$current.State',
+    '    enabled = ([string]$current.State -ne "Disabled")',
     '    executable = [string]$exec.Command',
     '    arguments = [string]$exec.Arguments',
     '    workingDirectory = [string]$exec.WorkingDirectory',
@@ -268,6 +270,14 @@ function buildPowerShellScript() {
     'function Run-Task {',
     '  Start-ScheduledTask -TaskName $TaskName',
     '}',
+
+    'function Disable-Task {',
+    '  Disable-ScheduledTask -TaskName $TaskName | Out-Null',
+    '}',
+
+    'function Enable-Task {',
+    '  Enable-ScheduledTask -TaskName $TaskName | Out-Null',
+    '}',
     '',
     'function Query-TaskXml {',
     '  $current = Get-NotifierTask',
@@ -291,6 +301,8 @@ function buildPowerShellScript() {
     '  "update" { Install-Or-UpdateTask }',
     '  "remove" { Remove-Task }',
     '  "run" { Run-Task }',
+    '  "disable" { Disable-Task }',
+    '  "enable" { Enable-Task }',
     '  "queryxml" { Query-TaskXml }',
     '  "state" { Query-TaskState }',
     '  "query" { Query-TaskState }',
@@ -341,6 +353,14 @@ function runTask(execImpl = defaultExecFileSync) {
   return invokeTaskMode("run", execImpl);
 }
 
+function disableTask(execImpl = defaultExecFileSync) {
+  return invokeTaskMode("disable", execImpl);
+}
+
+function enableTask(execImpl = defaultExecFileSync) {
+  return invokeTaskMode("enable", execImpl);
+}
+
 function removeTask(execImpl = defaultExecFileSync) {
   return invokeTaskMode("remove", execImpl);
 }
@@ -382,6 +402,8 @@ module.exports = {
   queryTaskState,
   queryTaskXml,
   runTask,
+  disableTask,
+  enableTask,
   removeTask,
   restoreTaskXml
 };

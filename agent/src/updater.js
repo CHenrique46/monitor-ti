@@ -17,10 +17,13 @@ const { execFileSync: defaultExecFileSync } = require("child_process");
 const WebSocket = require("ws");
 const {
   createOrUpdateTask: defaultCreateOrUpdateTask,
+  queryTaskState: defaultQueryTaskState,
   queryTaskXml: defaultQueryTaskXml,
   restoreTaskXml: defaultRestoreTaskXml,
   removeTask: defaultRemoveTask,
   runTask: defaultRunTask,
+  disableTask: defaultDisableTask,
+  enableTask: defaultEnableTask,
   TASK_NAME
 } = require("./notices/task");
 
@@ -175,6 +178,41 @@ function getServiceInfo(svc) {
   }
 }
 
+function getNotifierProcesses(execFileSync = defaultExecFileSync) {
+  const ps = "Get-CimInstance Win32_Process -Filter \"Name='MonitorTI-Notifier.exe'\" | Select-Object ProcessId,Name | ConvertTo-Json -Compress";
+  try {
+    const out = execFileSync(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-Command", ps],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15000 }
+    );
+    if (!String(out || "").trim()) return [];
+    const parsed = JSON.parse(out);
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    return rows
+      .filter((row) => row && row.Name === "MonitorTI-Notifier.exe" && Number(row.ProcessId) > 0)
+      .map((row) => Number(row.ProcessId));
+  } catch (e) {
+    throw new Error("falha ao consultar processo MonitorTI-Notifier.exe: " + e.message);
+  }
+}
+
+function terminateNotifierProcessByPid(pid, execFileSync = defaultExecFileSync) {
+  if (!Number.isInteger(Number(pid)) || Number(pid) <= 0) {
+    throw new Error("PID invalido para MonitorTI-Notifier.exe");
+  }
+  execFileSync("taskkill", ["/PID", String(pid), "/F"], { stdio: "ignore", timeout: 15000 });
+}
+
+function waitForNotifierExit(queryProcesses, sleepImpl = sleep, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    if (queryProcesses().length === 0) return true;
+    sleepImpl(250);
+  }
+  return queryProcesses().length === 0;
+}
+
 // Parsing robusto baseado na flag --apply-update (arquivo único, legado).
 function parseApplyUpdateArgs(argv) {
   const flagIndex = argv.indexOf("--apply-update");
@@ -231,13 +269,21 @@ function parseApplyUpdatePackageArgs(argv) {
 }
 
 async function run(argv, deps = {}) {
+  const testMode = process.env.MTI_UPDATER_TEST === "1";
   const isPackage = argv.indexOf("--apply-update-package") >= 0;
   const execFileSync = deps.execFileSync || defaultExecFileSync;
-  const createOrUpdateTask = deps.createOrUpdateTask || defaultCreateOrUpdateTask;
-  const queryTaskXml = deps.queryTaskXml || defaultQueryTaskXml;
-  const restoreTaskXml = deps.restoreTaskXml || defaultRestoreTaskXml;
-  const removeTask = deps.removeTask || defaultRemoveTask;
-  const runTask = deps.runTask || defaultRunTask;
+  const createOrUpdateTask = deps.createOrUpdateTask || (testMode ? (() => "test") : defaultCreateOrUpdateTask);
+  const queryTaskState = deps.queryTaskState || (testMode ? (() => null) : defaultQueryTaskState);
+  const queryTaskXml = deps.queryTaskXml || (testMode ? (() => null) : defaultQueryTaskXml);
+  const restoreTaskXml = deps.restoreTaskXml || (testMode ? (() => "") : defaultRestoreTaskXml);
+  const removeTask = deps.removeTask || (testMode ? (() => {}) : defaultRemoveTask);
+  const runTask = deps.runTask || (testMode ? (() => {}) : defaultRunTask);
+  const disableTask = deps.disableTask || (testMode ? (() => {}) : defaultDisableTask);
+  const enableTask = deps.enableTask || (testMode ? (() => {}) : defaultEnableTask);
+  const queryNotifierProcesses = deps.queryNotifierProcesses || (testMode ? (() => []) : (() => getNotifierProcesses(execFileSync)));
+  const terminateNotifierProcess = deps.terminateNotifierProcess || (testMode ? (() => {}) : ((pid) => terminateNotifierProcessByPid(pid, execFileSync)));
+  const sleepImpl = deps.sleep || sleep;
+  const waitNotifierExit = deps.waitForNotifierExit || ((query) => waitForNotifierExit(query, sleepImpl, 10000));
   const updateContext = Object.assign(parseOptionalArgs(argv), deps.updateContext || {});
   const hasInteractiveSession = deps.hasInteractiveSession || (() => {
     try {
@@ -257,7 +303,6 @@ async function run(argv, deps = {}) {
     return;
   }
   const { installExe, serviceName, sourceExe, files } = parsed;
-  const testMode = process.env.MTI_UPDATER_TEST === "1";
 
   // Validações OBRIGATÓRIAS antes de parar o serviço ou tocar em qualquer arquivo.
   const problems = [];
@@ -289,10 +334,15 @@ async function run(argv, deps = {}) {
   let taskTouched = false;
   let taskAlreadyExisted = false;
   let taskSnapshot = null;
+  let taskState = null;
+  let taskDisabledByUpdater = false;
+  let taskStateRestored = false;
   let stage = "init";
 
   function captureTaskSnapshot() {
     try {
+      taskState = queryTaskState();
+      log("notifier task state captured exists=" + !!(taskState && taskState.exists === true) + " enabled=" + (taskState && taskState.exists === true ? taskState.enabled !== false : false));
       const out = queryTaskXml();
       taskSnapshot = out;
       taskAlreadyExisted = !!out;
@@ -301,8 +351,46 @@ async function run(argv, deps = {}) {
       log("falha ao capturar snapshot da task: " + formatTaskCommandFailure("queryxml", e));
       taskSnapshot = null;
       taskAlreadyExisted = false;
-      return null;
+      throw e;
     }
+  }
+
+  function restoreTaskState() {
+    if (!taskDisabledByUpdater || taskStateRestored) return;
+    enableTask();
+    log("notifier task state restored (enabled)");
+    taskStateRestored = true;
+  }
+
+  function prepareNotifier() {
+    captureTaskSnapshot();
+    if (taskState && taskState.exists === true && taskState.enabled !== false) {
+      disableTask();
+      taskDisabledByUpdater = true;
+      log("notifier task temporarily disabled: " + TASK_NAME);
+    }
+
+    let pids = queryNotifierProcesses();
+    if (pids.length === 0) {
+      log("notifier exited gracefully");
+      return;
+    }
+    log("waiting for notifier process exit");
+    if (waitNotifierExit(queryNotifierProcesses)) {
+      log("notifier exited gracefully");
+      return;
+    }
+
+    log("notifier graceful shutdown timeout");
+    pids = queryNotifierProcesses();
+    for (const pid of pids) {
+      log("forcing notifier process termination pid=" + pid);
+      terminateNotifierProcess(pid);
+    }
+    if (!waitNotifierExit(queryNotifierProcesses)) {
+      throw new Error("nao foi possivel encerrar MonitorTI-Notifier.exe");
+    }
+    log("notifier process terminated");
   }
 
   function ensureNotifierTask() {
@@ -374,6 +462,11 @@ async function run(argv, deps = {}) {
   }
 
   try {
+    if (isPackage) {
+      stage = "prepare_notifier";
+      prepareNotifier();
+    }
+
     stage = "stop_service";
     // 1) garante que o serviço está parado (idempotente)
     if (!testMode) {
@@ -457,10 +550,11 @@ async function run(argv, deps = {}) {
     log("arquivos substituidos");
 
     stage = "ensure_task";
-    // 4.5) garante a task companion antes de reiniciar o Agent.
-    captureTaskSnapshot();
-    if (!ensureNotifierTask()) {
-      throw new Error("nao foi possivel garantir a task companion");
+    // Uma task existente teve seu estado preservado; somente crie uma ausente.
+    if (isPackage && (!taskState || taskState.exists !== true)) {
+      if (!ensureNotifierTask()) {
+        throw new Error("nao foi possivel garantir a task companion");
+      }
     }
 
     stage = "restart_service";
@@ -487,10 +581,16 @@ async function run(argv, deps = {}) {
       throw new Error("servico nao iniciou apos atualizacao");
     }
 
+    if (isPackage) {
+      stage = "restore_task_state";
+      restoreTaskState();
+    }
+
     stage = "activate_companion";
     // 7) se houver sessão interativa, solicita o run da task.
-    if (!testMode || deps.allowTaskRunInTestMode) {
-      if (hasInteractiveSession()) {
+    if (isPackage && (!testMode || deps.allowTaskRunInTestMode)) {
+      const shouldRunTask = taskState ? taskState.enabled !== false : taskTouched;
+      if (shouldRunTask && hasInteractiveSession()) {
         try {
           runTask();
           log("task companion acionada apos update");
@@ -507,6 +607,13 @@ async function run(argv, deps = {}) {
   } catch (e) {
     log("ERRO na atualizacao: " + e.message);
     if (backups.length) rollback();
+    if (isPackage) {
+      try {
+        restoreTaskState();
+      } catch (restoreErr) {
+        log("falha ao restaurar estado da task companion: " + formatTaskCommandFailure("restore-state", restoreErr));
+      }
+    }
     try {
       await sendUpdateFailedToServer(updateContext, {
         stage,
