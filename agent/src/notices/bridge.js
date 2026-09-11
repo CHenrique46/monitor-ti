@@ -263,19 +263,23 @@ function createNoticeBridge(opts, deps = {}) {
     }
   }
 
-  function handleServerMessage(ws, msg) {
-    if (!msg || typeof msg !== "object") return false;
-    if (msg.type !== "notice_show") return false;
+  function handleServerMessageResult(ws, msg) {
+    if (!msg || typeof msg !== "object") return { accepted: false, reason: "INVALID_PAYLOAD" };
+    if (msg.type !== "notice_show") return { accepted: false, reason: "INVALID_PAYLOAD" };
 
     if (companionEnabled) {
-      if (!runtime) return false;
+      if (!runtime) return { accepted: false, reason: "NOTIFIER_UNAVAILABLE" };
       const payload = msg.data && typeof msg.data === "object" ? msg.data : msg;
-      return !!runtime.enqueueFromServer(payload);
+      if (typeof runtime.enqueueFromServerResult === "function") return runtime.enqueueFromServerResult(payload);
+      return { accepted: !!runtime.enqueueFromServer(payload), reason: "NOTIFIER_REJECTED" };
     }
 
-    if (!legacyNotifier) return false;
-    legacyNotifier.handleNoticeShow(ws, msg);
-    return true;
+    if (!legacyNotifier) return { accepted: false, reason: "NOTIFIER_UNAVAILABLE" };
+    return { accepted: legacyNotifier.handleNoticeShow(ws, msg) !== false };
+  }
+
+  function handleServerMessage(ws, msg) {
+    return handleServerMessageResult(ws, msg).accepted;
   }
 
   function shutdown() {
@@ -334,6 +338,7 @@ function createNoticeBridge(opts, deps = {}) {
     onWsOpen,
     onWsClose,
     handleServerMessage,
+    handleServerMessageResult,
     announceCapabilities,
     shutdownForUpdate,
     attemptCompanionTaskRunIfNeeded,

@@ -143,25 +143,28 @@ const remoteActionRuntime = remoteActions.createRemoteActionRuntime({
     : Promise.reject(new Error("Companion indisponível.")),
   notifyUser: async (notice) => {
     if (!noticesBridge || !activeWs || activeWs.readyState !== WebSocket.OPEN) {
-      return { ok: false, message: "Notifier indisponível ou Agent desconectado." };
+      return { ok: false, reason: !activeWs ? "WEBSOCKET_UNAVAILABLE" : "NOTIFIER_UNAVAILABLE", message: "Notifier indisponível ou Agent desconectado." };
     }
     if (!noticesBridge.isNotifierReady()) {
       const readiness = typeof noticesBridge.getReadinessStatus === "function"
         ? noticesBridge.getReadinessStatus()
         : { status: "UNKNOWN" };
-      return { ok: false, message: "Notifier indisponível.", reason: readiness.status };
+      return { ok: false, message: "Notifier indisponível.", reason: readiness.status || "NOTIFIER_NOT_READY" };
     }
-    const accepted = noticesBridge.handleServerMessage(activeWs, {
+    const payload = {
       type: "notice_show",
       noticeDeliveryId: crypto.randomUUID(),
       title: notice.title,
       message: notice.message,
       level: notice.level,
       timestamp: new Date().toISOString()
-    });
-    return accepted
+    };
+    const result = typeof noticesBridge.handleServerMessageResult === "function"
+      ? noticesBridge.handleServerMessageResult(activeWs, payload)
+      : { accepted: noticesBridge.handleServerMessage(activeWs, payload), reason: "NOTIFIER_REJECTED" };
+    return result.accepted
       ? { ok: true }
-      : { ok: false, message: "Notifier não aceitou a notificação." };
+      : { ok: false, reason: result.reason || "NOTIFIER_REJECTED", message: result.message || "Notifier não aceitou a notificação." };
   }
 });
 const officeInventorySender = createOfficeInventorySender({ collector: collectOfficeInventory, logEvent });

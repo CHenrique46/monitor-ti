@@ -47,3 +47,26 @@ test("mudanca de readiness e reconexao reanunciam o conjunto completo", () => {
   bridge.onWsOpen(ws);
   assert.deepEqual(sent.at(-1).data.capabilities, ["disk_cleanup_analyze"]);
 });
+
+test("resultado estruturado distingue BUSY sem alterar o retorno booleano normal", () => {
+  const bridge = createNoticeBridge({
+    configDir: "test",
+    getAppDir: () => "test",
+    getDeviceId: () => "dev-busy",
+    version: "1.1.20",
+    companionEnabled: true,
+    logEvent: () => {}
+  }, {
+    createNoticeRuntime: () => ({
+      start() {},
+      stop() {},
+      isNotifierReady: () => true,
+      enqueueFromServerResult: () => ({ accepted: false, reason: "BUSY", message: "Aviso já em exibição" })
+    })
+  });
+  const ws = { readyState: 1, send() {} };
+  const payload = { type: "notice_show", protocolVersion: 1, noticeDeliveryId: "123e4567-e89b-12d3-a456-426614174000", title: "T", message: "M", level: "info", timestamp: new Date().toISOString() };
+
+  assert.deepEqual(bridge.handleServerMessageResult(ws, payload), { accepted: false, reason: "BUSY", message: "Aviso já em exibição" });
+  assert.equal(bridge.handleServerMessage(ws, payload), false);
+});

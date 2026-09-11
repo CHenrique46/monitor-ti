@@ -482,27 +482,27 @@ function createNoticeRuntime(opts) {
     return false;
   }
 
-  function enqueueNotice(notice) {
+  function enqueueNoticeResult(notice) {
     const d = validateNoticeShow({ type: "notice_show", protocolVersion: PROTOCOL_VERSION, ...notice });
     if (!d.ok) {
       log("notice_show rejeitado: " + d.code + " " + d.message);
-      return false;
+      return { accepted: false, reason: d.code, message: d.message };
     }
 
     const n = d.value;
     const existing = state.deliveries.get(n.noticeDeliveryId);
     if (existing && (existing.state === DELIVERY_STATES.ACKNOWLEDGED || existing.state === DELIVERY_STATES.DISPLAYED)) {
-      return true;
+      return { accepted: true };
     }
-    if (state.queueSet.has(n.noticeDeliveryId)) return true;
+    if (state.queueSet.has(n.noticeDeliveryId)) return { accepted: true };
     if (state.queue.length >= 100) {
       log("QUEUE_FULL " + n.noticeDeliveryId);
-      return false;
+      return { accepted: false, reason: "QUEUE_FULL", message: "Fila de avisos cheia" };
     }
 
     if (rejectBusyDelivery(n.noticeDeliveryId, "Aviso já em exibição")) {
       log("notice_rejeitado_busy " + n.noticeDeliveryId);
-      return false;
+      return { accepted: false, reason: "BUSY", message: "Aviso já em exibição" };
     }
 
     const active = getActiveConnection();
@@ -530,14 +530,19 @@ function createNoticeRuntime(opts) {
       log("notice_queued " + n.noticeDeliveryId);
       routeNext();
       scheduleSave();
-      return true;
+      return { accepted: true };
     }
 
     state.queue.push(delivery);
     state.queueSet.add(n.noticeDeliveryId);
     log("notice_queued " + n.noticeDeliveryId);
     scheduleSave();
-    return true;
+    return { accepted: true };
+  }
+
+  // Mantém a interface booleana usada pelo fluxo normal de avisos.
+  function enqueueNotice(notice) {
+    return enqueueNoticeResult(notice).accepted;
   }
 
   function acceptNoticeReceived(conn, msg) {
@@ -927,6 +932,7 @@ function createNoticeRuntime(opts) {
     stop,
     requestShutdown,
     enqueueFromServer: enqueueNotice,
+    enqueueFromServerResult: enqueueNoticeResult,
     isNotifierReady,
     getReadinessStatus,
     getConnectionSnapshot,

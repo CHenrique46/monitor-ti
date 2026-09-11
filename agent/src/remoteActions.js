@@ -29,6 +29,8 @@ const SYSTEM_MAINTENANCE_TIMEOUTS = Object.freeze({
 });
 const MAINTENANCE_DETAIL_LIMIT = 50;
 const MAX_MAINTENANCE_RESULT_BYTES = 512 * 1024;
+const MAX_FINAL_NOTIFICATION_ATTEMPTS = 5;
+const FINAL_NOTIFICATION_RETRY_INTERVAL_MS = 30000;
 
 const MAINTENANCE_NOTIFICATION = Object.freeze({
   title: "Manutenção do computador concluída",
@@ -267,7 +269,13 @@ function limitSystemMaintenanceResult(result) {
       }))
       : [],
     notification: result && result.notification
-      ? { status: result.notification.status, message: result.notification.message }
+      ? {
+        status: result.notification.status,
+        message: result.notification.message,
+        attempts: result.notification.attempts,
+        initialReason: result.notification.initialReason,
+        delivered: result.notification.delivered
+      }
       : { status: "SKIPPED", message: "Notificação não disponível." },
     rebootRecommended: true,
     truncated: true,
@@ -451,17 +459,7 @@ function createSystemMaintenanceExecutor(deps = {}) {
       output: maintenanceOutput(dns)
     });
 
-    let notification = { status: "SKIPPED", message: "Notificação não pôde ser exibida: Notifier indisponível." };
-    if (notifyUser) {
-      try {
-        const notified = await withTimeout(notifyUser(MAINTENANCE_NOTIFICATION), timeouts.notificationMs, "timeout ao exibir notificação");
-        notification = notified && notified.ok === false
-          ? { status: "SKIPPED", message: notified.message || "Notificação não pôde ser exibida." }
-          : { status: "SUCCESS", message: "Notificação exibida ao usuário." };
-      } catch (err) {
-        notification = { status: "SKIPPED", message: `Notificação não pôde ser exibida: ${err.message}` };
-      }
-    }
+    const notification = await notifyWithRetry();
 
     return {
       overallStatus: hasFailure ? "FAILED" : "SUCCESS",
@@ -731,6 +729,8 @@ module.exports = {
   createSystemMaintenanceExecutor,
   limitSystemMaintenanceResult,
   MAX_MAINTENANCE_RESULT_BYTES,
+  MAX_FINAL_NOTIFICATION_ATTEMPTS,
+  FINAL_NOTIFICATION_RETRY_INTERVAL_MS,
   createRemoteActionRuntime,
   ...defaultRuntime
 };

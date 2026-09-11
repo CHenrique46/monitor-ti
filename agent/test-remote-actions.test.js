@@ -268,6 +268,7 @@ test("system_maintenance executa todas as etapas sequencialmente", async () => {
   assert.equal(result.steps.every((step) => step.status === "SUCCESS"), true);
   assert.equal(result.rebootRecommended, true);
   assert.equal(result.notification.status, "SUCCESS");
+  assert.equal(result.notification.attempts, 1);
 });
 
 test("system_maintenance registra limpeza parcial por arquivo bloqueado", async () => {
@@ -390,6 +391,68 @@ test("system_maintenance nao falha globalmente se o Notifier estiver indisponive
   assert.equal(result.overallStatus, "SUCCESS");
   assert.equal(result.notification.status, "SKIPPED");
   assert.match(result.notification.message, /Notifier/);
+});
+
+test("system_maintenance repete somente a notificacao quando o Notifier esta BUSY", async () => {
+  const calls = [];
+  let notifications = 0;
+  const result = await createSystemMaintenanceExecutor(maintenanceSuccessDeps({
+    cleanupTemp: async () => { calls.push("cleanup"); return { roots: [], blocked: [], errors: [] }; },
+    runSfc: async () => { calls.push("sfc"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; },
+    runDism: async () => { calls.push("dism"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; },
+    flushDns: async () => { calls.push("dns"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; },
+    notifyUser: async () => (++notifications === 1 ? { ok: false, reason: "BUSY", message: "ocupado" } : { ok: true }),
+    sleep: async (delayMs) => assert.equal(delayMs, 30000)
+  }))();
+
+  assert.equal(result.overallStatus, "SUCCESS");
+  assert.deepEqual(calls, ["cleanup", "sfc", "dism", "dns"]);
+  assert.equal(result.notification.status, "SUCCESS");
+  assert.equal(result.notification.attempts, 2);
+  assert.equal(result.notification.initialReason, "BUSY");
+  assert.equal(result.notification.delivered, true);
+});
+
+test("system_maintenance limita retries BUSY sem repetir etapas tecnicas", async () => {
+  const calls = [];
+  let notifications = 0;
+  const result = await createSystemMaintenanceExecutor(maintenanceSuccessDeps({
+    cleanupTemp: async () => { calls.push("cleanup"); return { roots: [], blocked: [], errors: [] }; },
+    runSfc: async () => { calls.push("sfc"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; },
+    runDism: async () => { calls.push("dism"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; },
+    flushDns: async () => { calls.push("dns"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; },
+    notifyUser: async () => { notifications += 1; return { ok: false, reason: "BUSY", message: "ocupado" }; },
+    sleep: async () => {}
+  }))();
+
+  assert.equal(result.overallStatus, "SUCCESS");
+  assert.deepEqual(calls, ["cleanup", "sfc", "dism", "dns"]);
+  assert.equal(notifications, 5);
+  assert.equal(result.notification.status, "SKIPPED");
+  assert.equal(result.notification.attempts, 5);
+  assert.equal(result.notification.initialReason, "BUSY");
+  assert.match(result.notification.message, /5 tentativas/);
+});
+
+test("system_maintenance nao repete para Notifier indisponivel ou erro inesperado", async () => {
+  for (const notified of [
+    { ok: false, reason: "NOTIFIER_NOT_READY", message: "indisponivel" },
+    new Error("falha inesperada")
+  ]) {
+    let notifications = 0;
+    const result = await createSystemMaintenanceExecutor(maintenanceSuccessDeps({
+      notifyUser: async () => {
+        notifications += 1;
+        if (notified instanceof Error) throw notified;
+        return notified;
+      },
+      sleep: async () => { throw new Error("nao deveria aguardar"); }
+    }))();
+    assert.equal(notifications, 1);
+    assert.equal(result.overallStatus, "SUCCESS");
+    assert.equal(result.notification.status, "SKIPPED");
+    assert.equal(result.notification.attempts, 1);
+  }
 });
 
 test("system_maintenance marca result.truncated e preserva etapas quando resultado excede o limite", () => {
