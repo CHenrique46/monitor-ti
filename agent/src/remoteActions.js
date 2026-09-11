@@ -393,6 +393,48 @@ function createSystemMaintenanceExecutor(deps = {}) {
   const runDism = deps.runDism || (() => runTool("dism.exe", ["/Online", "/Cleanup-Image", "/RestoreHealth"], timeouts.dismMs));
   const flushDns = deps.flushDns || (() => runTool("ipconfig.exe", ["/flushdns"], timeouts.dnsFlushMs));
   const notifyUser = deps.notifyUser;
+  const sleep = deps.sleep || ((delayMs) => new Promise((resolve) => {
+    const timer = setTimeout(resolve, delayMs);
+    if (typeof timer.unref === "function") timer.unref();
+  }));
+
+  async function notifyWithRetry() {
+    if (!notifyUser) {
+      return { status: "SKIPPED", message: "Notificação não pôde ser exibida: Notifier indisponível.", attempts: 0, initialReason: "NOTIFIER_UNAVAILABLE", delivered: false };
+    }
+
+    let attempts = 0;
+    let initialReason = null;
+    while (attempts < MAX_FINAL_NOTIFICATION_ATTEMPTS) {
+      attempts += 1;
+      let notified;
+      try {
+        notified = await withTimeout(notifyUser(MAINTENANCE_NOTIFICATION), timeouts.notificationMs, "timeout ao exibir notificação");
+      } catch (err) {
+        return { status: "SKIPPED", message: `Notificação não pôde ser exibida: ${err.message}`, attempts, initialReason: initialReason || "UNEXPECTED_ERROR", delivered: false };
+      }
+
+      if (notified && notified.ok !== false) {
+        return { status: "SUCCESS", message: "Notificação exibida ao usuário.", attempts, initialReason, delivered: true };
+      }
+
+      const reason = notified && notified.reason ? notified.reason : "NOTIFIER_REJECTED";
+      initialReason = initialReason || reason;
+      if (reason !== "BUSY") {
+        return { status: "SKIPPED", message: (notified && notified.message) || "Notifier não aceitou a notificação.", attempts, initialReason, delivered: false };
+      }
+      if (attempts >= MAX_FINAL_NOTIFICATION_ATTEMPTS) break;
+      await sleep(FINAL_NOTIFICATION_RETRY_INTERVAL_MS);
+    }
+
+    return {
+      status: "SKIPPED",
+      message: `Notifier permaneceu ocupado após ${attempts} tentativas.`,
+      attempts,
+      initialReason,
+      delivered: false
+    };
+  }
 
   return async function executeSystemMaintenance() {
     const steps = [];
