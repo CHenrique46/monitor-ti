@@ -8,6 +8,18 @@ const agentUpdates = require("../services/agentUpdates.service");
 // Quando definida (ex.: via env MIN_UPDATE_VERSION=1.0.0), agents abaixo dela são rejeitados.
 const MIN_UPDATE_VERSION = process.env.MIN_UPDATE_VERSION || null;
 
+function hasUsableReleaseArtifact(releases, release, agentVersion) {
+  if (!release || !releases.hasArtifact(release, agentVersion)) return false;
+  if (compareVersion(agentVersion, "1.1.1") < 0) return true;
+  if (!release.packageName || !release.packageSha256 || !Number.isInteger(release.packageSize) || release.packageSize <= 0) return false;
+  const files = release.manifest && Array.isArray(release.manifest.files) ? release.manifest.files : [];
+  if (release.manifest.version !== release.version) return false;
+  return ["MonitorTI-Agent.exe", "MonitorTI-Notifier.exe"].every((name) => {
+    const file = files.find((item) => item && item.name === name);
+    return !!file && typeof file.sha256 === "string" && Number.isInteger(file.size) && file.size > 0;
+  });
+}
+
 async function trigger(req, res, deps = {}) {
   const db = deps.prisma || prisma;
   const releases = deps.releasesService || releasesService;
@@ -28,7 +40,15 @@ async function trigger(req, res, deps = {}) {
       });
     }
 
-    const release = await releases.getActiveRelease();
+    const requestedVersion = req.body && req.body.version;
+    if (requestedVersion !== undefined && typeof requestedVersion !== "string") {
+      return res.status(400).json({ erro: "Versao de release invalida." });
+    }
+    const release = requestedVersion === undefined
+      ? await releases.getActiveRelease()
+      : await releases.getRelease(requestedVersion.trim());
+    if (requestedVersion !== undefined && !release)
+      return res.status(404).json({ erro: "Release nao encontrada." });
     if (!release)
       return res.status(409).json({ erro: "Nenhuma release disponivel no servidor." });
     if (c.status !== "online")
@@ -39,7 +59,7 @@ async function trigger(req, res, deps = {}) {
     if (versionComparison >= 0)
       return res.status(409).json({ erro: versionComparison === 0 ? "Ja esta na versao mais recente." : "Downgrade de Agent nao permitido." });
 
-    if (!releases.hasArtifact(release, c.agentVersion))
+    if (!hasUsableReleaseArtifact(releases, release, c.agentVersion))
       return res.status(409).json({ erro: "Release registrada, mas artefato fisico indisponivel." });
 
     const created = await agentUpdates.createPending(db, {
@@ -61,7 +81,7 @@ async function trigger(req, res, deps = {}) {
     }
 
     console.log(
-      `[Monitor TI] atualizacao solicitada: ${c.hostname} -> ${release.version}`
+      `[Monitor TI] atualizacao solicitada: ${c.hostname} -> ${release.version} (releaseId=${release.id})`
     );
     return res.status(202).json({ ok: true, version: release.version });
   } catch (err) {

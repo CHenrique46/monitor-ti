@@ -7,6 +7,7 @@ const controller = require("./src/controllers/agentUpdate.controller");
 const tracking = require("./src/services/agentUpdates.service");
 const agentServer = require("./src/ws/agentServer");
 const { persistReleaseRecord } = require("./src/services/agentReleaseRegistration.service");
+const { requireAdmin } = require("./src/auth/middleware");
 
 function response() {
   return {
@@ -45,7 +46,7 @@ function baseDb(computer) {
 test("semver bloqueia igualdade e downgrade e permite upgrade", async () => {
   const c = { id: 162, deviceId: "dev-162", hostname: "PC-162", status: "online", agentVersion: "1.1.19" };
   const db = baseDb(c);
-  const release = { id: 10, version: "1.1.22", packageName: "pkg.zip", packageSha256: "sha", packageSize: 10 };
+  const release = { id: 10, version: "1.1.22", packageName: "pkg.zip", packageSha256: "sha", packageSize: 10, manifest: { version: "1.1.22", files: [{ name: "MonitorTI-Agent.exe", sha256: "agent", size: 1 }, { name: "MonitorTI-Notifier.exe", sha256: "notifier", size: 1 }] } };
   const sent = [];
   const deps = { prisma: db, releasesService: { getActiveRelease: async () => release, hasArtifact: () => true }, agentServer: { sendToAgent: (device, command) => { sent.push({ device, command }); return true; } } };
   const ok = response(); await request({ params: { id: "162" }, humanUser: { username: "admin" }, deps }, ok);
@@ -53,12 +54,110 @@ test("semver bloqueia igualdade e downgrade e permite upgrade", async () => {
 
   for (const [current, target] of [["1.1.22", "1.1.22"], ["1.1.22", "1.1.19"], ["1.1.9", "1.1.10"]]) {
     const db2 = baseDb({ ...c, agentVersion: current });
-    const release2 = { ...release, version: target };
+    const release2 = { ...release, version: target, manifest: { ...release.manifest, version: target } };
     const out = response();
     await request({ params: { id: "162" }, humanUser: { username: "admin" }, deps: { ...deps, prisma: db2, releasesService: { getActiveRelease: async () => release2, hasArtifact: () => true } } }, out);
     assert.equal(out.code, current === "1.1.9" ? 202 : 409);
   }
   assert.equal(tracking.toPublic(db.rows[0]).persistentStatus, "PENDING");
+});
+
+function packageRelease(id, version, active = false) {
+  return {
+    id,
+    version,
+    active,
+    fileName: "MonitorTI-Agent.exe",
+    sha256: "agent-sha",
+    size: 100,
+    packageName: `MonitorTI-Agent-${version}.zip`,
+    packageSha256: "package-sha",
+    packageSize: 200,
+    manifest: {
+      version,
+      files: [
+        { name: "MonitorTI-Agent.exe", sha256: "agent-sha", size: 100 },
+        { name: "MonitorTI-Notifier.exe", sha256: "notifier-sha", size: 50 }
+      ]
+    }
+  };
+}
+
+test("update sem version usa a release ativa atual", async () => {
+  const db = baseDb({ id: 15, deviceId: "anderson", hostname: "Anderson", status: "online", agentVersion: "1.1.23" });
+  const active = packageRelease(24, "1.1.24", true);
+  let activeCalls = 0;
+  const sent = [];
+  const out = response();
+  await request({ params: { id: "15" }, body: {}, humanUser: { username: "admin" }, deps: {
+    prisma: db,
+    releasesService: { getActiveRelease: async () => { activeCalls += 1; return active; }, hasArtifact: () => true },
+    agentServer: { sendToAgent: (device, command) => { sent.push({ device, command }); return true; } }
+  } }, out);
+  assert.equal(out.code, 202);
+  assert.equal(activeCalls, 1);
+  assert.equal(sent[0].command.version, "1.1.24");
+});
+
+test("update com version explicita usa release inactive e registra selecao", async () => {
+  const db = baseDb({ id: 15, deviceId: "anderson", hostname: "Anderson", status: "online", agentVersion: "1.1.23" });
+  const inactive = packageRelease(25, "1.1.24", false);
+  let activeCalls = 0;
+  let requested = null;
+  const sent = [];
+  const out = response();
+  await request({ params: { id: "15" }, body: { version: "1.1.24" }, humanUser: { username: "admin" }, deps: {
+    prisma: db,
+    releasesService: {
+      getActiveRelease: async () => { activeCalls += 1; return packageRelease(24, "1.1.23", true); },
+      getRelease: async (version) => { requested = version; return inactive; },
+      hasArtifact: () => true
+    },
+    agentServer: { sendToAgent: (device, command) => { sent.push({ device, command }); return true; } }
+  } }, out);
+  assert.equal(out.code, 202);
+  assert.equal(activeCalls, 0);
+  assert.equal(requested, "1.1.24");
+  assert.equal(sent[0].command.version, "1.1.24");
+  assert.equal(db.rows.length, 1);
+  assert.deepEqual([...new Set(db.rows.map((row) => row.computadorId))], [15]);
+  assert.equal(db.rows[0].releaseId, 25);
+  assert.equal(db.rows[0].versaoDestino, "1.1.24");
+  assert.equal(inactive.active, false);
+});
+
+test("update com version inexistente e rejeitado", async () => {
+  const db = baseDb({ id: 15, deviceId: "anderson", hostname: "Anderson", status: "online", agentVersion: "1.1.23" });
+  let sent = 0;
+  const out = response();
+  await request({ params: { id: "15" }, body: { version: "9.9.9" }, humanUser: { username: "admin" }, deps: {
+    prisma: db,
+    releasesService: { getRelease: async () => null, hasArtifact: () => true },
+    agentServer: { sendToAgent: () => { sent += 1; return true; } }
+  } }, out);
+  assert.equal(out.code, 404);
+  assert.equal(sent, 0);
+  assert.equal(db.rows.length, 0);
+});
+
+test("update rejeita release explicita sem pacote valido", async () => {
+  const db = baseDb({ id: 15, deviceId: "anderson", hostname: "Anderson", status: "online", agentVersion: "1.1.23" });
+  const out = response();
+  await request({ params: { id: "15" }, body: { version: "1.1.24" }, humanUser: { username: "admin" }, deps: {
+    prisma: db,
+    releasesService: { getRelease: async () => ({ id: 25, version: "1.1.24", packageName: null }), hasArtifact: () => true },
+    agentServer: { sendToAgent: () => true }
+  } }, out);
+  assert.equal(out.code, 409);
+  assert.equal(db.rows.length, 0);
+});
+
+test("viewer nao pode solicitar release explicita", () => {
+  const out = response();
+  let called = false;
+  requireAdmin()({ humanUser: { username: "viewer", role: "VIEWER" }, body: { version: "1.1.24" } }, out, () => { called = true; });
+  assert.equal(out.code, 403);
+  assert.equal(called, false);
 });
 
 test("lock por computador é atômico no armazenamento", async () => {
