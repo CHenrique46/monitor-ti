@@ -5,7 +5,8 @@ const navigationItems = [
   { key: 'overview', to: '/', label: 'Visão Geral', end: true },
   { key: 'alerts', to: '/avisos', label: 'Avisos' },
   { key: 'maintenance', to: '/manutencao-programada', label: 'Manutenção Programada' },
-  { key: 'inventory', to: '/inventario', label: 'Inventário' }
+  { key: 'inventory', to: '/inventario', label: 'Inventário' },
+  { key: 'certificates', to: '/certificados', label: 'Certificados', adminOnly: true }
 ]
 
 export default function SiteNav() {
@@ -22,7 +23,7 @@ export default function SiteNav() {
         </span>
       </Link>
       <nav className="site-nav" aria-label="Navegação principal">
-        {navigationItems.map((item) => (
+        {navigationItems.filter((item) => !item.adminOnly || user.role === 'ADMIN').map((item) => (
           <NavLink
             key={item.key}
             to={item.to}
