@@ -625,6 +625,26 @@ p {
   .remote-actions-history { max-height: 300px; }
 }
 
+.portal-shell { align-items: center; background: #0f172a; display: flex; justify-content: center; min-height: 100vh; padding: 24px; }
+.portal-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 680px; padding: 30px; width: 100%; }
+.portal-form { display: grid; gap: 8px; margin-top: 24px; }
+.portal-form select, .portal-form textarea { background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #e2e8f0; font: inherit; padding: 10px; }
+.portal-form textarea { resize: vertical; }
+.notice.success { background: rgba(34, 197, 94, .12); border-color: #22c55e; color: #86efac; }
+.certificate-request-list { display: grid; gap: 10px; }
+.certificate-request-row { align-items: center; background: #1e293b; border: 1px solid #334155; border-radius: 8px; display: flex; gap: 18px; justify-content: space-between; padding: 16px; }
+.certificate-request-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.certificate-request-actions button { margin: 0; }
+.request-aprovada { color: #86efac; }
+.request-negada { color: #fca5a5; }
+.portal-requests { border-top: 1px solid #334155; margin-top: 28px; padding-top: 18px; }
+.portal-requests h2 { margin: 0 0 12px; }
+.portal-request { align-items: center; border-bottom: 1px solid #334155; display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 0; }
+.portal-request small { color: #94a3b8; flex-basis: 100%; }
+.request-state { font-size: .78rem; margin-left: auto; }
+.request-pendente { color: #fbbf24; }
+.portal-form button:disabled { cursor: wait; opacity: .65; }
+@media (max-width: 600px) { .certificate-request-row { align-items: stretch; flex-direction: column; } .certificate-request-actions { justify-content: flex-start; } }
 @media (min-width: 601px) and (max-width: 900px) {
   .operational-summary {
     grid-template-columns: repeat(3, minmax(0, 1fr));

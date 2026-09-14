@@ -99,7 +99,7 @@ export default function Certificados() {
 
   return <main className="container certificates-page">
     <SiteNav />
-    <section className="certificates-heading"><div><p className="eyebrow">Catálogo interno</p><h1>Certificados de clientes</h1><p className="muted">Consulte os certificados disponíveis no catálogo interno.</p></div><span className="certificate-admin-badge">ADMIN</span></section>
+    <section className="certificates-heading"><div><p className="eyebrow">Catálogo interno</p><h1>Certificados de clientes</h1><p className="muted">Consulte os certificados disponíveis no catálogo interno.</p></div><div><a className="details-link" href="/certificados/solicitacoes">Solicitações</a><span className="certificate-admin-badge">ADMIN</span></div></section>
     <section className={`summary certificate-summary ${summaryLoading ? 'is-loading' : ''}`} aria-label="Resumo do catálogo">
       <SummaryCard label="Total no catálogo" value={summary.total ?? '—'} />
       <SummaryCard label="A1 2025" value={summary.year2025 ?? '—'} />

@@ -8,6 +8,10 @@ function getCertificadosClientesPath() {
   return String(process.env.CERTIFICADOS_CLIENTES_PATH || "").trim();
 }
 
+function getPortalCookieSecure() {
+  return String(process.env.PORTAL_COOKIE_SECURE || "").trim().toLowerCase() === "true";
+}
+
 function getAgentServerPublicUrl() {
   const raw = String(process.env.AGENT_SERVER_PUBLIC_URL || "").trim();
   if (!raw) {
@@ -34,4 +38,4 @@ function getAgentServerPublicUrl() {
   return raw.replace(/\/+$/, "");
 }
 
-module.exports = { getAgentServerPublicUrl, getInventoryExcelPath, getCertificadosClientesPath };
+module.exports = { getAgentServerPublicUrl, getInventoryExcelPath, getCertificadosClientesPath, getPortalCookieSecure };

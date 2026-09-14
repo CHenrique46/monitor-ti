@@ -6,7 +6,8 @@ const navigationItems = [
   { key: 'alerts', to: '/avisos', label: 'Avisos' },
   { key: 'maintenance', to: '/manutencao-programada', label: 'Manutenção Programada' },
   { key: 'inventory', to: '/inventario', label: 'Inventário' },
-  { key: 'certificates', to: '/certificados', label: 'Certificados', adminOnly: true }
+  { key: 'certificates', to: '/certificados', label: 'Certificados', adminOnly: true },
+  { key: 'certificate-requests', to: '/certificados/solicitacoes', label: 'Solicitações', adminOnly: true }
 ]
 
 export default function SiteNav() {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Routes, Route, useNavigate } from 'react-router-dom'
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import Dashboard from './components/Dashboard'
 import ComputerDetails from './components/ComputerDetails'
 import Avisos from './components/Avisos'
@@ -9,9 +9,12 @@ import Certificados from './components/Certificados'
 import Login from './components/Login'
 import { API_URL } from './config'
 import { AuthContext } from './auth/AuthContext'
+import PortalCertificados from './components/PortalCertificados'
+import SolicitacoesCertificado from './components/SolicitacoesCertificado'
 
 export default function App() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [connectionError, setConnectionError] = useState(false)
@@ -48,6 +51,7 @@ export default function App() {
     }
   }
 
+  if (location.pathname.startsWith('/portal')) return <Routes><Route path="/portal/certificados" element={<PortalCertificados />} /></Routes>
   if (loading) return <main className="login-shell"><p className="login-loading">Verificando sessão...</p></main>
   if (!user) return <Login connectionError={connectionError} onAuthenticated={(authenticatedUser) => { setConnectionError(false); setUser(authenticatedUser); navigate('/') }} />
 
@@ -59,6 +63,7 @@ export default function App() {
         <Route path="/manutencao-programada" element={<MaintenanceSchedules />} />
         <Route path="/inventario" element={<Inventory />} />
         <Route path="/certificados" element={<Certificados />} />
+        <Route path="/certificados/solicitacoes" element={<SolicitacoesCertificado />} />
         <Route path="/computadores/:id" element={<ComputerDetails />} />
       </Routes>
     </AuthContext.Provider>

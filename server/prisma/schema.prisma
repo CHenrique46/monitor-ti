@@ -52,6 +52,7 @@ model Computador {
   inventoryBaseline ComputerInventoryBaseline?
   excelInventorySyncs ExcelInventorySync[]
   agentUpdates      AgentUpdate[]
+  solicitacoesCertificado SolicitacaoCertificado[]
 }
 
 model ComputerInventoryBaseline {
@@ -300,10 +301,37 @@ model Certificado {
   ativo                     Boolean  @default(true)
   criadoEm                  DateTime @default(now())
   atualizadoEm              DateTime @updatedAt
+  solicitacoes              SolicitacaoCertificado[]
 
   @@index([nomePesquisaNormalizado])
   @@index([documentoNormalizado])
   @@index([ativo, anoReferencia])
+}
+
+model SolicitacaoCertificado {
+  id                       Int      @id @default(autoincrement())
+  protocolo                String   @unique
+  certificadoId            Int
+  computadorId             Int
+  hostnameRegistrado       String?
+  usuarioWindowsRegistrado String?
+  ipRegistrado             String
+  motivo                   String?
+  estado                   String   @default("PENDENTE") // PENDENTE|APROVADA|NEGADA
+  solicitadoEm             DateTime @default(now())
+  analisadoEm              DateTime?
+  analisadoPor             String?
+  motivoNegativa           String?
+  atualizadoEm             DateTime @updatedAt
+
+  certificado           Certificado @relation(fields: [certificadoId], references: [id], onDelete: Restrict)
+  computador            Computador @relation(fields: [computadorId], references: [id], onDelete: Restrict)
+
+  @@index([certificadoId])
+  @@index([computadorId])
+  @@index([estado])
+  @@index([solicitadoEm])
+  @@index([computadorId, solicitadoEm])
 }
 
 model OfficeInstallation {

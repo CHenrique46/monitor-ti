@@ -15,6 +15,7 @@ const wallpaperAssetRoutes = require("./routes/wallpaperAsset.routes");
 const maintenanceSchedulerRoutes = require("./routes/maintenanceScheduler.routes");
 const maintenanceSchedulerCanaryRoutes = require("./routes/maintenanceSchedulerCanary.routes");
 const certificadosRoutes = require("./routes/certificados.routes");
+const { createPortalRouter } = require("./routes/portal.routes");
 const { createAuthRouter } = require("./routes/auth.routes");
 const { createAuthService } = require("./auth/service");
 const { requireHumanSession, requireAdmin } = require("./auth/middleware");
@@ -28,10 +29,12 @@ const historicoService = require("./services/historico.service");
 const avisosService = require("./services/avisos.service");
 const maintenanceScheduler = require("./services/maintenanceScheduler.service");
 const { createExcelSyncWorker } = require("./inventory/excelSyncWorker");
+const { createPortalService } = require("./services/portal.service");
 
 const app = express();
 const authService = createAuthService();
 const excelSyncWorker = createExcelSyncWorker({ db: prisma, log: (message) => logEvent(`[Monitor TI] ${message}`) });
+const portalService = createPortalService({ db: prisma });
 
 app.use(express.json());
 
@@ -45,6 +48,9 @@ app.use("/api/alertas", humanSession, alertasRoutes);
 app.use("/api/computadores", humanSession, alertasRoutes);
 app.use("/api/agent", createAgentRouter({ authService }));
 app.use("/api/avisos", humanSession, avisosRoutes);
+const portalRoutes = createPortalRouter({ service: portalService, humanSession, requireAdmin });
+app.use("/api/portal", portalRoutes.portal);
+app.use("/api/certificados", portalRoutes.admin);
 app.use("/api/certificados", humanSession, certificadosRoutes);
 app.use("/api/computadores", humanSession, remoteActionsRoutes);
 app.use("/api/assets", wallpaperAssetRoutes);
