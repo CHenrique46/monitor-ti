@@ -11,7 +11,7 @@ import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from '../utils/upti
 import { compareVersions, isVersionNewer } from '../utils/version'
 import { activationStatus, displayProductName, licenseType, normalizeOffice, partialKey } from '../utils/office'
 import { buildInventoryBaselinePayload, canAddInventory } from '../utils/inventoryBaseline'
-import { buildAgentUpdateRequest, releaseStatusLabel, selectDefaultAgentRelease, sortAgentReleases } from '../utils/agentReleases'
+import { buildAgentUpdateRequest, preserveSelectedAgentRelease, releaseStatusLabel, sortAgentReleases } from '../utils/agentReleases'
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
@@ -233,7 +233,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
         const catalog = sortAgentReleases(await r.json())
         if (active) {
           setReleases(catalog)
-          setRelease(selectDefaultAgentRelease(catalog))
+          setRelease((current) => preserveSelectedAgentRelease(current, catalog))
         }
       } catch {
         if (active) {

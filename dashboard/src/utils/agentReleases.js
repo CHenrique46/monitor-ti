@@ -8,6 +8,14 @@ export function selectDefaultAgentRelease(releases = []) {
   return releases.find((release) => release.active) || null
 }
 
+export function preserveSelectedAgentRelease(selectedRelease, releases = []) {
+  if (selectedRelease) {
+    const current = releases.find((release) => release.version === selectedRelease.version)
+    if (current) return current
+  }
+  return selectDefaultAgentRelease(releases)
+}
+
 export function releaseStatusLabel(release) {
   return release?.active ? 'Ativa' : 'Inativa'
 }

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { buildAgentUpdateRequest, releaseStatusLabel, selectDefaultAgentRelease, sortAgentReleases } from '../src/utils/agentReleases.js'
+import { buildAgentUpdateRequest, preserveSelectedAgentRelease, releaseStatusLabel, selectDefaultAgentRelease, sortAgentReleases } from '../src/utils/agentReleases.js'
 
 const releases = [
   { id: 24, version: '1.1.23', active: true },
@@ -13,6 +13,26 @@ test('ordena releases semanticamente e seleciona a ativa por padrão', () => {
   assert.deepEqual(sortAgentReleases(releases).map((release) => release.version), ['1.1.24', '1.1.23', '1.1.9'])
   assert.equal(selectDefaultAgentRelease(releases).version, '1.1.23')
   assert.equal(releaseStatusLabel(releases[1]), 'Inativa')
+})
+
+test('preserva seleção manual válida após refresh do catálogo', () => {
+  const catalog = [
+    { id: 26, version: '1.1.24', active: false },
+    { id: 24, version: '1.1.23', active: true }
+  ]
+  const initial = selectDefaultAgentRelease(catalog)
+  const manual = catalog[0]
+  const refreshed = preserveSelectedAgentRelease(manual, [...catalog].reverse())
+  assert.equal(initial.version, '1.1.23')
+  assert.equal(refreshed.version, '1.1.24')
+  assert.equal(releaseStatusLabel(refreshed), 'Inativa')
+  assert.equal(buildAgentUpdateRequest(refreshed.version).body, JSON.stringify({ version: '1.1.24' }))
+})
+
+test('volta à release ativa somente quando a seleção desaparece', () => {
+  const selected = { id: 26, version: '1.1.24', active: false }
+  const fallback = preserveSelectedAgentRelease(selected, [{ id: 24, version: '1.1.23', active: true }])
+  assert.equal(fallback.version, '1.1.23')
 })
 
 test('request de update sempre carrega a versão explícita', () => {
