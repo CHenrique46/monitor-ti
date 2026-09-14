@@ -1,7 +1,25 @@
 const releasesService = require("../services/releases.service");
+const prisma = require("../prisma");
 
 function badVersion(res) {
   return res.status(400).json({ erro: "Versao invalida." });
+}
+
+async function list(req, res) {
+  try {
+    const releases = await prisma.agentRelease.findMany({
+      select: { id: true, version: true, active: true, releaseDate: true },
+      orderBy: { releaseDate: "desc" }
+    });
+    return res.status(200).json(releases.map((release) => ({
+      id: release.id,
+      version: release.version,
+      active: release.active,
+      createdAt: release.releaseDate
+    })));
+  } catch (err) {
+    return res.status(500).json({ erro: err.message });
+  }
 }
 
 async function latest(req, res) {
@@ -48,4 +66,4 @@ async function downloadPackage(req, res) {
   }
 }
 
-module.exports = { latest, getVersion, download, downloadPackage };
+module.exports = { list, latest, getVersion, download, downloadPackage };

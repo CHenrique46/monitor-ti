@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import SiteNav from './SiteNav'
 import MetricChart from './MetricChart'
@@ -11,6 +11,7 @@ import { getUptimeStatus, UPTIME_STATUS, uptimeStatusLabel } from '../utils/upti
 import { compareVersions, isVersionNewer } from '../utils/version'
 import { activationStatus, displayProductName, licenseType, normalizeOffice, partialKey } from '../utils/office'
 import { buildInventoryBaselinePayload, canAddInventory } from '../utils/inventoryBaseline'
+import { buildAgentUpdateRequest, releaseStatusLabel, selectDefaultAgentRelease, sortAgentReleases } from '../utils/agentReleases'
 
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
@@ -108,8 +109,8 @@ function ActionItem({ action }) {
   </details>
 }
 
-function ConfirmBox({ children, onCancel, onConfirm, confirmLabel }) {
-  return <div className="confirm-box"><p>{children}</p><div className="confirm-actions"><button type="button" className="btn-cancel" onClick={onCancel}>Cancelar</button><button type="button" className="btn-update" onClick={onConfirm}>{confirmLabel}</button></div></div>
+function ConfirmBox({ children, onCancel, onConfirm, confirmLabel, disabled = false }) {
+  return <div className="confirm-box"><p>{children}</p><div className="confirm-actions"><button type="button" className="btn-cancel" onClick={onCancel} disabled={disabled}>Cancelar</button><button type="button" className="btn-update" onClick={onConfirm} disabled={disabled}>{confirmLabel}</button></div></div>
 }
 
 function AddInventoryModal({ computer, form, saving, error, onChange, onCancel, onConfirm }) {
@@ -141,6 +142,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const [metricas, setMetricas] = useState(null)
   const [alertas, setAlertas] = useState([])
   const [release, setRelease] = useState(null)
+  const [releases, setReleases] = useState([])
   const [updateStatus, setUpdateStatus] = useState(null)
   const [confirm, setConfirm] = useState(false)
   const [remoteActions, setRemoteActions] = useState([])
@@ -163,6 +165,8 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   const [addInventoryError, setAddInventoryError] = useState(null)
   const [diskCleanupError, setDiskCleanupError] = useState(null)
   const [diskCapabilities, setDiskCapabilities] = useState([])
+  const [updateSubmitting, setUpdateSubmitting] = useState(false)
+  const updateRequestInFlight = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -217,15 +221,30 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
   }, [id])
 
   useEffect(() => {
-    if (drawer) {
-      setRelease(latestVersion ? { version: latestVersion } : null)
-      return undefined
-    }
     let active = true
-    const loadRelease = async () => { try { const r = await apiFetch(`${API_URL}/api/agent/releases/latest`); if (active) setRelease(r.ok ? await r.json() : null) } catch { if (active) setRelease(null) } }
+    const loadRelease = async () => {
+      if (!isAdmin) {
+        if (active) setRelease(latestVersion ? { version: latestVersion, active: true } : null)
+        return
+      }
+      try {
+        const r = await apiFetch(`${API_URL}/api/agent/releases`)
+        if (!r.ok) throw new Error('Falha ao carregar releases')
+        const catalog = sortAgentReleases(await r.json())
+        if (active) {
+          setReleases(catalog)
+          setRelease(selectDefaultAgentRelease(catalog))
+        }
+      } catch {
+        if (active) {
+          setReleases([])
+          setRelease(latestVersion ? { version: latestVersion, active: true } : null)
+        }
+      }
+    }
     loadRelease(); const interval = setInterval(loadRelease, 30000)
     return () => { active = false; clearInterval(interval) }
-  }, [id, drawer, latestVersion])
+  }, [isAdmin, latestVersion])
 
   useEffect(() => {
     if (!release) return undefined
@@ -259,7 +278,18 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
       if (body.execution) setRemoteActions((prev) => [body.execution, ...prev.filter((a) => a.actionExecutionId !== body.execution.actionExecutionId)])
     } catch { onError('Não foi possível concluir a ação.') }
   }
-  const triggerUpdate = async () => { setConfirm(false); await request('/agent-update', { method: 'POST' }, (message) => setUpdateStatus({ status: 'update_failed', message })) }
+  const triggerUpdate = async () => {
+    if (updateRequestInFlight.current || !release?.version) return
+    updateRequestInFlight.current = true
+    setConfirm(false)
+    setUpdateSubmitting(true)
+    try {
+      await request('/agent-update', buildAgentUpdateRequest(release.version), (message) => setUpdateStatus({ status: 'update_failed', message }))
+    } finally {
+      updateRequestInFlight.current = false
+      setUpdateSubmitting(false)
+    }
+  }
   const triggerSpoolerReset = async () => { setSpoolerConfirm(false); await request('/actions/spooler-reset', { method: 'POST' }, () => {}) }
   const triggerServiceRestart = async () => { setServiceRestartConfirm(false); setServiceRestartError(null); await request('/actions/service-restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceKey: 'spooler' }) }, setServiceRestartError) }
   const triggerSystemMaintenance = async () => { setSystemMaintenanceConfirm(false); setSystemMaintenanceError(null); await request('/actions/system-maintenance', { method: 'POST' }, setSystemMaintenanceError) }
@@ -342,7 +372,7 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
         <Section title="Memória e armazenamento"><Field label="RAM total">{bytesToGB(c.ramTotal)}</Field><Field label="RAM usada">{bytesToGB(c.ramUsada)}</Field><Field label="Disco total">{bytesToGB(c.discoTotal)}</Field><Field label="Disco livre">{bytesToGB(c.discoLivre)}</Field></Section>
         <Section title="Equipamento"><Field label="Número de série">{c.numeroSerie}</Field><Field label="GPU">{c.gpu}</Field><Field label="MAC">{c.mac}</Field><Field label="Placa-mãe">{[c.placaMaeFabricante, c.placaMaeModelo].filter(Boolean).join(' / ')}</Field><Field label="BIOS">{[c.biosFabricante, c.biosVersao].filter(Boolean).join(' / ')}</Field></Section>
         <Section title="Discos físicos">{c.discosFisicos?.length ? c.discosFisicos.map((d, i) => <div className="inventory-row" key={d.id || i}><strong>Disco {i + 1}</strong><span>{d.modelo || 'Modelo não informado'} · {d.tamanho != null ? bytesToGB(d.tamanho) : 'Capacidade não informada'} · {d.interface || 'Interface não informada'}</span></div>) : <div className="muted">Nenhum disco físico informado.</div>}</Section>
-       <Section title="Agent"><Field label="Versão instalada">v{c.agentVersion || 'desconhecida'}</Field>{release && <Field label="Versão disponível">v{release.version}</Field>}{release && !updateAvailable && <div className="update-ok">✓ Agent atualizado{versionComparison > 0 ? <small>Versão instalada superior à versão publicada</small> : versionComparison === 0 ? ` (v${release.version})` : null}</div>}{updateStatus && <div className={`update-status ${updateStatus.status === 'update_failed' ? 'failed' : updateStatus.status === 'update_success' ? 'ok' : 'running'}`}>{updateStatus.status}{updateStatus.message ? ` — ${updateStatus.message}` : ''}</div>}{release && updateAvailable && online && !inProgress && <button type="button" className="btn-update" onClick={() => setConfirm(true)}>Atualizar Agent</button>}{!online && updateAvailable && <div className="muted">Computador offline: não é possível atualizar agora.</div>}{confirm && <ConfirmBox onCancel={() => setConfirm(false)} onConfirm={triggerUpdate} confirmLabel="Atualizar">Atualizar o Agent da máquina <strong>{c.hostname}</strong> para v{release.version}?</ConfirmBox>}</Section>
+        <Section title="Agent"><Field label="Versão instalada">v{c.agentVersion || 'desconhecida'}</Field>{isAdmin && releases.length > 0 && <label className="agent-release-selector">Versão selecionada<select value={release?.version || ''} onChange={(event) => setRelease(releases.find((item) => item.version === event.target.value) || null)}><option value="" disabled>Selecione uma release</option>{releases.map((item) => <option key={item.id} value={item.version}>v{item.version} — {releaseStatusLabel(item)}</option>)}</select></label>}{release && !isAdmin && <Field label="Versão disponível">v{release.version}</Field>}{release && isAdmin && <Field label="Versão selecionada">v{release.version} — {releaseStatusLabel(release)}</Field>}{release && !updateAvailable && <div className="update-ok">✓ Agent atualizado{versionComparison > 0 ? <small>Versão instalada superior à versão publicada</small> : versionComparison === 0 ? ` (v${release.version})` : null}</div>}{updateStatus && <div className={`update-status ${updateStatus.status === 'update_failed' ? 'failed' : updateStatus.status === 'update_success' ? 'ok' : 'running'}`}>{updateStatus.status}{updateStatus.message ? ` — ${updateStatus.message}` : ''}</div>}{isAdmin && release && updateAvailable && online && !inProgress && !updateSubmitting && <button type="button" className="btn-update" onClick={() => setConfirm(true)}>Atualizar Agent</button>}{isAdmin && !online && updateAvailable && <div className="muted">Computador offline: não é possível atualizar agora.</div>}{isAdmin && confirm && <ConfirmBox onCancel={() => setConfirm(false)} onConfirm={triggerUpdate} confirmLabel="Atualizar" disabled={updateSubmitting}>Atualizar apenas esta máquina <strong>{c.hostname}</strong> para o Agent v{release.version}?<br /><small>Versão atual: v{c.agentVersion || 'desconhecida'} · Release: {releaseStatusLabel(release)}<br />Esta ação não atualiza outras máquinas.</small></ConfirmBox>}</Section>
       </>}
       {tab === 'alerts' && <><Section title="Alertas ativos">{alerts.length ? alerts.map((a, i) => <div key={i} className={`alert ${a.severity}`}>⚠ {a.msg}</div>) : <div className="muted">Nenhum alerta ativo.</div>}</Section><Section title="Histórico de alertas">{alertas.length ? <div className="alert-history">{alertas.map((a) => { const end = a.resolvidoEm ? new Date(a.resolvidoEm) : new Date(); const minutes = Math.max(0, Math.floor((end - new Date(a.iniciadoEm)) / 60000)); const duration = minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`; return <div key={a.id} className={`alert-history-item ${a.ativo ? 'ativo' : 'resolvido'}`}><div className="ah-top"><span className={`alert ${a.nivel}`}>{a.mensagem}</span><span className="ah-badge">{a.ativo ? 'ATIVO' : 'RESOLVIDO'}</span></div><div className="ah-meta">Início: {fmtDate(a.iniciadoEm)}{a.resolvidoEm ? ` · Fim: ${fmtDate(a.resolvidoEm)}` : ''} · Duração: {duration}</div></div> })}</div> : <div className="muted">Nenhum alerta registrado para este equipamento.</div>}</Section></>}
         {tab === 'actions' && <><Section title="Ações remotas"><div className="remote-actions-layout"><div className="remote-actions-available"><div className="action-toolbar"><span className="muted">Ações genéricas, incluindo serviços do Windows.</span>{online && !remoteInProgress && <button type="button" className="btn-update" onClick={() => setSpoolerConfirm(true)}>Reiniciar spooler</button>}{!online && <span className="muted">Computador offline: ação remota indisponível.</span>}</div>{spoolerConfirm && <ConfirmBox onCancel={() => setSpoolerConfirm(false)} onConfirm={triggerSpoolerReset} confirmLabel="Reiniciar">Reiniciar o spooler de impressão de <strong>{c.hostname}</strong>?</ConfirmBox>}{serviceRestartError && <div className="update-status failed">{serviceRestartError}</div>}{online && !serviceInProgress && <button type="button" className="btn-update" onClick={() => setServiceRestartConfirm(true)}>Reiniciar serviço Spooler</button>}{serviceRestartConfirm && <ConfirmBox onCancel={() => setServiceRestartConfirm(false)} onConfirm={triggerServiceRestart} confirmLabel="Reiniciar serviço">Reiniciar o serviço Spooler de <strong>{c.hostname}</strong>?</ConfirmBox>}{online && !remoteInProgress && <button type="button" className="btn-update" onClick={() => setWallpaperConfirm(true)}>Aplicar papel de parede padrão</button>}{wallpaperError && <div className="update-status failed">{wallpaperError}</div>}{wallpaperConfirm && <ConfirmBox onCancel={() => setWallpaperConfirm(false)} onConfirm={triggerWallpaper} confirmLabel="Aplicar">Aplicar o papel de parede padrão neste computador?<br /><small>Hostname: {c.hostname} · Status: {online ? 'Online' : 'Offline'} · Asset: WallPaperVava.jpg · Resolução: 1920x1080</small></ConfirmBox>}</div><div className="remote-actions-history">{genericActions.length ? <div className="action-list">{genericActions.map((a) => <ActionItem key={a.actionExecutionId} action={a} />)}</div> : <div className="muted">Nenhuma ação remota registrada.</div>}</div></div></Section></>}
