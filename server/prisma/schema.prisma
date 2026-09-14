@@ -284,6 +284,28 @@ model EntregaAviso {
   @@index([expiraEm])
 }
 
+model Certificado {
+  id                         Int      @id @default(autoincrement())
+  nomeExibicao               String
+  nomePesquisaNormalizado    String
+  documentoNormalizado      String?
+  tipoDocumento              String?
+  extensao                  String
+  pastaLogica               String?
+  anoReferencia             Int?
+  tamanhoBytes              Int
+  modificadoEm              DateTime
+  origemChave               String   @unique
+  metadataStatus            String   @default("PENDENTE")
+  ativo                     Boolean  @default(true)
+  criadoEm                  DateTime @default(now())
+  atualizadoEm              DateTime @updatedAt
+
+  @@index([nomePesquisaNormalizado])
+  @@index([documentoNormalizado])
+  @@index([ativo, anoReferencia])
+}
+
 model OfficeInstallation {
   id                     Int      @id @default(autoincrement())
   computadorId           Int
