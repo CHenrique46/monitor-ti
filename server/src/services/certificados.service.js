@@ -38,12 +38,38 @@ function removeCredentialMarker(value) {
   return text.trim();
 }
 
-function cleanDisplayName(filename) {
-  const cleaned = removeCredentialMarker(removeExtension(filename))
-    .replace(/[_.-]+/g, " ")
+function removeValiditySuffix(value) {
+  const marker = /(?:^|[\s_.:,;!?()[\]{}\/\\-])(?:validade|válido|valido|vencido|vence|venc|valid)(?=$|[\s_.:,;!?()[\]{}\/\\-])/giu;
+  let match;
+  while ((match = marker.exec(value))) {
+    if (/\d/.test(value.slice(match.index + match[0].length))) return value.slice(0, match.index).trim();
+  }
+  return value.trim();
+}
+
+function removeDocumentReferences(value) {
+  return value
+    .replace(/\d{3}[.\s-]\d{3}[.\s-]\d{3}[.\s-]\d{2}/g, " ")
+    .replace(/\d{2}[.\s-]\d{3}[.\s-]\d{3}[\/.\s-]\d{4}[.\s-]\d{2}/g, " ")
+    .replace(/(?<!\d)(?:\d{11}|\d{14})(?!\d)/g, " ")
+    .replace(/(?<!\d)\d{6,}(?!\d)/g, " ");
+}
+
+function sanitizePublicBusinessName(filename) {
+  let cleaned = removeExtension(filename);
+  cleaned = removeCredentialMarker(cleaned);
+  cleaned = removeValiditySuffix(cleaned);
+  cleaned = removeDocumentReferences(cleaned);
+  cleaned = cleaned.replace(/^\s*\d{3}(?=[\s_.-]+)/, " ");
+  cleaned = cleaned
+    .replace(/[_.\/:\\|-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return cleaned || "Certificado sem nome identificável";
+  return { name: cleaned || "Certificado de cliente", reviewRequired: !cleaned };
+}
+
+function cleanDisplayName(filename) {
+  return sanitizePublicBusinessName(filename).name;
 }
 
 function onlyDigits(value) {
@@ -135,9 +161,10 @@ function makeRecord(root, currentDirectory, entry, stats) {
   const document = extractDocument(entry.name);
   const logical = parseLogicalFolder(relativeDirectory);
   const extension = path.extname(entry.name).toLowerCase();
+  const publicName = sanitizePublicBusinessName(entry.name);
   return {
-    nomeExibicao: cleanDisplayName(entry.name) || "Certificado sem nome identificável",
-    nomePesquisaNormalizado: normalizeSearchText(cleanDisplayName(entry.name)),
+    nomeExibicao: publicName.name,
+    nomePesquisaNormalizado: normalizeSearchText(publicName.name),
     documentoNormalizado: document.value,
     tipoDocumento: document.type,
     extensao: extension,
@@ -145,7 +172,8 @@ function makeRecord(root, currentDirectory, entry, stats) {
     anoReferencia: logical.anoReferencia,
     tamanhoBytes: stats.size,
     modificadoEm: stats.mtime,
-    origemChave: buildOriginKey(relative)
+    origemChave: buildOriginKey(relative),
+    metadataStatus: publicName.reviewRequired ? "REVISAO_NOME" : "PENDENTE"
   };
 }
 
@@ -301,6 +329,9 @@ module.exports = {
   normalizeSearchText,
   removeExtension,
   removeCredentialMarker,
+  removeValiditySuffix,
+  removeDocumentReferences,
+  sanitizePublicBusinessName,
   cleanDisplayName,
   isValidCpf,
   isValidCnpj,

@@ -62,9 +62,23 @@ test("normaliza nomes, remove credencial e não vaza o trecho removido", () => {
   assert.equal(service.cleanDisplayName("Empresa_password=segredo.p12"), "Empresa");
   assert.equal(service.cleanDisplayName("EMPRESA_pwd_X9.p12"), "EMPRESA");
   assert.equal(service.cleanDisplayName("RESENHA CONTABIL LTDA.pfx"), "RESENHA CONTABIL LTDA");
-  assert.equal(service.cleanDisplayName("SENHA_123456.pfx"), "Certificado sem nome identificável");
+  assert.equal(service.cleanDisplayName("SENHA_123456.pfx"), "Certificado de cliente");
   assert.equal(service.normalizeSearchText(service.cleanDisplayName("EMPRESA password=abc123.pfx")).includes("abc123"), false);
   assert.equal(service.normalizeSearchText("ÁçãO Empresarial_ Ltda"), "acao empresarial ltda");
+});
+
+test("sanitiza documentos, códigos, validade e preserva números empresariais", () => {
+  assert.equal(service.cleanDisplayName("EMPRESA_11222333000181.pfx"), "EMPRESA");
+  assert.equal(service.cleanDisplayName("EMPRESA_11.222.333/0001-81.pfx"), "EMPRESA");
+  assert.equal(service.cleanDisplayName("11222333000181_EMPRESA.pfx"), "EMPRESA");
+  assert.equal(service.cleanDisplayName("529.982.247-25_EMPRESA.pfx"), "EMPRESA");
+  assert.equal(service.cleanDisplayName("123_EMPRESA.pfx"), "EMPRESA");
+  assert.equal(service.cleanDisplayName("EMPRESA_valid 04 08 27.pfx"), "EMPRESA");
+  assert.equal(service.cleanDisplayName("EMPRESA_venc 04-08-2027.pfx"), "EMPRESA");
+  assert.equal(service.cleanDisplayName("EMPRESA Filial 2 Loja 10 3 Irmãos.pfx"), "EMPRESA Filial 2 Loja 10 3 Irmãos");
+  assert.equal(service.cleanDisplayName("RESENHA CONTABIL LTDA.pfx"), "RESENHA CONTABIL LTDA");
+  assert.equal(service.cleanDisplayName("123456 987654 EMPRESA.pfx"), "EMPRESA");
+  assert.equal(service.sanitizePublicBusinessName("123456789.pfx").reviewRequired, true);
 });
 
 test("valida CPF/CNPJ e mascara somente documentos válidos", () => {
@@ -87,7 +101,7 @@ test("scan aceita somente pfx/p12 e não atravessa a profundidade permitida", ()
   assert.equal(result.records.length, 1);
   assert.equal(result.records[0].extensao, ".pfx");
   assert.equal(result.records[0].anoReferencia, 2025);
-  assert.equal(result.records[0].nomeExibicao.includes("11222333000181"), true);
+  assert.equal(result.records[0].nomeExibicao, "Empresa");
   assert.equal(result.errors.includes("max_depth_reached"), true);
 });
 
@@ -123,6 +137,8 @@ test("resposta pública não contém campos internos e middleware rejeita VIEWER
     ativo: true
   });
   assert.equal(result.documento, "11.***.***/****-**");
+  assert.equal(result.nomeEmpresa, result.nomeExibicao);
+  assert.equal(JSON.stringify(result).includes("11222333000181"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(result, "origemChave"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(result, "caminho"), false);
 
