@@ -6,6 +6,7 @@ import { apiFetch } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import {
   buildSelectionSummary,
+  NIVEL_OPTIONS,
   WEEKDAY_OPTIONS,
   buildAgendamentoCreatePayload,
   buildAgendamentoDraft,
