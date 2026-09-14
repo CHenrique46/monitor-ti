@@ -55,10 +55,22 @@ function removeDocumentReferences(value) {
     .replace(/(?<!\d)\d{6,}(?!\d)/g, " ");
 }
 
-function sanitizePublicBusinessName(filename) {
+function removeNumericDocumentRoot(value, document) {
+  const root = /^\s*(?:(\d{2})[\s._-](\d{3})[\s._-](\d{3})|(\d{8}))(?=\s|[._-]|$)/;
+  const match = value.match(root);
+  if (!match) return value;
+  const digits = match[4] || `${match[1]}${match[2]}${match[3]}`;
+  const matchesDocument = document && document.value && document.value.startsWith(digits);
+  const followedByBusinessName = /[A-Za-zÀ-ÿ]/.test(value.slice(match[0].length));
+  if (matchesDocument || followedByBusinessName) return value.slice(match[0].length).trim();
+  return value;
+}
+
+function sanitizePublicBusinessName(filename, document = null) {
   let cleaned = removeExtension(filename);
   cleaned = removeCredentialMarker(cleaned);
   cleaned = removeValiditySuffix(cleaned);
+  cleaned = removeNumericDocumentRoot(cleaned, document);
   cleaned = removeDocumentReferences(cleaned);
   cleaned = cleaned.replace(/^\s*\d{3}(?=[\s_.-]+)/, " ");
   cleaned = cleaned
@@ -161,7 +173,7 @@ function makeRecord(root, currentDirectory, entry, stats) {
   const document = extractDocument(entry.name);
   const logical = parseLogicalFolder(relativeDirectory);
   const extension = path.extname(entry.name).toLowerCase();
-  const publicName = sanitizePublicBusinessName(entry.name);
+  const publicName = sanitizePublicBusinessName(entry.name, document);
   return {
     nomeExibicao: publicName.name,
     nomePesquisaNormalizado: normalizeSearchText(publicName.name),
@@ -331,6 +343,7 @@ module.exports = {
   removeCredentialMarker,
   removeValiditySuffix,
   removeDocumentReferences,
+  removeNumericDocumentRoot,
   sanitizePublicBusinessName,
   cleanDisplayName,
   isValidCpf,

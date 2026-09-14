@@ -81,6 +81,18 @@ test("sanitiza documentos, códigos, validade e preserva números empresariais",
   assert.equal(service.sanitizePublicBusinessName("123456789.pfx").reviewRequired, true);
 });
 
+test("remove raízes documentais separadas sem remover números legítimos", () => {
+  assert.equal(service.cleanDisplayName("12 345 678 EMPRESA EXEMPLO LTDA.pfx"), "EMPRESA EXEMPLO LTDA");
+  assert.equal(service.cleanDisplayName("12.345.678 EMPRESA EXEMPLO LTDA.pfx"), "EMPRESA EXEMPLO LTDA");
+  assert.equal(service.cleanDisplayName("12345678_EMPRESA EXEMPLO LTDA.pfx"), "EMPRESA EXEMPLO LTDA");
+  assert.equal(service.cleanDisplayName("11222333000181_EMPRESA EXEMPLO LTDA.pfx"), "EMPRESA EXEMPLO LTDA");
+  assert.equal(service.cleanDisplayName("123_11222333000181_EMPRESA EXEMPLO LTDA.pfx"), "EMPRESA EXEMPLO LTDA");
+  assert.equal(service.cleanDisplayName("3 IRMÃOS LTDA.pfx"), "3 IRMÃOS LTDA");
+  assert.equal(service.cleanDisplayName("LOJA 10 LTDA.pfx"), "LOJA 10 LTDA");
+  assert.equal(service.cleanDisplayName("STUDIO 54 LTDA.pfx"), "STUDIO 54 LTDA");
+  assert.equal(service.cleanDisplayName("FÓRMULA 1 LTDA.pfx"), "FÓRMULA 1 LTDA");
+});
+
 test("valida CPF/CNPJ e mascara somente documentos válidos", () => {
   assert.equal(service.isValidCpf("529.982.247-25"), true);
   assert.equal(service.isValidCpf("529.982.247-26"), false);
