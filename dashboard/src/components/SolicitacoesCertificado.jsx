@@ -3,9 +3,11 @@ import SiteNav from './SiteNav'
 import { API_URL } from '../config'
 import { apiFetch } from '../api'
 import { useAuth } from '../auth/AuthContext'
+import { usePendingRequests } from './PendingRequestsProvider'
 
 export default function SolicitacoesCertificado() {
   const { user } = useAuth()
+  const { refreshPendingRequests } = usePendingRequests()
   const [items, setItems] = useState([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(null)
@@ -33,6 +35,7 @@ export default function SolicitacoesCertificado() {
       const body = await response.json()
       if (!response.ok) throw new Error(body.erro || 'Não foi possível atualizar a solicitação.')
       await load()
+      await refreshPendingRequests()
     } catch (updateError) { setError(updateError.message) } finally { setBusy(null) }
   }
 

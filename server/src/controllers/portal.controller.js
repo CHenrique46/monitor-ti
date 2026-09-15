@@ -30,11 +30,12 @@ function createPortalController({ service }) {
   async function catalog(req, res) { try { return res.status(200).json(await service.listCertificates(req.query)); } catch (error) { return sendError(res, error); } }
   async function createRequest(req, res) { try { return res.status(201).json(await service.createRequest(req.portalSession, req.body)); } catch (error) { return sendError(res, error); } }
   async function listOwnRequests(req, res) { try { return res.status(200).json(await service.listOwnRequests(req.portalSession, req.query)); } catch (error) { return sendError(res, error); } }
+  async function pendingRequestSummary(req, res) { try { return res.status(200).json(await service.pendingRequestSummary()); } catch (error) { return sendError(res, error); } }
   async function logout(req, res) { service._sessions.delete(readPortalCookie(req)); res.set("Set-Cookie", service.expiredCookie()); return res.status(204).end(); }
   async function listRequests(req, res) { try { return res.status(200).json(await service.listRequests()); } catch (error) { return sendError(res, error); } }
   async function decideRequest(req, res) { try { return res.status(200).json(await service.decideRequest(req.params.id, req.body, req.humanUser.username)); } catch (error) { return sendError(res, error); } }
 
-  return { start, requireSession, session, catalog, createRequest, listOwnRequests, logout, listRequests, decideRequest };
+  return { start, requireSession, session, catalog, createRequest, listOwnRequests, pendingRequestSummary, logout, listRequests, decideRequest };
 }
 
 function sendError(res, error) {

@@ -1,0 +1,36 @@
+.pending-request-notification {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 20;
+  max-width: min(360px, calc(100vw - 40px));
+  padding: 12px 16px;
+  border: 1px solid #22d3ee;
+  border-radius: 10px;
+  background: #0f2d3a;
+  box-shadow: 0 12px 30px rgba(2, 8, 23, .35);
+}
+
+.pending-request-notification a {
+  color: #a5f3fc;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.pending-request-notification a:focus-visible,
+.pending-request-notification a:hover { text-decoration: underline; }
+
+.pending-request-count {
+  display: inline-grid;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin-left: 5px;
+  padding: 0 4px;
+  place-items: center;
+  border-radius: 999px;
+  background: #0891b2;
+  color: #ecfeff;
+  font-size: .72rem;
+  font-weight: 800;
+  line-height: 1;
+}

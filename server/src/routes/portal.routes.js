@@ -12,6 +12,7 @@ function createPortalRouter({ service, humanSession, requireAdmin }) {
   portal.get("/solicitacoes", controller.requireSession, controller.listOwnRequests);
 
   const admin = express.Router();
+  admin.get("/solicitacoes/resumo", humanSession, requireAdmin(), controller.pendingRequestSummary);
   admin.get("/solicitacoes", humanSession, requireAdmin(), controller.listRequests);
   admin.patch("/solicitacoes/:id", humanSession, requireAdmin(), controller.decideRequest);
   return { portal, admin };

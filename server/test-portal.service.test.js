@@ -109,6 +109,24 @@ test("controller expõe listOwnRequests e converte conflito em HTTP 409", async 
   assert.equal(typeof controller.listOwnRequests, "function");
 });
 
+test("resumo ADMIN conta somente pendentes e retorna apenas o último marcador", async () => {
+  const latest = { id: 9, solicitadoEm: new Date("2026-09-15T01:01:00.000Z") };
+  const db = {
+    solicitacaoCertificado: {
+      count: async ({ where }) => { assert.deepEqual(where, { estado: "PENDENTE" }); return 1; },
+      findFirst: async (query) => { assert.deepEqual(query.where, { estado: "PENDENTE" }); assert.deepEqual(query.select, { id: true, solicitadoEm: true }); return latest; }
+    }
+  };
+  const service = createPortalService({ db });
+  assert.deepEqual(await service.pendingRequestSummary(), { pendentes: 1, ultimaSolicitacaoId: 9, ultimaSolicitacaoEm: latest.solicitadoEm });
+  let statusCode;
+  let body;
+  const controller = createPortalController({ service });
+  await controller.pendingRequestSummary({}, { status: (code) => { statusCode = code; return { json: (value) => { body = value; } }; } });
+  assert.equal(statusCode, 200);
+  assert.deepEqual(body, { pendentes: 1, ultimaSolicitacaoId: 9, ultimaSolicitacaoEm: latest.solicitadoEm });
+});
+
 test("controller usa req.ip e ignora X-Forwarded-For e identidade do body", async () => {
   let capturedIp;
   const service = {

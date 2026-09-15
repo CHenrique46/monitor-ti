@@ -1,5 +1,6 @@
 import { NavLink, Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { usePendingRequests } from './PendingRequestsProvider'
 
 const navigationItems = [
   { key: 'overview', to: '/', label: 'Visão Geral', end: true },
@@ -13,6 +14,7 @@ const navigationItems = [
 export default function SiteNav() {
   const location = useLocation()
   const { user, logout } = useAuth()
+  const { pendingCount } = usePendingRequests()
 
   return (
     <header className="site-header">
@@ -39,7 +41,7 @@ export default function SiteNav() {
                 : undefined
             }
           >
-            {item.label}
+            {item.label}{item.key === 'certificate-requests' && pendingCount > 0 && <span className="pending-request-count" aria-label={`${pendingCount} pendente${pendingCount === 1 ? '' : 's'}`}>{pendingCount}</span>}
           </NavLink>
         ))}
       </nav>

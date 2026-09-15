@@ -127,6 +127,15 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
     return requests.map((request) => publicAdminRequest(request, certificateRelease));
   }
 
+  async function pendingRequestSummary() {
+    const where = { estado: "PENDENTE" };
+    const [pendentes, latest] = await Promise.all([
+      db.solicitacaoCertificado.count({ where }),
+      db.solicitacaoCertificado.findFirst({ where, orderBy: [{ solicitadoEm: "desc" }, { id: "desc" }], select: { id: true, solicitadoEm: true } })
+    ]);
+    return { pendentes, ultimaSolicitacaoId: latest?.id ?? null, ultimaSolicitacaoEm: latest?.solicitadoEm ?? null };
+  }
+
   async function decideRequest(id, input, actor) {
     const requestId = Number(id);
     const estado = String(input && input.estado || "").trim().toUpperCase();
@@ -149,7 +158,7 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
     return publicAdminRequest(updated, certificateRelease);
   }
 
-  return { normalizeIp, resolveComputer, createSession, getSession, cookie, expiredCookie, listCertificates, createRequest, listOwnRequests, listRequests, decideRequest, releaseRequest: certificateRelease.releaseRequest, cleanup, _sessions: sessions };
+  return { normalizeIp, resolveComputer, createSession, getSession, cookie, expiredCookie, listCertificates, createRequest, listOwnRequests, listRequests, pendingRequestSummary, decideRequest, releaseRequest: certificateRelease.releaseRequest, cleanup, _sessions: sessions };
 }
 
 function publicPortalRequest(request, releaseService) {

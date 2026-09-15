@@ -11,6 +11,7 @@ import { API_URL } from './config'
 import { AuthContext } from './auth/AuthContext'
 import PortalCertificados from './components/PortalCertificados'
 import SolicitacoesCertificado from './components/SolicitacoesCertificado'
+import { PendingRequestsProvider } from './components/PendingRequestsProvider'
 
 export default function App() {
   const navigate = useNavigate()
@@ -57,15 +58,17 @@ export default function App() {
 
   return (
     <AuthContext.Provider value={{ user, logout, refreshSession: loadSession }}>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/avisos" element={<Avisos />} />
-        <Route path="/manutencao-programada" element={<MaintenanceSchedules />} />
-        <Route path="/inventario" element={<Inventory />} />
-        <Route path="/certificados" element={<Certificados />} />
-        <Route path="/certificados/solicitacoes" element={<SolicitacoesCertificado />} />
-        <Route path="/computadores/:id" element={<ComputerDetails />} />
-      </Routes>
+      <PendingRequestsProvider>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/avisos" element={<Avisos />} />
+          <Route path="/manutencao-programada" element={<MaintenanceSchedules />} />
+          <Route path="/inventario" element={<Inventory />} />
+          <Route path="/certificados" element={<Certificados />} />
+          <Route path="/certificados/solicitacoes" element={<SolicitacoesCertificado />} />
+          <Route path="/computadores/:id" element={<ComputerDetails />} />
+        </Routes>
+      </PendingRequestsProvider>
     </AuthContext.Provider>
   )
 }
