@@ -1,12 +1,15 @@
 const service = require("../services/certificados.service");
+const defaultSyncService = require("../services/certificateCatalogSync.service");
 
+function createCertificadosController({ syncService = defaultSyncService } = {}) {
 async function sincronizar(req, res) {
   try {
-    return res.status(200).json(await service.syncCatalog());
+    return res.status(200).json(await syncService.runManual(req.humanUser && req.humanUser.username));
   } catch (error) {
-    if (["CERTIFICATE_ROOT_NOT_CONFIGURED", "CERTIFICATE_ROOT_UNAVAILABLE", "CERTIFICATE_ROOT_INVALID", "CERTIFICATE_SCAN_IN_PROGRESS"].includes(error.code)) {
-      return res.status(error.code === "CERTIFICATE_SCAN_IN_PROGRESS" ? 409 : 503).json({ erro: error.message });
+    if (["CERTIFICATE_ROOT_NOT_CONFIGURED", "CERTIFICATE_ROOT_UNAVAILABLE", "CERTIFICATE_ROOT_INVALID", "CERTIFICATE_SYNC_FAILED"].includes(error.code)) {
+      return res.status(503).json({ erro: error.message });
     }
+    if (["CERTIFICATE_SYNC_IN_PROGRESS", "CERTIFICATE_SCAN_IN_PROGRESS"].includes(error.code)) return res.status(409).json({ erro: "Já existe uma sincronização em andamento." });
     return res.status(500).json({ erro: "Não foi possível sincronizar o catálogo de certificados." });
   }
 }
@@ -31,4 +34,17 @@ async function obter(req, res) {
   }
 }
 
-module.exports = { sincronizar, listar, obter };
+async function sincronizacoes(req, res) {
+  try { return res.status(200).json(await syncService.listHistory(req.query.limit)); }
+  catch (error) { return res.status(error.code === "INVALID_LIMIT" ? 400 : 500).json({ erro: error.message || "Não foi possível consultar o histórico de sincronização." }); }
+}
+
+async function sincronizacaoAtual(req, res) {
+  try { return res.status(200).json(await syncService.current()); }
+  catch { return res.status(500).json({ erro: "Não foi possível consultar a sincronização atual." }); }
+}
+
+return { sincronizar, listar, obter, sincronizacoes, sincronizacaoAtual };
+}
+
+module.exports = { ...createCertificadosController(), createCertificadosController };

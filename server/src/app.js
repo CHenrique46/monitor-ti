@@ -14,7 +14,7 @@ const remoteActionsRoutes = require("./routes/remoteActions.routes");
 const wallpaperAssetRoutes = require("./routes/wallpaperAsset.routes");
 const maintenanceSchedulerRoutes = require("./routes/maintenanceScheduler.routes");
 const maintenanceSchedulerCanaryRoutes = require("./routes/maintenanceSchedulerCanary.routes");
-const certificadosRoutes = require("./routes/certificados.routes");
+const { createCertificadosRouter } = require("./routes/certificados.routes");
 const { createPortalRouter } = require("./routes/portal.routes");
 const { createAuthRouter } = require("./routes/auth.routes");
 const { createAuthService } = require("./auth/service");
@@ -30,6 +30,8 @@ const avisosService = require("./services/avisos.service");
 const maintenanceScheduler = require("./services/maintenanceScheduler.service");
 const { createExcelSyncWorker } = require("./inventory/excelSyncWorker");
 const { createPortalService } = require("./services/portal.service");
+const certificateCatalogSyncService = require("./services/certificateCatalogSync.service");
+const certificateCatalogSyncScheduler = require("./services/certificateCatalogSyncScheduler.service");
 
 const app = express();
 const authService = createAuthService();
@@ -51,7 +53,7 @@ app.use("/api/avisos", humanSession, avisosRoutes);
 const portalRoutes = createPortalRouter({ service: portalService, humanSession, requireAdmin });
 app.use("/api/portal", portalRoutes.portal);
 app.use("/api/certificados", portalRoutes.admin);
-app.use("/api/certificados", humanSession, certificadosRoutes);
+app.use("/api/certificados", humanSession, createCertificadosRouter({ syncService: certificateCatalogSyncService }));
 app.use("/api/computadores", humanSession, remoteActionsRoutes);
 app.use("/api/assets", wallpaperAssetRoutes);
 app.use("/api/maintenance-schedules", humanSession, maintenanceSchedulerRoutes);
@@ -120,6 +122,7 @@ if (require.main === module) {
 
     server.listen(PORT, "0.0.0.0", () => {
       logEvent(`[Monitor TI] Server rodando na porta ${PORT}`);
+      certificateCatalogSyncScheduler.start();
     });
 
     historicoService.iniciarRetencao();

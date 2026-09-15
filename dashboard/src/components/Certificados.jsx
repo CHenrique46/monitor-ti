@@ -42,6 +42,10 @@ export default function Certificados() {
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [error, setError] = useState('')
   const [summaryError, setSummaryError] = useState(false)
+  const [syncInfo, setSyncInfo] = useState(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncError, setSyncError] = useState('')
+  const [catalogRevision, setCatalogRevision] = useState(0)
 
   useEffect(() => {
     if (!isAdmin) return undefined
@@ -61,6 +65,10 @@ export default function Certificados() {
     }).catch((loadError) => {
       if (loadError.name !== 'AbortError' && active) setSummaryError(true)
     }).finally(() => { if (active) setSummaryLoading(false) })
+    apiFetch(`${API_URL}/api/certificados/sincronizacao-atual`, { signal: controller.signal }).then(async (response) => {
+      if (!active || !response.ok) return
+      setSyncInfo(await response.json())
+    }).catch(() => {})
     return () => { active = false; controller.abort() }
   }, [isAdmin])
 
@@ -89,13 +97,26 @@ export default function Certificados() {
         .finally(() => { if (active) setLoading(false) })
     }, 320)
     return () => { active = false; controller.abort(); clearTimeout(timer) }
-  }, [isAdmin, page, search, year])
+  }, [isAdmin, page, search, year, catalogRevision])
 
   if (!isAdmin) return <main className="container"><SiteNav /><section className="panel certificate-access-denied"><p className="eyebrow">Acesso restrito</p><h1>Acesso negado</h1><p className="muted">O catálogo de certificados está disponível somente para administradores.</p></section></main>
 
   const updateSearch = (value) => { setSearch(value); setPage(1) }
   const updateYear = (value) => { setYear(value); setPage(1) }
   const totalPages = result?.totalPages || 0
+
+  async function syncCatalogNow() {
+    if (syncing || !window.confirm('Atualizar o catálogo agora? A atualização apenas lê nomes e metadados. Nenhum certificado é alterado.')) return
+    setSyncing(true)
+    setSyncError('')
+    try {
+      const response = await apiFetch(`${API_URL}/api/certificados/sincronizar`, { method: 'POST' })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.erro || 'Não foi possível atualizar o catálogo.')
+      setSyncInfo(body)
+      setCatalogRevision((value) => value + 1)
+    } catch (syncLoadError) { setSyncError(syncLoadError.message) } finally { setSyncing(false) }
+  }
 
   return <main className="container certificates-page">
     <SiteNav />
@@ -107,6 +128,11 @@ export default function Certificados() {
       <SummaryCard label="Metadados pendentes" value="N/D" detail="Filtro não disponível na API" />
     </section>
     {summaryError && <p className="notice error">Não foi possível carregar o resumo do catálogo.</p>}
+    <section className="panel certificate-sync-panel" aria-label="Sincronização do catálogo">
+      <div><p className="eyebrow">Sincronização read-only</p><h2>Atualização do catálogo</h2>{syncInfo ? <p className="muted">Última sincronização: {syncInfo.finalizadaEm ? new Date(syncInfo.finalizadaEm).toLocaleString() : 'em andamento'} · Status: {syncInfo.status} · Encontrados: {syncInfo.encontrados} · Novos: {syncInfo.criados} · Atualizados: {syncInfo.atualizados} · Inativados: {syncInfo.inativados} · Ignorados: {syncInfo.ignorados} · Erros: {syncInfo.erros}</p> : <p className="muted">Nenhuma sincronização registrada.</p>}</div>
+      <button type="button" className="btn-update" onClick={syncCatalogNow} disabled={syncing}>{syncing ? 'Atualizando catálogo...' : 'Atualizar catálogo agora'}</button>
+    </section>
+    {syncError && <p className="notice error">{syncError}</p>}
     <section className="panel certificate-filters" aria-label="Filtros de certificados">
       <div className="certificate-search-field"><label htmlFor="certificate-search">Pesquisar por empresa ou CNPJ/CPF</label><input id="certificate-search" value={search} onChange={(event) => updateSearch(event.target.value)} placeholder="Pesquisar por empresa ou CNPJ/CPF" autoComplete="off" /></div>
       <label className="toolbar-field" htmlFor="certificate-year"><span>Ano</span><select id="certificate-year" value={year} onChange={(event) => updateYear(event.target.value)}><option value="">Todos</option><option value="2025">2025</option><option value="2026">2026</option></select></label>

@@ -205,6 +205,7 @@ function scanCatalog(root) {
     for (const entry of entries) {
       if (entry.isSymbolicLink()) {
         ignored += 1;
+        errors.push("reparse_point_ignored");
         continue;
       }
       const fullPath = path.join(directory, entry.name);
@@ -225,6 +226,7 @@ function scanCatalog(root) {
         const stats = fs.lstatSync(fullPath);
         if (stats.isSymbolicLink()) {
           ignored += 1;
+          errors.push("reparse_point_ignored");
           continue;
         }
         records.push(makeRecord(root, directory, entry, stats));

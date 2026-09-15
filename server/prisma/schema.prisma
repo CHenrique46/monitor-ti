@@ -308,6 +308,27 @@ model Certificado {
   @@index([ativo, anoReferencia])
 }
 
+model SincronizacaoCatalogoCertificado {
+  id               Int      @id @default(autoincrement())
+  origemCategoria  String   @default("CLIENTE")
+  gatilho          String
+  status           String
+  iniciadaEm       DateTime
+  finalizadaEm     DateTime?
+  encontrados      Int      @default(0)
+  criados          Int      @default(0)
+  atualizados      Int      @default(0)
+  inativados       Int      @default(0)
+  ignorados        Int      @default(0)
+  erros            Int      @default(0)
+  mensagemSegura   String?
+  executadoPor     String?
+  criadoEm         DateTime @default(now())
+
+  @@index([origemCategoria, iniciadaEm])
+  @@index([status, iniciadaEm])
+}
+
 model SolicitacaoCertificado {
   id                       Int      @id @default(autoincrement())
   protocolo                String   @unique

@@ -13,6 +13,16 @@ function getPortalCookieSecure() {
   return String(process.env.PORTAL_COOKIE_SECURE || "").trim().toLowerCase() === "true";
 }
 
+function getCertificadosSyncEnabled() {
+  return String(process.env.CERTIFICADOS_SYNC_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+function getCertificadosSyncIntervalMinutes() {
+  const parsed = Number.parseInt(String(process.env.CERTIFICADOS_SYNC_INTERVAL_MINUTES || "30").trim(), 10);
+  if (!Number.isInteger(parsed) || parsed < 5 || parsed > 1440) return 30;
+  return parsed;
+}
+
 function getCertificadosLiberadosPath() {
   const raw = String(process.env.CERTIFICADOS_LIBERADOS_PATH || "").trim();
   if (!raw || !path.isAbsolute(raw)) {
@@ -63,4 +73,4 @@ function getAgentServerPublicUrl() {
   return raw.replace(/\/+$/, "");
 }
 
-module.exports = { getAgentServerPublicUrl, getInventoryExcelPath, getCertificadosClientesPath, getPortalCookieSecure, getCertificadosLiberadosPath, getCertificadosLiberadosUnc };
+module.exports = { getAgentServerPublicUrl, getInventoryExcelPath, getCertificadosClientesPath, getPortalCookieSecure, getCertificadosSyncEnabled, getCertificadosSyncIntervalMinutes, getCertificadosLiberadosPath, getCertificadosLiberadosUnc };

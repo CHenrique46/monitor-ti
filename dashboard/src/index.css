@@ -644,6 +644,9 @@ p {
 .request-state { font-size: .78rem; margin-left: auto; }
 .request-pendente { color: #fbbf24; }
 .portal-form button:disabled { cursor: wait; opacity: .65; }
+
+.certificate-sync-panel { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin: 16px 0; }
+.certificate-sync-panel h2 { margin: 0 0 6px; }
 @media (max-width: 600px) { .certificate-request-row { align-items: stretch; flex-direction: column; } .certificate-request-actions { justify-content: flex-start; } }
 @media (min-width: 601px) and (max-width: 900px) {
   .operational-summary {
