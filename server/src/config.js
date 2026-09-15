@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 
 function getInventoryExcelPath() {
   return String(process.env.INVENTORY_EXCEL_PATH || path.join(__dirname, "..", "..", "private", "inventory", "inventario.xlsx")).trim();
@@ -10,6 +11,30 @@ function getCertificadosClientesPath() {
 
 function getPortalCookieSecure() {
   return String(process.env.PORTAL_COOKIE_SECURE || "").trim().toLowerCase() === "true";
+}
+
+function getCertificadosLiberadosPath() {
+  const raw = String(process.env.CERTIFICADOS_LIBERADOS_PATH || "").trim();
+  if (!raw || !path.isAbsolute(raw)) {
+    const error = new Error("Destino de certificados liberados inválido.");
+    error.code = "RELEASE_DESTINATION_INVALID";
+    throw error;
+  }
+  const resolved = path.resolve(raw);
+  let stats;
+  try { stats = fs.lstatSync(resolved); } catch { throw Object.assign(new Error("Destino de certificados liberados indisponível."), { code: "RELEASE_DESTINATION_UNAVAILABLE" }); }
+  if (!stats.isDirectory() || stats.isSymbolicLink()) throw Object.assign(new Error("Destino de certificados liberados inválido."), { code: "RELEASE_DESTINATION_INVALID" });
+  return resolved;
+}
+
+function getCertificadosLiberadosUnc() {
+  const raw = String(process.env.CERTIFICADOS_LIBERADOS_UNC || "").trim().replace(/\\+$/, "");
+  if (!/^\\\\[^\\]+\\[^\\]+/.test(raw)) {
+    const error = new Error("Compartilhamento de certificados liberados inválido.");
+    error.code = "RELEASE_SHARE_INVALID";
+    throw error;
+  }
+  return raw;
 }
 
 function getAgentServerPublicUrl() {
@@ -38,4 +63,4 @@ function getAgentServerPublicUrl() {
   return raw.replace(/\/+$/, "");
 }
 
-module.exports = { getAgentServerPublicUrl, getInventoryExcelPath, getCertificadosClientesPath, getPortalCookieSecure };
+module.exports = { getAgentServerPublicUrl, getInventoryExcelPath, getCertificadosClientesPath, getPortalCookieSecure, getCertificadosLiberadosPath, getCertificadosLiberadosUnc };

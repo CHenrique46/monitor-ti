@@ -4,7 +4,7 @@ const { createPortalService, normalizeIp, SESSION_MAX_AGE_SECONDS } = require(".
 const { createPortalController } = require("./src/controllers/portal.controller");
 
 function certificate(id = 7) {
-  return { id, nomeExibicao: `Empresa ${id}`, documentoNormalizado: "12345678000199", tipoDocumento: "CNPJ", extensao: ".pfx", pastaLogica: null, anoReferencia: 2026, metadataStatus: "PENDENTE" };
+  return { id, ativo: true, nomeExibicao: `Empresa ${id}`, documentoNormalizado: "12345678000199", tipoDocumento: "CNPJ", extensao: ".pfx", pastaLogica: null, anoReferencia: 2026, metadataStatus: "PENDENTE" };
 }
 
 function database(computers = [{ id: 3, ip: "192.168.40.20", hostname: "PC-03", usuario: "tech", status: "online" }], initial = []) {
@@ -124,7 +124,7 @@ test("controller usa req.ip e ignora X-Forwarded-For e identidade do body", asyn
 test("logout invalida sessão e ADMIN pode aprovar somente pendente", async () => {
   const db = database();
   db.requests.push({ id: 1, computadorId: 3, certificadoId: 7, estado: "PENDENTE" });
-  const service = createPortalService({ db });
+  const service = createPortalService({ db, releaseService: { releaseRequest: async () => { if (db.requests[0].estado !== "PENDENTE") throw Object.assign(new Error("A solicitação não está pendente."), { code: "INVALID_TRANSITION" }); db.requests[0].estado = "APROVADA"; return { ...db.requests[0], certificado: certificate(), computador: { id: 3, hostname: "PC-03", ip: "192.168.40.20", usuario: "tech" } }; }, publicRelease: () => null } });
   const approved = await service.decideRequest(1, { estado: "APROVADA" }, "admin");
   assert.equal(approved.estado, "APROVADA");
   await assert.rejects(() => service.decideRequest(1, { estado: "NEGADA", motivoNegativa: "tarde" }, "admin"), { code: "INVALID_TRANSITION" });

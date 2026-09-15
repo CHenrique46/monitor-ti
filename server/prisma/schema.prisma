@@ -322,6 +322,10 @@ model SolicitacaoCertificado {
   analisadoEm              DateTime?
   analisadoPor             String?
   motivoNegativa           String?
+  nomeArquivoLiberado      String?
+  liberadoEm               DateTime?
+  erroLiberacao            String?
+  tentativasLiberacao      Int      @default(0)
   atualizadoEm             DateTime @updatedAt
 
   certificado           Certificado @relation(fields: [certificadoId], references: [id], onDelete: Restrict)

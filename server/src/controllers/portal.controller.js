@@ -27,7 +27,7 @@ function createPortalController({ service }) {
   }
 
   async function session(req, res) { return res.status(200).json({ hostname: req.portalSession.computer.hostname, usuarioWindows: req.portalSession.computer.usuario || null, expiresAt: new Date(req.portalSession.expiresAt).toISOString(), identificacao: "Esta sessão representa a estação que iniciou o acesso." }); }
-  async function catalog(req, res) { try { return res.status(200).json(await service.listCertificates()); } catch (error) { return sendError(res, error); } }
+  async function catalog(req, res) { try { return res.status(200).json(await service.listCertificates(req.query)); } catch (error) { return sendError(res, error); } }
   async function createRequest(req, res) { try { return res.status(201).json(await service.createRequest(req.portalSession, req.body)); } catch (error) { return sendError(res, error); } }
   async function listOwnRequests(req, res) { try { return res.status(200).json(await service.listOwnRequests(req.portalSession, req.query)); } catch (error) { return sendError(res, error); } }
   async function logout(req, res) { service._sessions.delete(readPortalCookie(req)); res.set("Set-Cookie", service.expiredCookie()); return res.status(204).end(); }
@@ -38,7 +38,7 @@ function createPortalController({ service }) {
 }
 
 function sendError(res, error) {
-  const status = { PORTAL_IP_INVALID: 403, PORTAL_LOOPBACK_BLOCKED: 403, PORTAL_COMPUTER_NOT_FOUND: 403, PORTAL_COMPUTER_AMBIGUOUS: 409, INVALID_CERTIFICATE: 400, INVALID_REQUEST: 400, CERTIFICATE_NOT_FOUND: 404, DUPLICATE_REQUEST: 409, INVALID_ID: 400, INVALID_STATE: 400, DENIAL_REASON_REQUIRED: 400, NOT_FOUND: 404, INVALID_TRANSITION: 409 }[error.code] || 500;
+  const status = { PORTAL_IP_INVALID: 403, PORTAL_LOOPBACK_BLOCKED: 403, PORTAL_COMPUTER_NOT_FOUND: 403, PORTAL_COMPUTER_AMBIGUOUS: 409, INVALID_CERTIFICATE: 400, INVALID_REQUEST: 400, CERTIFICATE_NOT_FOUND: 404, DUPLICATE_REQUEST: 409, INVALID_ID: 400, INVALID_STATE: 400, DENIAL_REASON_REQUIRED: 400, NOT_FOUND: 404, INVALID_TRANSITION: 409, RELEASE_FAILED: 409, RELEASE_REVIEW_REQUIRED: 409 }[error.code] || 500;
   return res.status(status).json({ erro: error.message || "Não foi possível concluir a operação." });
 }
 

@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const net = require("net");
 const prisma = require("../prisma");
 const certificatesService = require("./certificados.service");
+const { createCertificateReleaseService } = require("./certificateRelease.service");
 const { getPortalCookieSecure } = require("../config");
 
 const PORTAL_COOKIE = "ht_portal_session";
@@ -26,8 +27,9 @@ function makeError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
-function createPortalService({ db = prisma, now = () => Date.now(), randomBytes = (size) => crypto.randomBytes(size), cookieSecure = getPortalCookieSecure() } = {}) {
+function createPortalService({ db = prisma, now = () => Date.now(), randomBytes = (size) => crypto.randomBytes(size), cookieSecure = getPortalCookieSecure(), releaseService = null } = {}) {
   const sessions = new Map();
+  const certificateRelease = releaseService || createCertificateReleaseService({ db });
 
   function cleanup() {
     const timestamp = now();
@@ -75,8 +77,8 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
     return `${PORTAL_COOKIE}=; Path=/api/portal; HttpOnly; SameSite=Lax; Max-Age=0${cookieSecure ? "; Secure" : ""}`;
   }
 
-  async function listCertificates() {
-    return certificatesService.listCertificates({ db, query: { page: 1, pageSize: MAX_PAGE_SIZE } });
+  async function listCertificates(query = {}) {
+    return certificatesService.listCertificates({ db, query });
   }
 
   async function createRequest(session, input = {}) {
@@ -117,12 +119,12 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
       db.solicitacaoCertificado.count({ where }),
       db.solicitacaoCertificado.findMany({ where, orderBy: [{ solicitadoEm: "desc" }, { id: "desc" }], skip: (page - 1) * pageSize, take: pageSize, include: { certificado: true } })
     ]);
-    return { items: requests.map(publicPortalRequest), total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+    return { items: requests.map((request) => publicPortalRequest(request, certificateRelease)), total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async function listRequests() {
     const requests = await db.solicitacaoCertificado.findMany({ orderBy: [{ solicitadoEm: "desc" }, { id: "desc" }], include: { certificado: true, computador: { select: { id: true, hostname: true, ip: true, usuario: true } } } });
-    return requests.map(publicAdminRequest);
+    return requests.map((request) => publicAdminRequest(request, certificateRelease));
   }
 
   async function decideRequest(id, input, actor) {
@@ -133,6 +135,7 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
     const motivoNegativa = input && input.motivoNegativa == null ? "" : String(input.motivoNegativa || "").trim();
     if (estado === "NEGADA" && !motivoNegativa) throw makeError("DENIAL_REASON_REQUIRED", "O motivo da negativa é obrigatório.");
     if (motivoNegativa.length > 500) throw makeError("INVALID_REQUEST", "O motivo da negativa excede o limite permitido.");
+    if (estado === "APROVADA") return publicAdminRequest(await certificateRelease.releaseRequest(requestId, actor), certificateRelease);
     const result = await db.solicitacaoCertificado.updateMany({
       where: { id: requestId, estado: "PENDENTE" },
       data: { estado, analisadoEm: new Date(now()), analisadoPor: String(actor || "ADMIN"), motivoNegativa: estado === "NEGADA" ? motivoNegativa : null }
@@ -143,13 +146,14 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
       throw makeError("INVALID_TRANSITION", "A solicitação não está pendente.");
     }
     const updated = await db.solicitacaoCertificado.findUnique({ where: { id: requestId }, include: { certificado: true, computador: { select: { id: true, hostname: true, ip: true, usuario: true } } } });
-    return publicAdminRequest(updated);
+    return publicAdminRequest(updated, certificateRelease);
   }
 
-  return { normalizeIp, resolveComputer, createSession, getSession, cookie, expiredCookie, listCertificates, createRequest, listOwnRequests, listRequests, decideRequest, cleanup, _sessions: sessions };
+  return { normalizeIp, resolveComputer, createSession, getSession, cookie, expiredCookie, listCertificates, createRequest, listOwnRequests, listRequests, decideRequest, releaseRequest: certificateRelease.releaseRequest, cleanup, _sessions: sessions };
 }
 
-function publicPortalRequest(request) {
+function publicPortalRequest(request, releaseService) {
+  const release = releaseService?.publicRelease(request);
   return {
     id: request.id,
     protocolo: request.protocolo,
@@ -158,11 +162,13 @@ function publicPortalRequest(request) {
     solicitadoEm: request.solicitadoEm,
     analisadoEm: request.analisadoEm,
     ...(request.estado === "NEGADA" ? { motivoNegativa: request.motivoNegativa } : {}),
+    ...(release ? { liberacao: release } : {}),
     certificado: request.certificado ? certificatesService.publicCertificate(request.certificado) : null
   };
 }
 
-function publicAdminRequest(request) {
+function publicAdminRequest(request, releaseService) {
+  const release = releaseService?.publicRelease(request);
   return {
     id: request.id,
     protocolo: request.protocolo,
@@ -172,6 +178,8 @@ function publicAdminRequest(request) {
     solicitadoEm: request.solicitadoEm,
     analisadoEm: request.analisadoEm,
     analisadoPor: request.analisadoPor,
+    liberacao: release,
+    liberacaoPendente: request.estado === "APROVADA" && !release,
     certificado: request.certificado ? certificatesService.publicCertificate(request.certificado) : null,
     computador: request.computador ? { id: request.computador.id, hostname: request.computador.hostname, ip: request.computador.ip, usuario: request.computador.usuario } : null
   };
