@@ -32,13 +32,19 @@ const { createExcelSyncWorker } = require("./inventory/excelSyncWorker");
 const { createPortalService } = require("./services/portal.service");
 const certificateCatalogSyncService = require("./services/certificateCatalogSync.service");
 const certificateCatalogSyncScheduler = require("./services/certificateCatalogSyncScheduler.service");
+const { createShutdownController } = require("./serverLifecycle");
 
 const app = express();
+app.locals.shuttingDown = false;
 const authService = createAuthService();
 const excelSyncWorker = createExcelSyncWorker({ db: prisma, log: (message) => logEvent(`[Monitor TI] ${message}`) });
 const portalService = createPortalService({ db: prisma });
 
 app.use(express.json());
+app.use((req, res, next) => {
+  if (app.locals.shuttingDown) return res.status(503).json({ status: "shutting_down", erro: "Servidor encerrando." });
+  next();
+});
 
 app.use("/health", healthRoutes);
 app.use("/api/auth", createAuthRouter({ authService }));
@@ -98,8 +104,7 @@ async function waitForDatabase() {
   );
 }
 
-if (require.main === module) {
-  (async () => {
+async function startServer() {
     await waitForDatabase();
     await normalizeComputersOfflineOnStartup();
     try {
@@ -118,7 +123,16 @@ if (require.main === module) {
     await maintenanceScheduler.ensureDefaultSchedule();
 
     const server = http.createServer(app);
-    setupWebSocket(server);
+    const wss = setupWebSocket(server);
+    const shutdownController = createShutdownController({
+      server,
+      wss,
+      schedulers: [certificateCatalogSyncScheduler, maintenanceScheduler, avisosService, historicoService, excelSyncWorker],
+      prisma,
+      setShuttingDown: (value) => { app.locals.shuttingDown = value; },
+      log: logEvent
+    });
+    const unregisterSignals = shutdownController.registerSignals(process);
 
     server.listen(PORT, "0.0.0.0", () => {
       logEvent(`[Monitor TI] Server rodando na porta ${PORT}`);
@@ -129,10 +143,16 @@ if (require.main === module) {
     avisosService.iniciarAgendador();
     maintenanceScheduler.start();
     excelSyncWorker.start();
-  })().catch((err) => {
+    return { server, wss, shutdown: shutdownController.shutdown, unregisterSignals };
+}
+
+if (require.main === module) {
+  startServer().catch((err) => {
     console.error("[Monitor TI] erro no startup:", err.message);
     process.exitCode = 1;
   });
 }
 
 module.exports = app;
+module.exports.startServer = startServer;
+module.exports.createShutdownController = createShutdownController;

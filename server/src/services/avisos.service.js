@@ -586,6 +586,11 @@ function iniciarAgendador() {
   tick();
 }
 
+function pararAgendador() {
+  if (timerAgendador) clearInterval(timerAgendador);
+  timerAgendador = null;
+}
+
 // ---------------------------------------------------------------------------
 // Entrada unica (controller)
 // ---------------------------------------------------------------------------
@@ -628,6 +633,8 @@ module.exports = {
   expirarEntregas,
   processarAgendamentosVencidos,
   iniciarAgendador,
+  pararAgendador,
+  stop: pararAgendador,
   // expostos p/ testes
   saoPauloParaUtc,
   proximaEmSaoPaulo

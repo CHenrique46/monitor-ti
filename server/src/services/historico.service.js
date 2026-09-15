@@ -113,4 +113,9 @@ function iniciarRetencao() {
   if (timerRetencao.unref) timerRetencao.unref();
 }
 
-module.exports = { maybeSaveSample, iniciarRetencao, INTERVAL_MS, RETENCAO_DIAS };
+function pararRetencao() {
+  if (timerRetencao) clearInterval(timerRetencao);
+  timerRetencao = null;
+}
+
+module.exports = { maybeSaveSample, iniciarRetencao, pararRetencao, stop: pararRetencao, INTERVAL_MS, RETENCAO_DIAS };
