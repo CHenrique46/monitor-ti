@@ -56,7 +56,7 @@ test("inventory scheduling is asynchronous and does not block the caller", async
 
 test("register and metrics protocol paths remain unchanged", () => {
   const source = fs.readFileSync(path.join(__dirname, "src/index.js"), "utf8");
-  assert.match(source, /ws\.send\(JSON\.stringify\(\{ type: "register", data: machine \}\)\)/);
+  assert.match(source, /ws\.send\(JSON\.stringify\(\{ type: "register", data: currentMachine \}\)\)/);
   assert.match(source, /ws\.send\(JSON\.stringify\(\{ type: "metrics", data: metrics \}\)\)/);
   assert.doesNotMatch(source, /office:/);
 });

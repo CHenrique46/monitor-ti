@@ -12,6 +12,7 @@ const { createRemoteActionStore } = require("./remoteActionStore");
 const { collectOfficeInventory } = require("./inventory/office");
 const { createOfficeInventorySender, scheduleOfficeInventory } = require("./inventory/officeProtocol");
 const { selectLanIPv4 } = require("./network");
+const { createConnectionLifecycle } = require("./connectionLifecycle");
 
 // Atualizador: se iniciado com --apply-update (arquivo unico) ou
 // --apply-update-package (pacote Agent+Notifier), executa apenas a troca e
@@ -668,32 +669,10 @@ function startMetrics(ws, machine) {
   }, METRICS_INTERVAL);
 }
 
-function connect(machine) {
-  logEvent(`Tentando conectar em ${SERVER_URL}`);
-  const ws = new WebSocket(SERVER_URL);
-  activeWs = ws;
-
-  ws.on("open", () => {
-    logEvent("Conectado ao Monitor TI Server.");
-    ws.send(JSON.stringify({ type: "register", data: machine }));
-    logEvent("register enviado");
-    startMetrics(ws, machine);
-    scheduleOfficeInventory(() => officeInventorySender.send(ws, machine.deviceId));
-    if (noticesBridge) {
-      noticesBridge.onWsOpen(ws);
-      if (noticesBridge.isCompanionMode && noticesBridge.attemptCompanionTaskRunIfNeeded) {
-        noticesBridge.attemptCompanionTaskRunIfNeeded();
-      }
-    }
-  });
-
-  ws.on("message", (raw) => {
+function handleServerMessage(ws, raw, parsedMessage) {
     let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch (e) {
-      return;
-    }
+    msg = parsedMessage;
+    if (!msg) try { msg = JSON.parse(raw.toString()); } catch (e) { return; }
     if (msg && msg.type === "update_agent") {
       handleUpdateCommand(ws, msg).catch(() => {});
     } else if (msg && msg.type === "remote_action") {
@@ -710,23 +689,40 @@ function connect(machine) {
         noticesBridge.handleServerMessage(ws, msg);
       }
     }
-  });
+}
 
-  ws.on("error", (err) => {
-    // erros de conexao sao tratados no 'close'; log curto para diagnostico
-    logEvent("Erro WebSocket: " + ((err && (err.code || err.message)) || "desconhecido"));
-  });
-
-  ws.on("close", () => {
-    stopMetrics();
-    logEvent("Desconectado do servidor.");
-    logEvent(`Tentando reconectar em ${RECONNECT_DELAY / 1000}s...`);
+const connectionLifecycle = createConnectionLifecycle({
+  WebSocket,
+  serverUrl: SERVER_URL,
+  log: logEvent,
+  onConnect: (ws) => { activeWs = ws; },
+  onOpen: (ws, currentMachine) => {
+    logEvent("Conectado ao Monitor TI Server.");
+    ws.send(JSON.stringify({ type: "register", data: currentMachine }));
+    logEvent("register enviado");
+    startMetrics(ws, currentMachine);
+    scheduleOfficeInventory(() => officeInventorySender.send(ws, currentMachine.deviceId));
     if (noticesBridge) {
-      noticesBridge.onWsClose(ws);
+      noticesBridge.onWsOpen(ws);
+      if (noticesBridge.isCompanionMode && noticesBridge.attemptCompanionTaskRunIfNeeded) noticesBridge.attemptCompanionTaskRunIfNeeded();
     }
+  },
+  onMessage: handleServerMessage,
+  onRegisterAck: () => logEvent("register confirmado pelo Monitor TI Server."),
+  onError: (err, suppressed) => logEvent(`Erro WebSocket: ${((err && (err.code || err.message)) || "desconhecido")}${suppressed ? ` (mais ${suppressed} ocorrências suprimidas)` : ""}`),
+  onClose: (ws, reason) => {
+    stopMetrics();
+    if (reason !== "intentional_shutdown") logEvent("Desconectado do servidor.");
+    if (noticesBridge) noticesBridge.onWsClose(ws);
     if (activeWs === ws) activeWs = null;
-    setTimeout(() => connect(machine), RECONNECT_DELAY);
-  });
+  },
+  onReconnectScheduled: (delay) => logEvent(`Tentando reconectar em ${Math.max(1, Math.round(delay / 1000))}s...`)
+});
+
+function connect(currentMachine) {
+  logEvent(`Tentando conectar em ${SERVER_URL}`);
+  connectionLifecycle.resume();
+  connectionLifecycle.connect(currentMachine);
 }
 
 function shutdown() {
@@ -734,14 +730,8 @@ function shutdown() {
   if (noticesBridge) {
     noticesBridge.shutdown();
   }
-  if (activeWs) {
-    try {
-      if (activeWs.readyState === WebSocket.OPEN) activeWs.close();
-    } catch (e) {
-      // ignora erro ao fechar
-    }
-    activeWs = null;
-  }
+  connectionLifecycle.stop();
+  activeWs = null;
   logEvent("Agent encerrado.");
   process.exit(0);
 }
@@ -774,3 +764,9 @@ Promise.allSettled([collectAdvancedInventory(), collectInteractiveUser()])
     Object.assign(machine, adv, u);
     connect(machine);
   });
+
+// Somente para smoke tests locais do executável; nunca definido pelo serviço.
+const testShutdownAfterMs = Number(process.env.MTI_TEST_SHUTDOWN_AFTER_MS);
+if (Number.isFinite(testShutdownAfterMs) && testShutdownAfterMs > 0) {
+  setTimeout(shutdown, testShutdownAfterMs);
+}

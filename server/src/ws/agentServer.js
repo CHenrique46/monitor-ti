@@ -485,9 +485,10 @@ function setupWebSocket(server, dependencies = {}) {
             }
           });
           ws.deviceId = d.deviceId;
-          applyRegisterCapabilities(d.deviceId, d.capabilities);
-          console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
-          ws.send(JSON.stringify({
+           applyRegisterCapabilities(d.deviceId, d.capabilities);
+           console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
+           ws.send(JSON.stringify({ type: "register_ack", protocolVersion: 1, deviceId: d.deviceId }));
+           ws.send(JSON.stringify({
             type: "remote_action_reconcile_request",
             protocolVersion: 1,
             deviceId: d.deviceId

@@ -1,7 +1,23 @@
 process.env.MTI_TEST_AUTO_ACK = "1";
+const crypto = require("crypto");
+const events = require("events");
 const fs = require("fs");
+const net = require("net");
 const os = require("os");
 const path = require("path");
+const childProcess = require("child_process");
+
+// O teste cobre o protocolo do Agent sem depender de um binário ignorado pelo Git.
+childProcess.spawn = (_exe, args) => {
+  const child = new events.EventEmitter();
+  const pipePath = "\\\\.\\pipe\\" + args[1];
+  setTimeout(() => {
+    const socket = net.createConnection(pipePath, () => socket.write("received\nacknowledged\n"));
+    socket.on("error", () => {});
+  }, 10);
+  return child;
+};
+
 const { createNotifier } = require("./src/notifier");
 
 function uuid() {
@@ -14,6 +30,12 @@ function uuid() {
 
 const tmpCfg = fs.mkdtempSync(path.join(os.tmpdir(), "mti-nt-"));
 const deviceId = uuid();
+const fakeNotifier = path.join(tmpCfg, "MonitorTI-Notifier.exe");
+fs.writeFileSync(fakeNotifier, "MonitorTI notifier test fixture");
+fs.writeFileSync(path.join(tmpCfg, "notifier-integrity.json"), JSON.stringify({
+  version: "test",
+  notifierSha256: crypto.createHash("sha256").update(fs.readFileSync(fakeNotifier)).digest("hex")
+}));
 
 function makeWs() {
   const rec = [];
@@ -22,7 +44,7 @@ function makeWs() {
 
 const notifier = createNotifier({
   configDir: tmpCfg,
-  getAppDir: () => __dirname,
+  getAppDir: () => tmpCfg,
   getDeviceId: () => deviceId,
   getWs: () => ({ send: () => {}, readyState: 1 }),
   logEvent: (m) => console.log("[agent] " + m),
@@ -52,7 +74,7 @@ function findType(rec, type, id) {
       noticeDeliveryId: id,
       title: "Aviso de Teste <b>x</b>",
       message: "Mensagem de teste do Agent -> Notifier IPC.",
-      level: "IMPORTANTE",
+      level: "urgente",
       scheduledAt: new Date().toISOString(),
       serverTime: new Date().toISOString(),
     },
@@ -64,7 +86,16 @@ function findType(rec, type, id) {
 
   // Test B: reenvio do mesmo id (ja CONFIRMADO) -> re-sincroniza, sem nova janela
   const wsB = makeWs();
-  notifier.handleNoticeShow(wsB, { type: "notice_show", data: { noticeDeliveryId: id, title: "z", message: "w" } });
+  notifier.handleNoticeShow(wsB, {
+    type: "notice_show",
+    data: {
+      noticeDeliveryId: id,
+      title: "z",
+      message: "w",
+      level: "urgente",
+      timestamp: new Date().toISOString()
+    }
+  });
   await waitFor(() => findType(wsB.rec, "notice_acknowledged", id), 5000);
   if (findType(wsB.rec, "notice_received")) throw new Error("janela duplicada criada para aviso ja confirmado");
   console.log("PASS B: aviso ja confirmado re-sincroniza sem exibir de novo");

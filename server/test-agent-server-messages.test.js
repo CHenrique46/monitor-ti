@@ -168,7 +168,8 @@ test("Server solicita reconciliacao e envia ACK somente depois da persistencia",
       type: "register",
       data: { deviceId: "dev-1", hostname: "PC-1", discosFisicos: [], capabilities: [] }
     }));
-    await waitFor(() => messages.some((message) => message.type === "remote_action_reconcile_request"));
+    await waitFor(() => messages.some((message) => message.type === "register_ack") && messages.some((message) => message.type === "remote_action_reconcile_request"));
+    assert.deepEqual(messages.find((message) => message.type === "register_ack"), { type: "register_ack", protocolVersion: 1, deviceId: "dev-1" });
     socket.send(JSON.stringify({
       type: "remote_action_reconcile",
       deviceId: "dev-1",

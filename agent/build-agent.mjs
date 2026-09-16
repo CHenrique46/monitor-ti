@@ -25,6 +25,11 @@ await build({
   outfile: path.join(dist, "agent.bundle.js")
 });
 
+const bundleText = fs.readFileSync(path.join(dist, "agent.bundle.js"), "utf8");
+for (const marker of ["function createConnectionLifecycle", "handshakeTimeoutMs", "livenessTimeoutMs"]) {
+  if (!bundleText.includes(marker)) throw new Error(`Bundle invalido: marcador ausente: ${marker}`);
+}
+
 // 2) gera o blob SEA (Single Executable Application)
 execSync("node --experimental-sea-config sea-config.json", {
   cwd: root,
