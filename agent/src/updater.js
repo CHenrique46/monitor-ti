@@ -13,6 +13,7 @@
 //      e MonitorTI-Notifier.exe. Ambos são trocados com backup/rollback individuais.
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { execFileSync: defaultExecFileSync } = require("child_process");
 const WebSocket = require("ws");
 const {
@@ -26,6 +27,16 @@ const {
   enableTask: defaultEnableTask,
   TASK_NAME
 } = require("./notices/task");
+
+// Windows SCM can report a transient empty/StartPending state immediately
+// after net start. The 30s window matches the normal SCM startup budget.
+const SERVICE_START_TIMEOUT_MS = 30000;
+const SERVICE_START_POLL_INTERVAL_MS = 250;
+const SERVICE_STOP_TIMEOUT_MS = 30000;
+const MANIFEST_NAME = "package-manifest.json";
+const AGENT_NAME = "MonitorTI-Agent.exe";
+const NOTIFIER_NAME = "MonitorTI-Notifier.exe";
+const INTEGRITY_NAME = "notifier-integrity.json";
 
 function log(m) {
   const line = `[updater ${new Date().toISOString()}] ${m}`;
@@ -159,23 +170,108 @@ function isFileUnlocked(p) {
   }
 }
 
-// Consulta estruturada do serviço via CIM Win32_Service (Win32_Service.State
-// é sempre "Running"/"Stopped" em inglês, independente do idioma do Windows).
-function getServiceInfo(svc) {
+function sanitizeDiagnostic(value) {
+  return String(value == null ? "" : value)
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1000);
+}
+
+function sha256File(filePath) {
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function commandError(command, err) {
+  const exitCode = err && typeof err.status === "number" ? err.status : null;
+  const stdout = sanitizeDiagnostic(err && err.stdout);
+  const stderr = sanitizeDiagnostic(err && err.stderr);
+  return `comando=${command} exitCode=${exitCode === null ? "null" : exitCode} stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)} erro=${JSON.stringify(sanitizeDiagnostic(err && err.message))}`;
+}
+
+function systemBinary(name) {
+  const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+  return path.join(root, "System32", name);
+}
+
+function parseScQueryEx(stdout) {
+  const text = String(stdout || "");
+  const stateMatch = text.match(/^\s*(?:STATE|ESTADO)\s*:\s*(\d+)\b/im);
+  const pidMatch = text.match(/^\s*PID\s*:\s*(\d+)\b/im);
+  if (!stateMatch) return null;
+  const stateCode = Number(stateMatch[1]);
+  return {
+    stateCode,
+    state: stateCode === 4 ? "Running" : stateCode === 2 ? "StartPending" : stateCode === 1 ? "Stopped" : "Unknown",
+    processId: pidMatch ? Number(pidMatch[1]) : 0
+  };
+}
+
+function parsePowerShellService(stdout) {
+  const obj = JSON.parse(String(stdout || "").trim());
+  if (!obj || typeof obj !== "object") throw new Error("resposta CIM vazia");
+  const state = String(obj.State || "");
+  const processId = Number(obj.ProcessId || 0);
+  return { state, stateCode: state === "Running" ? 4 : state === "StartPending" ? 2 : state === "Stopped" ? 1 : 0, processId };
+}
+
+function queryServiceState(serviceName, execFileSync = defaultExecFileSync) {
+  const scPath = systemBinary("sc.exe");
   try {
-    const ps =
-      "Get-CimInstance -ClassName Win32_Service -Filter \"Name='" + svc + "'\"" +
-      " | Select-Object -Property State,ProcessId | ConvertTo-Json -Compress";
-    const out = execFileSync(
-      "powershell",
-      ["-NoProfile", "-NonInteractive", "-Command", ps],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15000 }
-    );
-    const obj = JSON.parse(out.trim());
-    return { state: obj.State, processId: obj.ProcessId };
-  } catch (e) {
-    return null;
+    const stdout = execFileSync(scPath, ["queryex", serviceName], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000
+    });
+    const parsed = parseScQueryEx(stdout);
+    if (parsed) return parsed;
+    throw new Error("sc.exe nao retornou STATE numerico");
+  } catch (scError) {
+    const psPath = path.join(process.env.SystemRoot || process.env.windir || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    const ps = "Get-CimInstance -ClassName Win32_Service -Filter \"Name='" + serviceName + "'\" | Select-Object -Property State,ProcessId | ConvertTo-Json -Compress";
+    try {
+      const stdout = execFileSync(psPath, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps], {
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000
+      });
+      return parsePowerShellService(stdout);
+    } catch (psError) {
+      const detail = `${commandError(scPath + " queryex " + serviceName, scError)}; fallback=${commandError(psPath, psError)}`;
+      const error = new Error(detail);
+      error.serviceDiagnostics = detail;
+      throw error;
+    }
   }
+}
+
+// Compatibilidade de nome para consumidores antigos; a implementação real é queryServiceState.
+function getServiceInfo(svc) {
+  return queryServiceState(svc);
+}
+
+function waitForServiceRunning(serviceName, {
+  getInfo = getServiceInfo,
+  sleepImpl = sleep,
+  now = () => Date.now(),
+  timeoutMs = SERVICE_START_TIMEOUT_MS,
+  pollIntervalMs = SERVICE_START_POLL_INTERVAL_MS,
+  onProbe = () => {}
+} = {}) {
+  const startedAt = now();
+  let attempts = 0;
+  let lastInfo = null;
+  while (now() - startedAt <= timeoutMs) {
+    attempts += 1;
+    try {
+      lastInfo = getInfo(serviceName);
+    } catch (error) {
+      lastInfo = { state: "Unavailable", stateCode: 0, processId: 0, error: sanitizeDiagnostic(error.serviceDiagnostics || error.message) };
+    }
+    onProbe({ attempts, info: lastInfo, elapsedMs: now() - startedAt });
+    if (lastInfo && (lastInfo.state === "Running" || lastInfo.stateCode === 4)) {
+      return { running: true, attempts, elapsedMs: now() - startedAt, info: lastInfo };
+    }
+    if (now() - startedAt >= timeoutMs) break;
+    sleepImpl(Math.min(pollIntervalMs, timeoutMs - (now() - startedAt)));
+  }
+  return { running: false, attempts, elapsedMs: now() - startedAt, info: lastInfo };
 }
 
 function getNotifierProcesses(execFileSync = defaultExecFileSync) {
@@ -254,34 +350,98 @@ function parseApplyUpdatePackageArgs(argv) {
   ) {
     throw new Error("argumentos posicionais apos --apply-update-package incompletos");
   }
-  const agentSrc = path.join(packageDir, "MonitorTI-Agent.exe");
-  const notifierSrc = path.join(packageDir, "MonitorTI-Notifier.exe");
-  const integritySrc = path.join(packageDir, "notifier-integrity.json");
+  const manifestPath = path.join(packageDir, MANIFEST_NAME);
+  if (!isSafeOwnedDirectory(packageDir)) throw new Error("diretorio de pacote invalido ou reparse point");
+  let manifest = null;
+  if (fs.existsSync(manifestPath)) {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    validatePackageManifest(manifest, packageDir);
+  }
+  const agentSrc = path.join(packageDir, AGENT_NAME);
+  const notifierSrc = path.join(packageDir, NOTIFIER_NAME);
+  const integritySrc = path.join(packageDir, INTEGRITY_NAME);
   const appDir = path.dirname(installExe);
   const files = [{ src: agentSrc, dst: installExe }];
-  if (fs.existsSync(notifierSrc)) {
-    files.push({ src: notifierSrc, dst: path.join(appDir, "MonitorTI-Notifier.exe") });
+  if (!manifest || manifest.packageMode === "full") {
+    if (fs.existsSync(notifierSrc)) {
+      files.push({ src: notifierSrc, dst: path.join(appDir, NOTIFIER_NAME) });
+    }
+    if (fs.existsSync(integritySrc)) {
+      files.push({ src: integritySrc, dst: path.join(appDir, INTEGRITY_NAME) });
+    }
   }
-  if (fs.existsSync(integritySrc)) {
-    files.push({ src: integritySrc, dst: path.join(appDir, "notifier-integrity.json") });
+  return { installExe, serviceName, sourceExe: agentSrc, files, packageMode: manifest ? manifest.packageMode : "full", manifest };
+}
+
+function validatePackageManifest(manifest, packageDir) {
+  if (!manifest || manifest.schemaVersion !== 1) throw new Error("manifesto de pacote invalido: schemaVersion");
+  if (!/^\d+\.\d+\.\d+$/.test(String(manifest.version || ""))) throw new Error("manifesto de pacote invalido: version");
+  if (manifest.packageMode !== "agent-only" && manifest.packageMode !== "full") throw new Error("manifesto de pacote invalido: packageMode");
+  if (!Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error("manifesto de pacote invalido: files");
+  const declared = new Set(manifest.files.map((f) => f && f.name));
+  const allowed = manifest.packageMode === "agent-only"
+    ? new Set([AGENT_NAME, MANIFEST_NAME])
+    : new Set([AGENT_NAME, NOTIFIER_NAME, INTEGRITY_NAME, MANIFEST_NAME]);
+  for (const entry of manifest.files) {
+    if (!entry || !allowed.has(entry.name) || !Number.isInteger(entry.size) || entry.size <= 0 || !/^[a-f0-9]{64}$/i.test(String(entry.sha256 || ""))) {
+      throw new Error("manifesto de pacote invalido: allowlist/hash/tamanho");
+    }
+    const filePath = path.join(packageDir, entry.name);
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("arquivo declarado invalido: " + entry.name);
+    if (stat.size !== entry.size || sha256File(filePath) !== String(entry.sha256).toLowerCase()) throw new Error("hash/tamanho invalido: " + entry.name);
   }
-  return { installExe, serviceName, sourceExe: agentSrc, files };
+  for (const actual of fs.readdirSync(packageDir)) {
+    // Resíduos físicos de um diretório legado são ignorados; somente entradas
+    // declaradas no manifesto podem entrar no plano de atualização.
+    if (declared.has(actual) || actual === MANIFEST_NAME) {
+      if (fs.lstatSync(path.join(packageDir, actual)).isSymbolicLink()) throw new Error("reparse point no pacote: " + actual);
+    }
+  }
+  if (manifest.packageMode === "agent-only" && (manifest.files.length !== 1 || !declared.has(AGENT_NAME))) {
+    throw new Error("manifesto agent-only deve declarar somente MonitorTI-Agent.exe");
+  }
+  if (manifest.packageMode === "agent-only" && (manifest.notifierAction !== "preserve" || manifest.configAction !== "preserve" || manifest.serviceAction !== "restart")) {
+    throw new Error("manifesto agent-only invalido: actions");
+  }
+}
+
+function isSafeOwnedDirectory(dir) {
+  const stat = fs.lstatSync(dir);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+  return fs.realpathSync(dir) === path.resolve(dir);
+}
+
+function writeRecoveryMarker(installExe, details) {
+  const marker = installExe + ".recovery.json";
+  try {
+    fs.writeFileSync(marker, JSON.stringify({
+      schemaVersion: 1,
+      timestamp: new Date().toISOString(),
+      installExe,
+      ...details
+    }, null, 2) + "\n", "utf8");
+    log("recovery marker criado: " + marker);
+  } catch (e) {
+    log("falha ao criar recovery marker: " + sanitizeDiagnostic(e.message));
+  }
 }
 
 async function run(argv, deps = {}) {
-  const testMode = process.env.MTI_UPDATER_TEST === "1";
   const isPackage = argv.indexOf("--apply-update-package") >= 0;
   const execFileSync = deps.execFileSync || defaultExecFileSync;
-  const createOrUpdateTask = deps.createOrUpdateTask || (testMode ? (() => "test") : defaultCreateOrUpdateTask);
-  const queryTaskState = deps.queryTaskState || (testMode ? (() => null) : defaultQueryTaskState);
-  const queryTaskXml = deps.queryTaskXml || (testMode ? (() => null) : defaultQueryTaskXml);
-  const restoreTaskXml = deps.restoreTaskXml || (testMode ? (() => "") : defaultRestoreTaskXml);
-  const removeTask = deps.removeTask || (testMode ? (() => {}) : defaultRemoveTask);
-  const runTask = deps.runTask || (testMode ? (() => {}) : defaultRunTask);
-  const disableTask = deps.disableTask || (testMode ? (() => {}) : defaultDisableTask);
-  const enableTask = deps.enableTask || (testMode ? (() => {}) : defaultEnableTask);
-  const queryNotifierProcesses = deps.queryNotifierProcesses || (testMode ? (() => []) : (() => getNotifierProcesses(execFileSync)));
-  const terminateNotifierProcess = deps.terminateNotifierProcess || (testMode ? (() => {}) : ((pid) => terminateNotifierProcessByPid(pid, execFileSync)));
+  const queryServiceStateImpl = deps.queryServiceState || queryServiceState;
+  const isFileUnlockedImpl = deps.isFileUnlocked || isFileUnlocked;
+  const createOrUpdateTask = deps.createOrUpdateTask || defaultCreateOrUpdateTask;
+  const queryTaskState = deps.queryTaskState || (() => defaultQueryTaskState(execFileSync));
+  const queryTaskXml = deps.queryTaskXml || (() => defaultQueryTaskXml(execFileSync));
+  const restoreTaskXml = deps.restoreTaskXml || ((xml) => defaultRestoreTaskXml(xml, execFileSync));
+  const removeTask = deps.removeTask || (() => defaultRemoveTask(execFileSync));
+  const runTask = deps.runTask || (() => defaultRunTask(execFileSync));
+  const disableTask = deps.disableTask || (() => defaultDisableTask(execFileSync));
+  const enableTask = deps.enableTask || (() => defaultEnableTask(execFileSync));
+  const queryNotifierProcesses = deps.queryNotifierProcesses || (() => getNotifierProcesses(execFileSync));
+  const terminateNotifierProcess = deps.terminateNotifierProcess || ((pid) => terminateNotifierProcessByPid(pid, execFileSync));
   const sleepImpl = deps.sleep || sleep;
   const waitNotifierExit = deps.waitForNotifierExit || ((query) => waitForNotifierExit(query, sleepImpl, 10000));
   const updateContext = Object.assign(parseOptionalArgs(argv), deps.updateContext || {});
@@ -303,6 +463,7 @@ async function run(argv, deps = {}) {
     return;
   }
   const { installExe, serviceName, sourceExe, files } = parsed;
+  const agentOnly = isPackage && parsed.packageMode === "agent-only";
 
   // Validações OBRIGATÓRIAS antes de parar o serviço ou tocar em qualquer arquivo.
   const problems = [];
@@ -430,77 +591,93 @@ async function run(argv, deps = {}) {
 
   function rollback() {
     log("INICIANDO ROLLBACK");
-    rollbackTask();
-    if (!testMode) {
+    if (!agentOnly) rollbackTask();
+    let restoreFailure = null;
+    try {
+      execFileSync("net.exe", ["stop", serviceName], { stdio: "ignore", timeout: 15000 });
+    } catch (e) {}
+    let serviceStopped = false;
+    try {
+      const info = queryServiceStateImpl(serviceName, execFileSync);
+      if (info && info.processId) {
+        try {
+          execFileSync("taskkill.exe", ["/PID", String(info.processId), "/F"], { stdio: "ignore", timeout: 15000 });
+        } catch (e) {}
+      }
+    } catch (e) {}
+    for (let i = 0; i < SERVICE_STOP_TIMEOUT_MS / 250; i++) {
       try {
-        const info = getServiceInfo(serviceName);
-        if (info && info.processId) {
-          try {
-            execFileSync("taskkill", ["/PID", String(info.processId), "/F"], { stdio: "ignore" });
-          } catch (e) {}
-        }
-      } catch (e) {}
+        const info = queryServiceStateImpl(serviceName, execFileSync);
+        serviceStopped = !info || (info.stateCode !== 4 && !info.processId);
+      } catch (e) {
+        serviceStopped = false;
+      }
+      if (serviceStopped && isFileUnlockedImpl(installExe)) break;
+      sleepImpl(250);
+    }
+    if (!serviceStopped) {
+      restoreFailure = { file: installExe, error: "servico nao confirmado como Stopped/PID encerrado antes da restauracao" };
     }
     for (const b of backups) {
       try {
+        if (restoreFailure && restoreFailure.file === installExe && restoreFailure.error.startsWith("servico nao confirmado")) {
+          throw new Error(restoreFailure.error);
+        }
         if (b.previous && fs.existsSync(b.previous)) {
+          if (!isFileUnlockedImpl(b.dst)) throw new Error("EBUSY: destino ainda bloqueado");
           fs.copyFileSync(b.previous, b.dst);
+          if (sha256File(b.previous) !== sha256File(b.dst)) throw new Error("hash divergente apos restauracao");
           log("restaurado: " + b.previous);
         } else if (!b.previous && fs.existsSync(b.dst)) {
           fs.rmSync(b.dst, { force: true });
           log("removido arquivo criado durante atualizacao: " + b.dst);
         }
       } catch (e) {
+        restoreFailure = restoreFailure || { file: b.dst, error: sanitizeDiagnostic(e.message) };
         log("falha ao restaurar " + b.dst + ": " + e.message);
       }
     }
-    if (!testMode) {
-      try {
-        execFileSync("net", ["start", serviceName], { stdio: "ignore" });
-      } catch (e) {}
+    if (restoreFailure) {
+      writeRecoveryMarker(installExe, { rollbackCompleted: false, restoreFailure });
     }
+    try {
+      execFileSync("net.exe", ["start", serviceName], { stdio: "ignore" });
+    } catch (e) {}
+    return !restoreFailure;
   }
 
   try {
-    if (isPackage) {
+    if (isPackage && !agentOnly) {
       stage = "prepare_notifier";
       prepareNotifier();
     }
 
     stage = "stop_service";
     // 1) garante que o serviço está parado (idempotente)
-    if (!testMode) {
-      try {
-        execFileSync("net", ["stop", serviceName], { stdio: "ignore" });
-      } catch (e) {
-        log("aviso ao parar servico (pode ja estar parado): " + e.message);
-      }
-    } else {
-      log("TEST: pulando parada de servico");
+    try {
+      execFileSync("net.exe", ["stop", serviceName], { stdio: "ignore" });
+    } catch (e) {
+      log("aviso ao parar servico (pode ja estar parado): " + e.message);
     }
 
     stage = "wait_unlock";
     // 2) aguarda o executável instalado ficar desbloqueado (serviço parado)
     let stopped = false;
-    if (testMode) {
-      stopped = true;
-    } else {
-      for (let i = 0; i < 30; i++) {
-        if (isFileUnlocked(installExe)) { stopped = true; break; }
-        sleep(1000);
+    for (let i = 0; i < 30; i++) {
+      if (isFileUnlockedImpl(installExe)) { stopped = true; break; }
+      sleepImpl(1000);
+    }
+    if (!stopped) {
+      const info = queryServiceStateImpl(serviceName, execFileSync);
+      const pid = info ? info.processId : null;
+      if (pid) {
+        try {
+          execFileSync("taskkill", ["/PID", String(pid), "/F"], { stdio: "ignore" });
+        } catch (e) {}
       }
-      if (!stopped) {
-        const info = getServiceInfo(serviceName);
-        const pid = info ? info.processId : null;
-        if (pid) {
-          try {
-            execFileSync("taskkill", ["/PID", String(pid), "/F"], { stdio: "ignore" });
-          } catch (e) {}
-        }
-        for (let i = 0; i < 15; i++) {
-          if (isFileUnlocked(installExe)) { stopped = true; break; }
-          sleep(1000);
-        }
+      for (let i = 0; i < 15; i++) {
+        if (isFileUnlockedImpl(installExe)) { stopped = true; break; }
+        sleepImpl(1000);
       }
     }
     if (!stopped) {
@@ -530,9 +707,9 @@ async function run(argv, deps = {}) {
     for (const f of files) {
       let ok = false;
       for (let i = 0; i < 15 && !ok; i++) {
-        if (fs.existsSync(f.dst) && !isFileUnlocked(f.dst)) {
+        if (fs.existsSync(f.dst) && !isFileUnlockedImpl(f.dst)) {
           log("destino ainda travado; aguardando (tentativa " + i + ")");
-          sleep(1000);
+          sleepImpl(1000);
           continue;
         }
         try {
@@ -540,7 +717,7 @@ async function run(argv, deps = {}) {
           ok = true;
         } catch (e) {
           log("falha ao copiar " + f.dst + " (tentativa " + i + "): " + e.message);
-          sleep(1000);
+          sleepImpl(1000);
         }
       }
       if (!ok) {
@@ -551,7 +728,7 @@ async function run(argv, deps = {}) {
 
     stage = "ensure_task";
     // Uma task existente teve seu estado preservado; somente crie uma ausente.
-    if (isPackage && (!taskState || taskState.exists !== true)) {
+    if (isPackage && !agentOnly && (!taskState || taskState.exists !== true)) {
       if (!ensureNotifierTask()) {
         throw new Error("nao foi possivel garantir a task companion");
       }
@@ -559,36 +736,41 @@ async function run(argv, deps = {}) {
 
     stage = "restart_service";
     // 5) reinicia o serviço
-    if (!testMode) {
-      execFileSync("net", ["start", serviceName], { stdio: "ignore" });
-    } else {
-      log("TEST: pulando inicio de servico");
+    try {
+      log("service_start_command issued service=" + serviceName);
+      execFileSync("net.exe", ["start", serviceName], { stdio: "ignore" });
+    } catch (error) {
+      log("service_start_command returned error; continuing SCM polling: " + error.message);
     }
 
     stage = "verify_running";
-    // 6) confirma início por consulta estruturada CIM (estado Running)
-    let running = false;
-    if (testMode) {
-      running = true;
-    } else {
-      for (let i = 0; i < 20; i++) {
-        const info = getServiceInfo(serviceName);
-        if (info && info.state === "Running") { running = true; break; }
-        sleep(1000);
-      }
-    }
-    if (!running) {
+    // 6) confirma início por polling CIM; null/StartPending são transitórios.
+    const verification = waitForServiceRunning(serviceName, {
+      getInfo: () => queryServiceStateImpl(serviceName, execFileSync),
+      sleepImpl,
+      onProbe: ({ attempts, info, elapsedMs }) => log(
+        "service_start_probe attempt=" + attempts +
+        " elapsedMs=" + elapsedMs +
+        " state=" + (info && info.state ? info.state : "UNAVAILABLE")
+      )
+    });
+    log(
+      "service_start_result running=" + verification.running +
+      " attempts=" + verification.attempts +
+      " elapsedMs=" + verification.elapsedMs
+    );
+    if (!verification.running) {
       throw new Error("servico nao iniciou apos atualizacao");
     }
 
-    if (isPackage) {
+    if (isPackage && !agentOnly) {
       stage = "restore_task_state";
       restoreTaskState();
     }
 
     stage = "activate_companion";
     // 7) se houver sessão interativa, solicita o run da task.
-    if (isPackage && (!testMode || deps.allowTaskRunInTestMode)) {
+    if (isPackage) {
       const shouldRunTask = taskState ? taskState.enabled !== false : taskTouched;
       if (shouldRunTask && hasInteractiveSession()) {
         try {
@@ -606,7 +788,8 @@ async function run(argv, deps = {}) {
     log("atualizacao concluida (servico Running)");
   } catch (e) {
     log("ERRO na atualizacao: " + e.message);
-    if (backups.length) rollback();
+    const rollbackOk = backups.length ? rollback() : true;
+    if (!rollbackOk) log("ROLLBACK INCOMPLETO: recovery marker necessario");
     if (isPackage) {
       try {
         restoreTaskState();
@@ -634,12 +817,16 @@ async function run(argv, deps = {}) {
   process.exit(0);
 }
 
-module.exports = {
+  module.exports = {
   run,
   parseApplyUpdateArgs,
   parseApplyUpdatePackageArgs,
   isFileUnlocked,
+  queryServiceState,
   getServiceInfo,
+  waitForServiceRunning,
+  SERVICE_START_TIMEOUT_MS,
+  SERVICE_START_POLL_INTERVAL_MS,
 };
 
 if (require.main === module) {

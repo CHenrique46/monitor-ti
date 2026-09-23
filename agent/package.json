@@ -1,13 +1,13 @@
 {
   "name": "monitor-ti-agent",
-  "version": "1.1.25",
+  "version": "1.1.29",
   "private": true,
   "description": "Agente do Monitor TI (coleta futura via WebSocket)",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "build": "node build-agent.mjs",
+    "build": "node build-agent-only.mjs",
     "build:installer": "node build-installer.mjs"
   },
   "dependencies": {

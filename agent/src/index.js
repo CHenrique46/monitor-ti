@@ -6,6 +6,7 @@ const WebSocket = require("ws");
 const checkDiskSpace = require("check-disk-space").default;
 const { execFile, spawn } = require("child_process");
 const { createNoticeBridge } = require("./notices/bridge");
+const { handleCertificateNotificationMessage } = require("./certificateNotificationHandler");
 const { composeCapabilities } = require("./capabilities");
 const remoteActions = require("./remoteActions");
 const { createRemoteActionStore } = require("./remoteActionStore");
@@ -13,6 +14,7 @@ const { collectOfficeInventory } = require("./inventory/office");
 const { createOfficeInventorySender, scheduleOfficeInventory } = require("./inventory/officeProtocol");
 const { selectLanIPv4 } = require("./network");
 const { createConnectionLifecycle } = require("./connectionLifecycle");
+const { createRegistry64Adapter, ensureBrowserNotificationPolicies } = require("./browserNotificationPolicy");
 
 // Atualizador: se iniciado com --apply-update (arquivo unico) ou
 // --apply-update-package (pacote Agent+Notifier), executa apenas a troca e
@@ -20,6 +22,16 @@ const { createConnectionLifecycle } = require("./connectionLifecycle");
 if (process.argv.includes("--apply-update") || process.argv.includes("--apply-update-package")) {
   require("./updater").run(process.argv);
   return;
+}
+
+if (process.argv.includes("--audit-service-reader")) {
+  try {
+    process.stdout.write(JSON.stringify(require("./updater").queryServiceState("Spooler")) + "\n");
+    process.exit(0);
+  } catch (error) {
+    process.stderr.write(String(error.message || error) + "\n");
+    process.exit(1);
+  }
 }
 
 // Versão única e canônica do Agent (lida do package.json; inlined no build SEA).
@@ -226,7 +238,11 @@ function getMachineInfo(deviceId) {
     cpusLogicas: cpus.length,
     sistemaRelease: os.release(),
     agentVersion: AGENT_VERSION,
-    capabilities: composeCapabilities({ version: AGENT_VERSION, notifier: noticesBridge })
+    capabilities: composeCapabilities({
+      version: AGENT_VERSION,
+      notifier: noticesBridge,
+      certificateNotificationTest: !!(noticesBridge && noticesBridge.isCertificateNotificationTestReady && noticesBridge.isCertificateNotificationTestReady())
+    })
   };
 }
 
@@ -688,6 +704,8 @@ function handleServerMessage(ws, raw, parsedMessage) {
       if (noticesBridge) {
         noticesBridge.handleServerMessage(ws, msg);
       }
+    } else if (msg && msg.type === "certificate_notification_test") {
+      handleCertificateNotificationMessage({ ws, msg, noticesBridge, logEvent });
     }
 }
 
@@ -742,6 +760,12 @@ process.on("SIGTERM", shutdown);
 logEvent("Monitor TI Agent iniciado.");
 const deviceId = getDeviceId();
 logEvent("deviceId: " + deviceId);
+const browserPolicyResult = ensureBrowserNotificationPolicies({
+  registry: createRegistry64Adapter(),
+  log: (message) => logEvent(message)
+});
+const browserNotificationPolicyReady = browserPolicyResult.valid === true;
+if (!browserNotificationPolicyReady) logEvent("browser_policy_capability_unavailable");
 noticesBridge = createNoticeBridge({
   configDir: CONFIG_DIR,
   getAppDir,
@@ -749,6 +773,7 @@ noticesBridge = createNoticeBridge({
   getServerHttpBase: () => SERVER_URL,
   logEvent,
   version: AGENT_VERSION,
+  browserNotificationPolicyReady,
   getInteractiveUser: () => (machine && machine.usuario) || null,
   companionEnabled: process.env.MTI_NOTICES_COMPANION
 });
@@ -764,9 +789,3 @@ Promise.allSettled([collectAdvancedInventory(), collectInteractiveUser()])
     Object.assign(machine, adv, u);
     connect(machine);
   });
-
-// Somente para smoke tests locais do executável; nunca definido pelo serviço.
-const testShutdownAfterMs = Number(process.env.MTI_TEST_SHUTDOWN_AFTER_MS);
-if (Number.isFinite(testShutdownAfterMs) && testShutdownAfterMs > 0) {
-  setTimeout(shutdown, testShutdownAfterMs);
-}

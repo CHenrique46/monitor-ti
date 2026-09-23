@@ -1,4 +1,3 @@
-process.env.MTI_TEST_AUTO_ACK = "1";
 const crypto = require("crypto");
 const events = require("events");
 const fs = require("fs");
