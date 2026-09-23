@@ -27,7 +27,11 @@ function makeError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
-function createPortalService({ db = prisma, now = () => Date.now(), randomBytes = (size) => crypto.randomBytes(size), cookieSecure = getPortalCookieSecure(), releaseService = null } = {}) {
+function publishBrowserNotification(browserNotifications, method, ...args) {
+  try { browserNotifications?.[method]?.(...args); } catch { /* notificações não podem desfazer a operação principal */ }
+}
+
+function createPortalService({ db = prisma, now = () => Date.now(), randomBytes = (size) => crypto.randomBytes(size), cookieSecure = getPortalCookieSecure(), releaseService = null, browserNotifications = null } = {}) {
   const sessions = new Map();
   const certificateRelease = releaseService || createCertificateReleaseService({ db });
 
@@ -38,15 +42,15 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
 
   async function resolveComputer(ip) {
     const normalized = normalizeIp(ip);
-    if (!normalized) throw makeError("PORTAL_IP_INVALID", "O endereço IP desta estação é inválido.");
-    if (isLoopback(normalized)) throw makeError("PORTAL_LOOPBACK_BLOCKED", "O portal não pode associar uma estação por loopback.");
+    if (!normalized) throw makeError("PORTAL_IP_INVALID", "O endere├ºo IP desta esta├º├úo ├® inv├ílido.");
+    if (isLoopback(normalized)) throw makeError("PORTAL_LOOPBACK_BLOCKED", "O portal n├úo pode associar uma esta├º├úo por loopback.");
     const computers = await db.computador.findMany({
       where: { status: "online" },
       select: { id: true, ip: true, hostname: true, usuario: true }
     });
     const matches = computers.filter((computer) => normalizeIp(computer.ip) === normalized);
-    if (matches.length === 0) throw makeError("PORTAL_COMPUTER_NOT_FOUND", "Nenhuma estação online foi identificada para este acesso.");
-    if (matches.length > 1) throw makeError("PORTAL_COMPUTER_AMBIGUOUS", "Mais de uma estação online corresponde a este acesso.");
+    if (matches.length === 0) throw makeError("PORTAL_COMPUTER_NOT_FOUND", "Nenhuma esta├º├úo online foi identificada para este acesso.");
+    if (matches.length > 1) throw makeError("PORTAL_COMPUTER_AMBIGUOUS", "Mais de uma esta├º├úo online corresponde a este acesso.");
     return { ...matches[0], ip: normalized };
   }
 
@@ -83,13 +87,13 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
 
   async function createRequest(session, input = {}) {
     const certificateId = Number(input.certificadoId);
-    if (!Number.isInteger(certificateId) || certificateId <= 0) throw makeError("INVALID_CERTIFICATE", "Certificado inválido.");
+    if (!Number.isInteger(certificateId) || certificateId <= 0) throw makeError("INVALID_CERTIFICATE", "Certificado inv├ílido.");
     const motivo = input.motivo == null ? null : String(input.motivo).trim();
     if (motivo && motivo.length > 500) throw makeError("INVALID_REQUEST", "O motivo excede o limite permitido.");
     const certificate = await db.certificado.findFirst({ where: { id: certificateId, ativo: true }, select: { id: true } });
-    if (!certificate) throw makeError("CERTIFICATE_NOT_FOUND", "Certificado não encontrado.");
+    if (!certificate) throw makeError("CERTIFICATE_NOT_FOUND", "Certificado n├úo encontrado.");
     const duplicate = await db.solicitacaoCertificado.findFirst({ where: { computadorId: session.computerId, certificadoId: certificateId, estado: "PENDENTE" }, select: { protocolo: true } });
-    if (duplicate) throw makeError("DUPLICATE_REQUEST", "Já existe uma solicitação pendente deste certificado para esta estação.");
+    if (duplicate) throw makeError("DUPLICATE_REQUEST", "J├í existe uma solicita├º├úo pendente deste certificado para esta esta├º├úo.");
     let request;
     try {
       request = await db.solicitacaoCertificado.create({
@@ -105,7 +109,7 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
         include: { certificado: true }
       });
     } catch (error) {
-      if (error && error.code === "P2002") throw makeError("DUPLICATE_REQUEST", "Já existe uma solicitação pendente deste certificado para esta estação.");
+      if (error && error.code === "P2002") throw makeError("DUPLICATE_REQUEST", "J├í existe uma solicita├º├úo pendente deste certificado para esta esta├º├úo.");
       throw error;
     }
     return publicPortalRequest(request);
@@ -139,20 +143,24 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
   async function decideRequest(id, input, actor) {
     const requestId = Number(id);
     const estado = String(input && input.estado || "").trim().toUpperCase();
-    if (!Number.isInteger(requestId) || requestId <= 0) throw makeError("INVALID_ID", "Solicitação inválida.");
-    if (!["APROVADA", "NEGADA"].includes(estado)) throw makeError("INVALID_STATE", "Estado inválido.");
+    if (!Number.isInteger(requestId) || requestId <= 0) throw makeError("INVALID_ID", "Solicita├º├úo inv├ílida.");
+    if (!["APROVADA", "NEGADA"].includes(estado)) throw makeError("INVALID_STATE", "Estado inv├ílido.");
     const motivoNegativa = input && input.motivoNegativa == null ? "" : String(input.motivoNegativa || "").trim();
-    if (estado === "NEGADA" && !motivoNegativa) throw makeError("DENIAL_REASON_REQUIRED", "O motivo da negativa é obrigatório.");
+    if (estado === "NEGADA" && !motivoNegativa) throw makeError("DENIAL_REASON_REQUIRED", "O motivo da negativa ├® obrigat├│rio.");
     if (motivoNegativa.length > 500) throw makeError("INVALID_REQUEST", "O motivo da negativa excede o limite permitido.");
-    if (estado === "APROVADA") return publicAdminRequest(await certificateRelease.releaseRequest(requestId, actor), certificateRelease);
+    if (estado === "APROVADA") {
+        const released = await certificateRelease.releaseRequest(requestId, actor);
+        if (!released.__alreadyReleased) publishBrowserNotification(browserNotifications, "publishComputer", released.computadorId, "CERTIFICATE_RELEASED");
+        return publicAdminRequest(released, certificateRelease);
+      }
     const result = await db.solicitacaoCertificado.updateMany({
       where: { id: requestId, estado: "PENDENTE" },
       data: { estado, analisadoEm: new Date(now()), analisadoPor: String(actor || "ADMIN"), motivoNegativa: estado === "NEGADA" ? motivoNegativa : null }
     });
     if (result.count !== 1) {
       const current = await db.solicitacaoCertificado.findUnique({ where: { id: requestId }, select: { id: true, estado: true } });
-      if (!current) throw makeError("NOT_FOUND", "Solicitação não encontrada.");
-      throw makeError("INVALID_TRANSITION", "A solicitação não está pendente.");
+      if (!current) throw makeError("NOT_FOUND", "Solicita├º├úo n├úo encontrada.");
+      throw makeError("INVALID_TRANSITION", "A solicita├º├úo n├úo est├í pendente.");
     }
     const updated = await db.solicitacaoCertificado.findUnique({ where: { id: requestId }, include: { certificado: true, computador: { select: { id: true, hostname: true, ip: true, usuario: true } } } });
     return publicAdminRequest(updated, certificateRelease);

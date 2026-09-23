@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { API_URL } from '../config'
+import BrowserNotificationControls from './BrowserNotificationControls'
 
 const PAGE_SIZE = 10
 
@@ -118,6 +119,7 @@ export default function PortalCertificados() {
       <p className="eyebrow">Portal de certificados</p>
       <h1>Solicitar certificado</h1>
       {session && <p className="muted">Estação: <strong>{session.hostname}</strong>{session.usuarioWindows ? ` · ${session.usuarioWindows}` : ''}<br />{session.identificacao}</p>}
+      {session && <BrowserNotificationControls basePath="/api/portal/browser-notifications" label="Notificações desta estação" />}
       {error && <p className="notice error">{error}</p>}
       {message && <p className="notice success">{message}</p>}
       {!error && <>

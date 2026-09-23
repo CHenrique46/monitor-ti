@@ -5,6 +5,7 @@ import { apiFetch } from '../api'
 import { requestMarker, markerKey, PENDING_REQUESTS_STORAGE_KEY, shouldNotify } from '../pendingRequests'
 import { AuthContext } from '../auth/AuthContext'
 import './PendingRequestsProvider.css'
+import BrowserNotificationControls from './BrowserNotificationControls'
 
 const PendingRequestsContext = createContext(null)
 const NORMAL_TITLE = 'HenriTech Control'
@@ -93,6 +94,7 @@ export function PendingRequestsProvider({ children }) {
   return (
     <PendingRequestsContext.Provider value={value}>
       {children}
+      {isAdmin && <BrowserNotificationControls basePath="/api/browser-notifications" label="Notificações de solicitações" />}
       {isAdmin && notification && (
         <div className="pending-request-notification" role="status" aria-live="polite">
           <Link to="/certificados/solicitacoes" onClick={() => setNotification(null)}>
