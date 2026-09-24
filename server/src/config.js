@@ -38,6 +38,8 @@ function getCertificadosLiberadosPath() {
 }
 
 function getCertificadosLiberadosUnc() {
+  const configuredPath = String(process.env.CERTIFICADOS_LIBERADOS_PATH || "").trim().replace(/\\+$/, "");
+  if (/^\\\\[^\\]+\\[^\\]+$/.test(configuredPath)) return configuredPath;
   const raw = String(process.env.CERTIFICADOS_LIBERADOS_UNC || "").trim().replace(/\\+$/, "");
   if (!/^\\\\[^\\]+\\[^\\]+/.test(raw)) {
     const error = new Error("Compartilhamento de certificados liberados inválido.");
@@ -45,6 +47,43 @@ function getCertificadosLiberadosUnc() {
     throw error;
   }
   return raw;
+}
+
+function configurationError(message, code) {
+  return Object.assign(new Error(message), { code });
+}
+
+function validateSmbSecretPath(value, fsModule = fs) {
+  const raw = String(value || "").trim();
+  const normalized = path.win32.normalize(raw);
+  const segments = raw.split(/[\\/]+/);
+  if (!raw || !path.win32.isAbsolute(normalized) || /^(?:[a-z][a-z0-9+.-]*:\/\/|\\\\[?.])/i.test(raw) || /[?*]/.test(raw) || segments.includes("..") || path.win32.basename(normalized).toLowerCase() !== "certificados-smb.dpapi") {
+    throw configurationError("Credencial SMB não configurada.", "SMB_SECRET_PATH_INVALID");
+  }
+  let stats;
+  try { stats = fsModule.lstatSync(normalized); } catch { throw configurationError("Credencial SMB indisponível.", "SMB_SECRET_FILE_UNAVAILABLE"); }
+  if (!stats.isFile() || stats.isSymbolicLink()) throw configurationError("Credencial SMB inválida.", "SMB_SECRET_FILE_INVALID");
+  return normalized;
+}
+
+function getCertificadosSmbSecretPath(options = {}) {
+  return validateSmbSecretPath(process.env.CERTIFICATE_SMB_CREDENTIAL_FILE, options.fsModule || fs);
+}
+
+function normalizeSmbIdentity(value) {
+  return String(value || "").trim().replace(/\//g, "\\");
+}
+
+function smbIdentitiesEqual(actual, expected) {
+  return normalizeSmbIdentity(actual).toLowerCase() === normalizeSmbIdentity(expected).toLowerCase();
+}
+
+function getCertificadosSmbExpectedIdentity() {
+  const identity = normalizeSmbIdentity(process.env.CERTIFICATE_SMB_EXPECTED_SERVICE_IDENTITY);
+  if (!identity || !/^[^\\/:*?"<>|\s]+\\[^\\/:*?"<>|\s]+$/.test(identity)) {
+    throw configurationError("Identidade SMB não configurada.", "SMB_IDENTITY_INVALID");
+  }
+  return identity;
 }
 
 function getAgentServerPublicUrl() {
@@ -73,4 +112,4 @@ function getAgentServerPublicUrl() {
   return raw.replace(/\/+$/, "");
 }
 
-module.exports = { getAgentServerPublicUrl, getInventoryExcelPath, getCertificadosClientesPath, getPortalCookieSecure, getCertificadosSyncEnabled, getCertificadosSyncIntervalMinutes, getCertificadosLiberadosPath, getCertificadosLiberadosUnc };
+module.exports = { getAgentServerPublicUrl, getInventoryExcelPath, getCertificadosClientesPath, getPortalCookieSecure, getCertificadosSyncEnabled, getCertificadosSyncIntervalMinutes, getCertificadosLiberadosPath, getCertificadosLiberadosUnc, validateSmbSecretPath, getCertificadosSmbSecretPath, normalizeSmbIdentity, smbIdentitiesEqual, getCertificadosSmbExpectedIdentity };

@@ -35,12 +35,14 @@ const { createBrowserNotificationRouters } = require("./routes/browserNotificati
 const certificateCatalogSyncService = require("./services/certificateCatalogSync.service");
 const certificateCatalogSyncScheduler = require("./services/certificateCatalogSyncScheduler.service");
 const { createShutdownController } = require("./serverLifecycle");
+const { createSmbCredentialConnection, startSchedulerWhenReady } = require("./services/smbCredential.service");
 
 const app = express();
 app.locals.shuttingDown = false;
 const authService = createAuthService();
 const excelSyncWorker = createExcelSyncWorker({ db: prisma, log: (message) => logEvent(`[Monitor TI] ${message}`) });
 const portalService = createPortalService({ db: prisma, browserNotifications: browserNotificationHub });
+const smbCredentialConnection = createSmbCredentialConnection();
 
 app.use(express.json());
 app.use((req, res, next) => {
@@ -134,14 +136,20 @@ async function startServer() {
       wss,
       schedulers: [certificateCatalogSyncScheduler, maintenanceScheduler, avisosService, historicoService, excelSyncWorker],
       prisma,
+      cleanup: smbCredentialConnection.disconnect,
       setShuttingDown: (value) => { app.locals.shuttingDown = value; },
       log: logEvent
     });
     const unregisterSignals = shutdownController.registerSignals(process);
 
-    server.listen(PORT, "0.0.0.0", () => {
+    server.listen(PORT, "0.0.0.0", async () => {
       logEvent(`[Monitor TI] Server rodando na porta ${PORT}`);
-      certificateCatalogSyncScheduler.start();
+      const ready = await startSchedulerWhenReady({
+        connection: smbCredentialConnection,
+        scheduler: certificateCatalogSyncScheduler,
+        log: (code) => logEvent(`[Monitor TI] ${code}`)
+      });
+      if (!ready) logEvent("[Monitor TI] scheduler_catalogo desabilitado");
     });
 
     historicoService.iniciarRetencao();
