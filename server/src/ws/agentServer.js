@@ -259,6 +259,8 @@ function setupWebSocket(server, dependencies = {}) {
       ws.ping();
     });
   }, HEARTBEAT_INTERVAL);
+  if (typeof heartbeat.unref === "function") heartbeat.unref();
+  wss.stopHeartbeat = () => clearInterval(heartbeat);
 
   wss.on("connection", (ws) => {
     ws.isAlive = true;
