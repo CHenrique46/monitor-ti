@@ -12,7 +12,8 @@ const installation = (overrides = {}) => ({
 })
 
 test('API antiga sem office vira estado desconhecido', () => {
-  assert.deepEqual(normalizeOffice(undefined), { available: null, inventoryStatus: 'unknown', installations: [] })
+  // A resposta legada não fornece normalizado; a UI preserva essa ausência como null.
+  assert.deepEqual(normalizeOffice(undefined), { available: null, inventoryStatus: 'unknown', installations: [], normalized: null })
 })
 
 test('office vazio permanece desconhecido, não Office não instalado', () => {

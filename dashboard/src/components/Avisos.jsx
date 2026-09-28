@@ -95,6 +95,7 @@ export default function Avisos() {
   const [pendingImmediatePayload, setPendingImmediatePayload] = useState(null)
   const [pendingScheduleAction, setPendingScheduleAction] = useState(null)
   const [pendingDeleteSchedule, setPendingDeleteSchedule] = useState(null)
+  const [initialLoading, setInitialLoading] = useState(true)
 
   const reloadData = async () => {
     try {
@@ -139,7 +140,7 @@ export default function Avisos() {
     } catch (e) {
       setServerOk(false)
       setLoadError('Falha ao carregar os dados da tela de avisos.')
-    }
+    } finally { setInitialLoading(false) }
   }
 
   useEffect(() => {
@@ -480,21 +481,25 @@ export default function Avisos() {
         <Stat label="Confirmado" value={entregas.filter((e) => e.estado === 'CONFIRMADO').length} tone="online" />
       </div>
 
-      <div className="avisos-layout">
-        <section className="panel">
-          <h2>Novo aviso</h2>
-          <form className="aviso-form" onSubmit={handleSubmit}>
-            <div className="segmented-control" role="tablist" aria-label="Modo do aviso">
-              <button
-                type="button"
+       {initialLoading ? <div className="loading-state" role="status"><span className="loading-dot" />Carregando avisos, computadores e histórico...</div> : <div className="avisos-layout">
+         <section className="panel aviso-compose-panel" aria-labelledby="new-notice-title">
+           <div className="panel-heading"><div><p className="eyebrow">Composição</p><h2 id="new-notice-title">Novo aviso</h2></div><span className="panel-hint">{isAdmin ? 'ADMIN' : 'Somente leitura'}</span></div>
+           <form className="aviso-form" onSubmit={handleSubmit}>
+             <div className="segmented-control" role="tablist" aria-label="Modo do aviso">
+               <button
+                 type="button"
+                 role="tab"
+                 aria-selected={mode === 'immediate'}
                 className={mode === 'immediate' ? 'segment-btn active' : 'segment-btn'}
                 onClick={() => setMode('immediate')}
                 disabled={formDisabled}
               >
                 Enviar agora
               </button>
-              <button
-                type="button"
+               <button
+                 type="button"
+                 role="tab"
+                 aria-selected={mode === 'schedule'}
                 className={mode === 'schedule' ? 'segment-btn active' : 'segment-btn'}
                 onClick={() => setMode('schedule')}
                 disabled={formDisabled}
@@ -814,8 +819,8 @@ export default function Avisos() {
         </section>
 
         <div className="avisos-side">
-          <section className="panel">
-            <h2>Agendamentos</h2>
+           <section className="panel" aria-labelledby="schedules-title">
+             <div className="panel-heading"><div><p className="eyebrow">Execuções futuras</p><h2 id="schedules-title">Agendamentos</h2></div><span className="panel-hint">{agendamentos.length}</span></div>
             {agendamentos.length === 0 ? (
               <p className="empty">Nenhum agendamento cadastrado.</p>
             ) : (
@@ -858,8 +863,8 @@ export default function Avisos() {
             )}
           </section>
 
-          <section className="panel">
-            <h2>Histórico</h2>
+           <section className="panel" aria-labelledby="notice-history-title">
+             <div className="panel-heading"><div><p className="eyebrow">Rastreabilidade</p><h2 id="notice-history-title">Histórico</h2></div><span className="panel-hint">{filteredHistory.length}</span></div>
             <div className="history-toolbar">
               <input
                 type="search"
@@ -888,7 +893,7 @@ export default function Avisos() {
                 <option value="7d">Últimos 7 dias</option>
                 <option value="30d">Últimos 30 dias</option>
               </select>
-            </div>
+              </div>
 
             <div className="history-summary-row">
               <span>{filteredHistory.length} registros encontrados</span>
@@ -948,9 +953,9 @@ export default function Avisos() {
             )}
           </section>
         </div>
-      </div>
+       </div>}
 
-      {pendingDeleteSchedule && (
+       {pendingDeleteSchedule && (
         <div className="confirm-box confirm-floating">
           <p>
             Este agendamento será cancelado. Deseja continuar?

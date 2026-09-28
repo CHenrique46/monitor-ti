@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { usePendingRequests } from './PendingRequestsProvider'
@@ -15,9 +16,10 @@ export default function SiteNav() {
   const location = useLocation()
   const { user, logout } = useAuth()
   const { pendingCount } = usePendingRequests()
+  const [menuOpen, setMenuOpen] = useState(false)
 
   return (
-    <header className="site-header">
+    <header className={`site-header ${menuOpen ? 'menu-open' : ''}`}>
       <Link className="site-brand" to="/" aria-label="HenriTech Control">
         <span className="brand-mark" aria-hidden="true">HT</span>
         <span className="brand-copy">
@@ -25,7 +27,10 @@ export default function SiteNav() {
           <small>Painel de Monitoramento e Gerenciamento de TI</small>
         </span>
       </Link>
-      <nav className="site-nav" aria-label="Navegação principal">
+      <button type="button" className="nav-toggle" aria-expanded={menuOpen} aria-controls="main-navigation" aria-label={menuOpen ? 'Fechar navegação' : 'Abrir navegação'} onClick={() => setMenuOpen((open) => !open)}>
+        <span aria-hidden="true">☰</span>
+      </button>
+      <nav id="main-navigation" className="site-nav" aria-label="Navegação principal">
         {navigationItems.filter((item) => !item.adminOnly || user.role === 'ADMIN').map((item) => (
           <NavLink
             key={item.key}
@@ -40,12 +45,13 @@ export default function SiteNav() {
                 ? 'page'
                 : undefined
             }
+            onClick={() => setMenuOpen(false)}
           >
             {item.label}{item.key === 'certificate-requests' && pendingCount > 0 && <span className="pending-request-count" aria-label={`${pendingCount} pendente${pendingCount === 1 ? '' : 's'}`}>{pendingCount}</span>}
           </NavLink>
         ))}
       </nav>
-      <div className="site-account"><span>{user.username}{user.role === 'VIEWER' && <small>Somente visualização</small>}</span><button type="button" onClick={logout}>Sair</button></div>
+      <div className="site-account"><span><strong>{user.username}</strong>{user.role === 'VIEWER' && <small>Somente visualização</small>}</span><button type="button" onClick={logout}>Sair</button></div>
     </header>
   )
 }

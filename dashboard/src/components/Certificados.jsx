@@ -3,6 +3,7 @@ import SiteNav from './SiteNav'
 import { API_URL } from '../config'
 import { apiFetch } from '../api'
 import { useAuth } from '../auth/AuthContext'
+import { formatCertificateValidity } from '../formatCertificateValidity'
 
 const PAGE_SIZE = 25
 
@@ -15,6 +16,7 @@ function SummaryCard({ label, value, detail }) {
 }
 
 function CertificateRow({ certificate }) {
+  const validity = formatCertificateValidity(certificate)
   return <article className="certificate-row">
     <div className="certificate-main">
       <strong>{certificate.nomeEmpresa || certificate.nomeExibicao}</strong>
@@ -25,7 +27,8 @@ function CertificateRow({ certificate }) {
       <span className="certificate-badge">{certificate.extensao?.replace('.', '').toUpperCase() || 'CERT'}</span>
       {certificate.anoReferencia && <span className="certificate-badge">{certificate.anoReferencia}</span>}
       <span className="certificate-folder">{displayFolder(certificate.pastaLogica)}</span>
-      <span className="certificate-status">Validade ainda não identificada</span>
+      <span className={`certificate-status validity-${validity.tone}`}>{validity.label}</span>
+      {validity.detail && <small className="certificate-validity-detail">{validity.detail}</small>}
     </div>
   </article>
 }
@@ -35,6 +38,7 @@ export default function Certificados() {
   const isAdmin = user.role === 'ADMIN'
   const [search, setSearch] = useState('')
   const [year, setYear] = useState('')
+  const [showExpired, setShowExpired] = useState(false)
   const [page, setPage] = useState(1)
   const [result, setResult] = useState(null)
   const [summary, setSummary] = useState({ total: null, year2025: null, year2026: null })
@@ -46,6 +50,7 @@ export default function Certificados() {
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState('')
   const [catalogRevision, setCatalogRevision] = useState(0)
+  const [catalogRequested, setCatalogRequested] = useState(false)
 
   useEffect(() => {
     if (!isAdmin) return undefined
@@ -77,11 +82,13 @@ export default function Certificados() {
     const controller = new AbortController()
     let active = true
     const timer = setTimeout(() => {
+      setCatalogRequested(true)
       setLoading(true)
       setError('')
       const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) })
       if (search.trim()) params.set('q', search.trim())
       if (year) params.set('ano', year)
+      if (showExpired) params.set('mostrarVencidos', 'true')
       apiFetch(`${API_URL}/api/certificados?${params.toString()}`, { signal: controller.signal })
         .then(async (response) => {
           if (!active) return
@@ -97,7 +104,7 @@ export default function Certificados() {
         .finally(() => { if (active) setLoading(false) })
     }, 320)
     return () => { active = false; controller.abort(); clearTimeout(timer) }
-  }, [isAdmin, page, search, year, catalogRevision])
+  }, [isAdmin, page, search, year, showExpired, catalogRevision])
 
   if (!isAdmin) return <main className="container"><SiteNav /><section className="panel certificate-access-denied"><p className="eyebrow">Acesso restrito</p><h1>Acesso negado</h1><p className="muted">O catálogo de certificados está disponível somente para administradores.</p></section></main>
 
@@ -136,11 +143,13 @@ export default function Certificados() {
     <section className="panel certificate-filters" aria-label="Filtros de certificados">
       <div className="certificate-search-field"><label htmlFor="certificate-search">Pesquisar por empresa ou CNPJ/CPF</label><input id="certificate-search" value={search} onChange={(event) => updateSearch(event.target.value)} placeholder="Pesquisar por empresa ou CNPJ/CPF" autoComplete="off" /></div>
       <label className="toolbar-field" htmlFor="certificate-year"><span>Ano</span><select id="certificate-year" value={year} onChange={(event) => updateYear(event.target.value)}><option value="">Todos</option><option value="2025">2025</option><option value="2026">2026</option></select></label>
-      <button type="button" className="certificate-clear-button" onClick={() => { setSearch(''); setYear(''); setPage(1) }} disabled={!search && !year}>Limpar filtros</button>
+      <label className="certificate-expired-toggle"><input type="checkbox" checked={showExpired} onChange={(event) => { setShowExpired(event.target.checked); setPage(1) }} /> Mostrar vencidos</label>
+      <button type="button" className="certificate-clear-button" onClick={() => { setSearch(''); setYear(''); setShowExpired(false); setPage(1) }} disabled={!search && !year && !showExpired}>Limpar filtros</button>
     </section>
-    <section className="certificate-results" aria-live="polite">
-      <div className="certificate-results-heading"><div><p className="eyebrow">Resultados</p><h2>{result ? `${result.total} certificados encontrados` : 'Catálogo de certificados'}</h2></div>{result && <span className="muted">Página {result.page} de {result.totalPages || 1}</span>}</div>
-      {loading && <p className="notice">Carregando certificados...</p>}
+     <section className="certificate-results" aria-live="polite" aria-labelledby="certificate-results-title">
+       <div className="certificate-results-heading"><div><p className="eyebrow">Resultados</p><h2 id="certificate-results-title">{result ? `${result.total} certificados encontrados` : 'Catálogo de certificados'}</h2></div>{result && <span className="muted">Página {result.page} de {result.totalPages || 1}</span>}</div>
+       {loading && <div className="loading-state" role="status"><span className="loading-dot" />Carregando certificados...</div>}
+       {!loading && !catalogRequested && <div className="loading-state" role="status"><span className="loading-dot" />Preparando catálogo...</div>}
       {!loading && error && <p className="notice error">{error}</p>}
       {!loading && !error && result && result.items.length === 0 && <div className="empty"><strong>Nenhum certificado encontrado.</strong><span className="muted">Tente alterar a empresa, documento ou ano.</span></div>}
       {!loading && !error && result && result.items.length > 0 && <div className="certificate-list">{result.items.map((certificate) => <CertificateRow key={certificate.id} certificate={certificate} />)}</div>}

@@ -26,6 +26,8 @@ export default function Dashboard() {
   const [sortMode, setSortMode] = useState('default')
   const [computersLoaded, setComputersLoaded] = useState(false)
   const [alertsLoaded, setAlertsLoaded] = useState(false)
+  const [computersLoadError, setComputersLoadError] = useState(false)
+  const [alertsLoadError, setAlertsLoadError] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteError, setDeleteError] = useState(null)
   const [deleting, setDeleting] = useState(false)
@@ -49,9 +51,10 @@ export default function Dashboard() {
         if (r.ok) {
           setComputadores(await r.json())
           setComputersLoaded(true)
-        }
+          setComputersLoadError(false)
+        } else setComputersLoadError(true)
       } catch (e) {
-        if (active) setComputersLoaded(true)
+        if (active) { setComputersLoaded(true); setComputersLoadError(true) }
       }
     }
 
@@ -89,10 +92,10 @@ export default function Dashboard() {
       try {
         const r = await apiFetch(`${API_URL}/api/alertas?ativos=true`)
         if (!active) return
-        if (r.ok) setAlertasAtivos(await r.json())
+        if (r.ok) { setAlertasAtivos(await r.json()); setAlertsLoadError(false) } else setAlertsLoadError(true)
         setAlertsLoaded(true)
       } catch (e) {
-        if (active) setAlertsLoaded(true)
+        if (active) { setAlertsLoaded(true); setAlertsLoadError(true) }
       }
     }
     loadAlertas()
@@ -149,18 +152,16 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="container">
-      <SiteNav />
-       <h1>Visão geral do ambiente</h1>
-      <p>
-        Servidor:{' '}
-        <span className={serverOk ? 'online' : 'offline'}>
-          {serverOk ? 'Online' : 'Offline'}
-        </span>
-      </p>
-      {!serverOk && (
-        <p className="server-warn">Não foi possível atualizar os dados.</p>
-      )}
+       <div className="container dashboard-page">
+       <SiteNav />
+       <header className="page-head dashboard-head">
+         <div><p className="eyebrow">Operação em tempo real</p><h1>Visão geral do ambiente</h1><p className="muted">Acompanhe disponibilidade, atenção operacional e estado dos computadores.</p></div>
+         <div className="server-state" aria-label={`Servidor ${serverOk ? 'online' : 'offline'}`}><span className={serverOk ? 'online' : 'offline'}>{serverOk ? '● Online' : '● Offline'}</span><small>Atualização automática</small></div>
+       </header>
+       {!serverOk && (
+         <p className="server-warn">Não foi possível atualizar os dados.</p>
+       )}
+       {alertsLoadError && <p className="notice error" role="alert">Não foi possível carregar os alertas ativos. A consulta será repetida automaticamente.</p>}
 
        <SummaryCards
          summary={summary}
@@ -169,9 +170,9 @@ export default function Dashboard() {
          onFilterChange={setComputerFilter}
        />
 
-      {alertasAtivos.length > 0 && (
-        <div className="alertas-ativos">
-          <div className="alerts-summary-head"><h2>Alertas ativos ({alertasAtivos.length})</h2><span className="alerts-summary-counts"><strong>{alertasAtivos.filter((a) => a.nivel === 'critical').length} crítico{alertasAtivos.filter((a) => a.nivel === 'critical').length === 1 ? '' : 's'}</strong> · {alertasAtivos.filter((a) => a.nivel !== 'critical').length} atenção</span><button type="button" className="alerts-toggle" onClick={() => setAlertsExpanded((expanded) => !expanded)}>{alertsExpanded ? 'Ocultar' : 'Ver alertas'}</button></div>
+       {alertasAtivos.length > 0 && (
+         <section className="alertas-ativos" aria-labelledby="active-alerts-title">
+           <div className="alerts-summary-head"><h2 id="active-alerts-title">Alertas ativos ({alertasAtivos.length})</h2><span className="alerts-summary-counts"><strong>{alertasAtivos.filter((a) => a.nivel === 'critical').length} crítico{alertasAtivos.filter((a) => a.nivel === 'critical').length === 1 ? '' : 's'}</strong> · {alertasAtivos.filter((a) => a.nivel !== 'critical').length} atenção</span><button type="button" className="alerts-toggle" aria-expanded={alertsExpanded} onClick={() => setAlertsExpanded((expanded) => !expanded)}>{alertsExpanded ? 'Ocultar' : 'Ver alertas'}</button></div>
           {alertsExpanded && alertasAtivos.map((a) => (
             <div key={a.id} className={`alert ${a.nivel}`}>
               <strong>
@@ -181,10 +182,11 @@ export default function Dashboard() {
               <span className="alert-since"> desde {fmtDate(a.iniciadoEm)}</span>
             </div>
           ))}
-        </div>
-      )}
+         </section>
+       )}
 
-       <div className="computer-toolbar">
+        <section className="computer-results" aria-labelledby="computers-title">
+        <div className="computer-toolbar">
          <SearchBar value={search} onChange={setSearch} />
          <label className="toolbar-field">
            <span>Ordenar</span>
@@ -195,10 +197,10 @@ export default function Dashboard() {
          </label>
        </div>
 
-      <h2>Computadores</h2>
-      <hr />
+       <div className="section-heading"><div><p className="eyebrow">Inventário monitorado</p><h2 id="computers-title">Computadores</h2></div><span className="muted">{filtered.length} exibido(s)</span></div>
+       <hr />
 
-      {computadores.length === 0 ? (
+       {!computersLoaded ? <div className="loading-state" role="status"><span className="loading-dot" />Carregando computadores...</div> : computersLoadError ? <div className="empty error-state" role="alert"><strong>Não foi possível carregar os computadores.</strong><span className="muted">O servidor continua sendo consultado automaticamente.</span></div> : computadores.length === 0 ? (
         <p className="empty">
           Nenhum computador cadastrado.
           <br />
@@ -214,6 +216,7 @@ export default function Dashboard() {
             ))}
          </div>
        )}
+       </section>
       {selectedComputerId && (
         <ComputerDetails computerId={selectedComputerId} latestVersion={latestVersion} onClose={() => setSelectedComputerId(null)} />
       )}
