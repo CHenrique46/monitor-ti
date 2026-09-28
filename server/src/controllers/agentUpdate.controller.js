@@ -3,21 +3,17 @@ const releasesService = require("../services/releases.service");
 const agentServer = require("../ws/agentServer");
 const { compareVersion, buildUpdateCommand } = require("../services/updateCommand");
 const agentUpdates = require("../services/agentUpdates.service");
+const { validatePackageManifest } = require("../services/releases.service");
 
 // Versão mínima do Agent que suporta auto-update remoto (preparado para uso futuro).
 // Quando definida (ex.: via env MIN_UPDATE_VERSION=1.0.0), agents abaixo dela são rejeitados.
 const MIN_UPDATE_VERSION = process.env.MIN_UPDATE_VERSION || null;
 
-function hasUsableReleaseArtifact(releases, release, agentVersion) {
-  if (!release || !releases.hasArtifact(release, agentVersion)) return false;
+async function hasUsableReleaseArtifact(releases, release, agentVersion) {
+  if (!release || !(await releases.hasArtifact(release, agentVersion))) return false;
   if (compareVersion(agentVersion, "1.1.1") < 0) return true;
   if (!release.packageName || !release.packageSha256 || !Number.isInteger(release.packageSize) || release.packageSize <= 0) return false;
-  const files = release.manifest && Array.isArray(release.manifest.files) ? release.manifest.files : [];
-  if (release.manifest.version !== release.version) return false;
-  return ["MonitorTI-Agent.exe", "MonitorTI-Notifier.exe"].every((name) => {
-    const file = files.find((item) => item && item.name === name);
-    return !!file && typeof file.sha256 === "string" && Number.isInteger(file.size) && file.size > 0;
-  });
+  return validatePackageManifest(release);
 }
 
 async function trigger(req, res, deps = {}) {
@@ -59,7 +55,7 @@ async function trigger(req, res, deps = {}) {
     if (versionComparison >= 0)
       return res.status(409).json({ erro: versionComparison === 0 ? "Ja esta na versao mais recente." : "Downgrade de Agent nao permitido." });
 
-    if (!hasUsableReleaseArtifact(releases, release, c.agentVersion))
+    if (!(await hasUsableReleaseArtifact(releases, release, c.agentVersion)))
       return res.status(409).json({ erro: "Release registrada, mas artefato fisico indisponivel." });
 
     const created = await agentUpdates.createPending(db, {

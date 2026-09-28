@@ -3,7 +3,7 @@
 
 function parseVersion(v) {
   if (!v) return null;
-  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(v));
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(v));
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
@@ -29,20 +29,24 @@ function buildUpdateCommand(agentVersion, release) {
     release.packageSize != null;
 
   if (supportsPackage) {
-    let notifierSha256 = null;
-    if (release.manifest && Array.isArray(release.manifest.files)) {
-      const f = release.manifest.files.find((x) => x.name === "MonitorTI-Notifier.exe");
-      if (f) notifierSha256 = f.sha256;
-    }
-    return {
+    const packageMode = release.packageMode || (release.manifest && release.manifest.packageMode);
+    if (packageMode !== "full" && packageMode !== "agent-only") return null;
+    const command = {
       type: "update_agent",
       currentVersion: agentVersion,
       version: release.version,
       sha256: release.packageSha256,
       size: release.packageSize,
       package: true,
-      notifierSha256
+      packageMode
     };
+    if (packageMode === "full") {
+      const f = release.manifest && Array.isArray(release.manifest.files)
+        ? release.manifest.files.find((x) => x.name === "MonitorTI-Notifier.exe")
+        : null;
+      command.notifierSha256 = f ? f.sha256 : null;
+    }
+    return command;
   }
 
   // Fluxo legado (arquivo único).
