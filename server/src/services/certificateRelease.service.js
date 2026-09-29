@@ -325,9 +325,11 @@ function createCertificateReleaseService({ db, fsModule = fs, sourcePath = null,
         ? await isolatedRemovalHelper.run({ operation: "remove", destinationRoot: destination, filename: request.nomeArquivoLiberado, expectedFingerprint: request.releaseFingerprint })
         : await isolatedRemovalHelper.run({ operation: "inspect_presence", destinationRoot: destination, filename: request.nomeArquivoLiberado, expectedFingerprint: "" });
       if (!finalResult.ok || (request.releaseFingerprint && !["ABSENT", "REMOVED"].includes(finalResult.result)) || (!request.releaseFingerprint && finalResult.result === "PRESENT")) throw makeError(finalResult.code || "RELEASE_OWNERSHIP_INVALID", "A tentativa exige revisão de propriedade.");
-      const changed = await shortTransaction(db, (tx) => tx.solicitacaoCertificado.updateMany({ where: { id: request.id, statusLiberacao: { in: ["PUBLICANDO", "RECUPERACAO_PENDENTE"] }, releaseAttemptId: request.releaseAttemptId }, data: { estado: "PENDENTE", statusLiberacao: "NAO_LIBERADO", nomeArquivoLiberado: null, releaseAttemptId: null, releaseStartedAt: null, releaseStage: null, releaseFingerprint: null, erroLiberacao: "RELEASE_RECOVERED" } }));
-      if (changed.count !== 1) throw makeError("RELEASE_CONFLICT", "A tentativa exige revisão.");
-      await audit(request, "RELEASE_RECOVERED", "SUCCESS", "RECOVERED");
+      await shortTransaction(db, async (tx) => {
+        const changed = await tx.solicitacaoCertificado.updateMany({ where: { id: request.id, statusLiberacao: { in: ["PUBLICANDO", "RECUPERACAO_PENDENTE"] }, releaseAttemptId: request.releaseAttemptId }, data: { estado: "PENDENTE", statusLiberacao: "NAO_LIBERADO", nomeArquivoLiberado: null, releaseAttemptId: null, releaseStartedAt: null, releaseStage: null, releaseFingerprint: null, erroLiberacao: "RELEASE_RECOVERED" } });
+        if (changed.count !== 1) throw makeError("RELEASE_CONFLICT", "A tentativa exige revisão.");
+        await audit(request, "RELEASE_RECOVERED", "SUCCESS", "RECOVERED", null, tx);
+      });
       return true;
     } catch (error) {
       await shortTransaction(db, (tx) => tx.solicitacaoCertificado.updateMany({ where: { id: request.id, releaseAttemptId: request.releaseAttemptId }, data: { statusLiberacao: "RECUPERACAO_PENDENTE", erroLiberacao: "RELEASE_RECOVERY_PENDING" } })).catch(() => {});
@@ -363,9 +365,11 @@ function createCertificateReleaseService({ db, fsModule = fs, sourcePath = null,
             result = removedResult.result;
             if (result === "REMOVED") removed += 1;
           }
-          await db.solicitacaoCertificado.update({ where: { id: request.id }, data: { statusLiberacao: "EXPIRADA" } });
-          await audit(request, "RELEASE_EXPIRED", "SUCCESS", "EXPIRED").catch(() => {});
-          await audit(request, "RELEASE_FILE_REMOVED", "SUCCESS", result === "REMOVED" ? "REMOVED" : "ALREADY_ABSENT").catch(() => {});
+          await shortTransaction(db, async (tx) => {
+            await tx.solicitacaoCertificado.update({ where: { id: request.id }, data: { statusLiberacao: "EXPIRADA" } });
+            await audit(request, "RELEASE_EXPIRED", "SUCCESS", "EXPIRED", null, tx);
+            await audit(request, "RELEASE_FILE_REMOVED", "SUCCESS", result === "REMOVED" ? "REMOVED" : "ALREADY_ABSENT", null, tx);
+          });
         } catch (error) {
           await db.solicitacaoCertificado.update({ where: { id: request.id }, data: { statusLiberacao: "REMOCAO_PENDENTE", erroLiberacao: "RELEASE_REMOVAL_FAILED" } }).catch(() => {});
           await audit(request, "RELEASE_REMOVAL_FAILED", "FAILURE", error.code || "REMOVAL_FAILED").catch(() => {});
@@ -474,6 +478,7 @@ function createCertificateReleaseService({ db, fsModule = fs, sourcePath = null,
                 const completed = await tx.certificateReleaseRetryAuthorization.updateMany({ where: { id: activeLease.authorizationId, status: "ACQUIRED", attemptId: activeLease.attemptId }, data: { status: "COMPLETED", completedAt: now() } });
                 if (completed.count !== 1) throw makeError("RETRY_AUTHORIZATION_CONFLICT", "A autorização extraordinária perdeu a aquisição.");
               }
+              await audit(candidate, "RELEASE_EXPIRED", "SUCCESS", "EXPIRED", null, tx, activeLease.authorizationId);
               await audit(candidate, "RELEASE_FILE_REMOVED", "SUCCESS", "ALREADY_ABSENT", null, tx, activeLease.authorizationId);
               if (activeLease.authorizationId) await audit(candidate, "RELEASE_RETRY_COMPLETED", "SUCCESS", "ALREADY_ABSENT", null, tx, activeLease.authorizationId);
             });
@@ -490,6 +495,7 @@ function createCertificateReleaseService({ db, fsModule = fs, sourcePath = null,
               if (completed.count !== 1) throw makeError("RETRY_AUTHORIZATION_CONFLICT", "A autorização extraordinária perdeu a aquisição.");
             }
             const resultCode = removed.result === "ABSENT" ? "ALREADY_ABSENT" : "REMOVED";
+            await audit(candidate, "RELEASE_EXPIRED", "SUCCESS", "EXPIRED", null, tx, activeLease.authorizationId);
             await audit(candidate, "RELEASE_FILE_REMOVED", "SUCCESS", resultCode, null, tx, activeLease.authorizationId);
             if (activeLease.authorizationId) await audit(candidate, "RELEASE_RETRY_COMPLETED", "SUCCESS", resultCode, null, tx, activeLease.authorizationId);
           });
