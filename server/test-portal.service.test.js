@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const path = require("path");
 const { createPortalService, normalizeIp, SESSION_MAX_AGE_SECONDS } = require("./src/services/portal.service");
 const { createPortalController } = require("./src/controllers/portal.controller");
 
@@ -69,6 +71,35 @@ test("lista somente a estação da sessão com paginação e DTO público", asyn
   assert.deepEqual(result.items.map((item) => item.id), [1]);
   const text = JSON.stringify(result);
   for (const forbidden of ["computadorId", "deviceId", "ipRegistrado", "origemChave", "filename", "senha", "password"]) assert.equal(text.includes(forbidden), false, forbidden);
+});
+
+test("portal projeta liberação sem arquivo ou localização e preserva a expiração", async () => {
+  const expiresAt = new Date("2026-09-18T12:00:00.000Z");
+  const db = database([{ id: 3, ip: "192.168.40.20", hostname: "PC-03", usuario: "tech", status: "online" }], [{ id: 1, computadorId: 3, certificadoId: 7, estado: "APROVADA", statusLiberacao: "LIBERADO" }]);
+  const releaseService = { releaseStatus: () => "LIBERADO", publicRelease: () => ({ nomeArquivoLiberado: "secret.pfx", compartilhamento: "\\\\server\\share", liberadoEm: new Date(), releasedAt: new Date(), expiresAt }) };
+  const service = createPortalService({ db, releaseService });
+  const result = await service.listOwnRequests({ computerId: 3 }, { page: 1, pageSize: 10 });
+  assert.deepEqual(result.items[0].liberacao, { liberadoEm: result.items[0].liberacao.liberadoEm, releasedAt: result.items[0].liberacao.releasedAt, expiresAt });
+  const text = JSON.stringify(result);
+  for (const forbidden of ["nomeArquivoLiberado", "compartilhamento", "\\\\server\\share", "secret.pfx"]) assert.equal(text.includes(forbidden), false, forbidden);
+  assert.equal(result.items[0].statusLiberacao, "LIBERADO");
+});
+
+test("portal expirado não retorna informações do arquivo", async () => {
+  const db = database([{ id: 3, ip: "192.168.40.20", hostname: "PC-03", usuario: "tech", status: "online" }], [{ id: 1, computadorId: 3, certificadoId: 7, estado: "APROVADA", statusLiberacao: "LIBERADO" }]);
+  const service = createPortalService({ db, releaseService: { releaseStatus: () => "EXPIRADA", publicRelease: () => null } });
+  const result = await service.listOwnRequests({ computerId: 3 }, { page: 1, pageSize: 10 });
+  assert.equal(result.items[0].statusLiberacao, "EXPIRADA");
+  assert.equal(result.items[0].liberacao, undefined);
+});
+
+test("apresentação do funcionário não usa cópia, UNC ou erro de compartilhamento", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "dashboard", "src", "components", "PortalCertificados.jsx"), "utf8");
+  assert.equal(source.includes("navigator.clipboard"), false);
+  assert.equal(source.includes("Copiar compartilhamento"), false);
+  assert.equal(source.includes("Não foi possível copiar"), false);
+  assert.equal(source.includes("Certificado disponível na pasta Certificados."), true);
+  assert.equal(source.includes("Liberação expirada. Faça uma nova solicitação."), true);
 });
 
 test("estados, motivo de negativa e transições são restritos", async () => {
