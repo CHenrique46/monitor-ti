@@ -10,6 +10,9 @@ using System.Windows.Forms;
 using System.Security.Principal;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace MonitorTI
 {
@@ -68,6 +71,94 @@ namespace MonitorTI
         public string level;
         public string scheduledAt;
         public string serverTime;
+    }
+
+    public sealed class CertificateNotificationPayload
+    {
+        public string eventId;
+        public string eventType;
+    }
+
+    public sealed class CertificateToastResult
+    {
+        public bool Succeeded;
+        public string Code;
+    }
+
+    public static class CertificateToast
+    {
+        public const string AppUserModelId = "HenriTech.Control.Notifier";
+        private const string TestEventType = "CERTIFICATE_NOTIFICATION_TEST";
+        private const string RequestCreatedEventType = "CERTIFICATE_REQUEST_CREATED";
+        private const string ReleasedEventType = "CERTIFICATE_RELEASED";
+
+        public static bool IsAllowedEventType(string eventType)
+        {
+            return string.Equals(eventType, TestEventType, StringComparison.Ordinal) ||
+                string.Equals(eventType, RequestCreatedEventType, StringComparison.Ordinal) ||
+                string.Equals(eventType, ReleasedEventType, StringComparison.Ordinal);
+        }
+
+        public static CertificateToastResult Show(CertificateNotificationPayload payload)
+        {
+            if (payload == null || string.IsNullOrEmpty(payload.eventId) || !IsAllowedEventType(payload.eventType))
+                return new CertificateToastResult { Succeeded = false, Code = "INVALID_EVENT" };
+
+            string title;
+            string body;
+            if (string.Equals(payload.eventType, TestEventType, StringComparison.Ordinal))
+            {
+                title = "HenriTech Control";
+                body = "Teste concluído. As notificações de certificados estão funcionando nesta máquina.";
+            }
+            else if (string.Equals(payload.eventType, RequestCreatedEventType, StringComparison.Ordinal))
+            {
+                title = "Nova solicitação de certificado";
+                body = "Uma nova solicitação de certificado aguarda análise.";
+            }
+            else
+            {
+                title = "Certificado liberado";
+                body = "Seu certificado está disponível na pasta Certificados.";
+            }
+
+            try
+            {
+                Type xmlType = Type.GetType("Windows.Data.Xml.Dom.XmlDocument, Windows, ContentType=WindowsRuntime", true);
+                Type toastType = Type.GetType("Windows.UI.Notifications.ToastNotification, Windows, ContentType=WindowsRuntime", true);
+                Type managerType = Type.GetType("Windows.UI.Notifications.ToastNotificationManager, Windows, ContentType=WindowsRuntime", true);
+                object document = Activator.CreateInstance(xmlType);
+                string xml = "<toast><visual><binding template=\"ToastGeneric\"><text>" + EscapeXml(title) + "</text><text>" + EscapeXml(body) + "</text></binding></visual></toast>";
+                xmlType.GetMethod("LoadXml", new[] { typeof(string) }).Invoke(document, new object[] { xml });
+                object toast = Activator.CreateInstance(toastType, new[] { document });
+                MethodInfo createNotifier = managerType.GetMethod("CreateToastNotifier", new[] { typeof(string) });
+                object notifier = createNotifier.Invoke(null, new object[] { AppUserModelId });
+                notifier.GetType().GetMethod("Show").Invoke(notifier, new[] { toast });
+                return new CertificateToastResult { Succeeded = true, Code = null };
+            }
+            catch
+            {
+                return new CertificateToastResult { Succeeded = false, Code = "TOAST_DISPLAY_FAILED" };
+            }
+        }
+
+        private static string EscapeXml(string value)
+        {
+            return (value ?? "").Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&apos;");
+        }
+    }
+
+    public static class ToastIdentity
+    {
+        public const string ShortcutName = "HenriTech Control.lnk";
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+
+        public static bool SetCurrentProcessIdentity()
+        {
+            return SetCurrentProcessExplicitAppUserModelID(CertificateToast.AppUserModelId) == 0;
+        }
     }
 
     public class Program
@@ -182,6 +273,7 @@ namespace MonitorTI
             {
                 if (HasArg(args, "--companion"))
                 {
+                    ToastIdentity.SetCurrentProcessIdentity();
                     RunCompanionMode(args);
                     return;
                 }
@@ -262,6 +354,8 @@ namespace MonitorTI
 
         private static void RunCompanionMode(string[] args)
         {
+            Application.ThreadException += (s, e) => Log("companion ThreadException: " + e.Exception.Message);
+            AppDomain.CurrentDomain.UnhandledException += (s, e) => Log("companion UnhandledException: " + (e.ExceptionObject == null ? "unknown" : e.ExceptionObject.ToString()));
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Log("companion mode iniciado; pipe=" + CompanionPipeName + "; sessionId=" + CurrentSessionId());
@@ -321,6 +415,48 @@ namespace MonitorTI
             p.scheduledAt = GetJsonString(json, "scheduledAt");
             p.serverTime = GetJsonString(json, "serverTime");
             return p;
+        }
+
+        private static NoticePayload ParseCertificateNotificationTest(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            if (!HasOnlyJsonKeys(json, new[] { "type", "protocolVersion", "eventId", "eventType" })) return null;
+            string eventType = GetJsonString(json, "eventType");
+            string eventId = GetJsonString(json, "eventId");
+            Guid parsedId;
+            if (!CertificateToast.IsAllowedEventType(eventType) || !Guid.TryParse(eventId, out parsedId)) return null;
+            return new NoticePayload
+            {
+                noticeDeliveryId = eventId,
+                title = "",
+                message = "",
+                level = "info",
+                serverTime = DateTime.UtcNow.ToString("o")
+            };
+        }
+
+        private static CertificateNotificationPayload ParseCertificatePayload(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            if (!HasOnlyJsonKeys(json, new[] { "type", "protocolVersion", "eventId", "eventType" })) return null;
+            string eventType = GetJsonString(json, "eventType");
+            string eventId = GetJsonString(json, "eventId");
+            Guid parsedId;
+            if (!CertificateToast.IsAllowedEventType(eventType) || !Guid.TryParse(eventId, out parsedId)) return null;
+            return new CertificateNotificationPayload { eventId = eventId, eventType = eventType };
+        }
+
+        private static bool HasOnlyJsonKeys(string json, string[] allowed)
+        {
+            var allowedSet = new HashSet<string>(allowed, StringComparer.Ordinal);
+            var matches = Regex.Matches(json, "\\\"([A-Za-z][A-Za-z0-9_]*)\\\"\\s*:");
+            var found = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Match match in matches)
+            {
+                string key = match.Groups[1].Value;
+                if (!allowedSet.Contains(key) || !found.Add(key)) return false;
+            }
+            return found.Count == allowedSet.Count;
         }
 
         private static string GetPipeMessageType(string json)
@@ -827,6 +963,9 @@ namespace MonitorTI
             private volatile bool _registered;
             private volatile bool _ready;
             private volatile bool _disposed;
+            private readonly HashSet<string> _certificateEventIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            private readonly Queue<string> _certificateEventOrder = new Queue<string>();
+            private const int MAX_CERTIFICATE_EVENTS = 100;
 
             public CompanionController(Control ui, string[] args)
             {
@@ -991,6 +1130,42 @@ namespace MonitorTI
                     return;
                 }
 
+                if (string.Equals(type, "certificate_notification_test", StringComparison.OrdinalIgnoreCase))
+                {
+                    var payload = ParseCertificatePayload(line);
+                    if (payload == null)
+                    {
+                        Log("certificate_notification_test rejeitado");
+                        SendCertificateStatus(null, null, "FAILED", "INVALID_EVENT");
+                        return;
+                    }
+                    if (_certificateEventIds.Contains(payload.eventId))
+                    {
+                        Log("certificate_notification_duplicate");
+                        SendCertificateStatus(payload.eventId, payload.eventType, "DUPLICATE", null);
+                        return;
+                    }
+                    if (_certificateEventIds.Count >= MAX_CERTIFICATE_EVENTS)
+                    {
+                        Log("certificate_notification_failed code=TOAST_UNAVAILABLE");
+                        SendCertificateStatus(payload.eventId, payload.eventType, "FAILED", "TOAST_UNAVAILABLE");
+                        return;
+                    }
+                    _certificateEventIds.Add(payload.eventId);
+                    _certificateEventOrder.Enqueue(payload.eventId);
+                    while (_certificateEventOrder.Count > MAX_CERTIFICATE_EVENTS)
+                    {
+                        _certificateEventIds.Remove(_certificateEventOrder.Dequeue());
+                    }
+                    if (_ui.IsDisposed)
+                    {
+                        SendCertificateStatus(payload.eventId, payload.eventType, "FAILED", "TOAST_UNAVAILABLE");
+                        return;
+                    }
+                    _ui.BeginInvoke((Action)(() => ShowCertificateToastOnUi(payload)));
+                    return;
+                }
+
                 if (string.Equals(type, "wallpaper_apply", StringComparison.OrdinalIgnoreCase))
                 {
                     var actionId = GetJsonString(line, "actionExecutionId");
@@ -1078,6 +1253,47 @@ namespace MonitorTI
                 _currentForm.TopMost = true;
                 _currentForm.ShowInTaskbar = true;
                 _currentForm.Show();
+            }
+
+            private void ShowCertificateToastOnUi(CertificateNotificationPayload payload)
+            {
+                try
+                {
+                    CertificateToastResult result = CertificateToast.Show(payload);
+                    if (result.Succeeded)
+                    {
+                        Log("certificate_notification_displayed");
+                        SendCertificateStatus(payload.eventId, payload.eventType, "DISPLAYED", null);
+                    }
+                    else
+                    {
+                        Log("certificate_notification_failed code=" + (result.Code ?? "TOAST_DISPLAY_FAILED"));
+                        SendCertificateStatus(payload.eventId, payload.eventType, "FAILED", result.Code ?? "TOAST_DISPLAY_FAILED");
+                    }
+                }
+                catch
+                {
+                    Log("certificate_notification_failed code=TOAST_DISPLAY_FAILED");
+                    SendCertificateStatus(payload.eventId, payload.eventType, "FAILED", "TOAST_DISPLAY_FAILED");
+                }
+            }
+
+            private void SendCertificateStatus(string eventId, string eventType, string status, string errorCode)
+            {
+                var pairs = new List<string>
+                {
+                    "type", JsonStringLiteral("certificate_notification_test_status"),
+                    "protocolVersion", PROTOCOL_VERSION.ToString(),
+                    "eventId", eventId == null ? "null" : JsonStringLiteral(eventId),
+                    "eventType", eventType == null ? "null" : JsonStringLiteral(eventType),
+                    "status", JsonStringLiteral(status)
+                };
+                if (!string.IsNullOrEmpty(errorCode))
+                {
+                    pairs.Add("errorCode");
+                    pairs.Add(JsonStringLiteral(errorCode));
+                }
+                SendRaw(BuildJsonLine(pairs.ToArray()));
             }
 
             private void SendRegister()

@@ -50,6 +50,7 @@ execSync(
 // 5) arquivos de apoio
 fs.copyFileSync(path.join(root, "config.json"), path.join(rel, "config.json"));
 fs.copyFileSync(path.join(root, "..", "installer", "notifier-companion-task.ps1"), path.join(rel, "notifier-companion-task.ps1"));
+fs.copyFileSync(path.join(root, "..", "installer", "notifier-toast-identity.ps1"), path.join(rel, "notifier-toast-identity.ps1"));
 if (fs.existsSync(path.join(root, "LEIA-ME.txt"))) {
   fs.copyFileSync(path.join(root, "LEIA-ME.txt"), path.join(rel, "LEIA-ME.txt"));
 }
@@ -64,16 +65,52 @@ if (fs.existsSync(csc) && fs.existsSync(notifierSrc)) {
     stdio: "inherit"
   });
 } else {
-  console.warn("csc ou fonte do Notifier ausente; pulando compilacao do Notifier.");
+  throw new Error("csc ou fonte do Notifier ausente; pacote do piloto incompleto.");
 }
 
-if (fs.existsSync(notifierOut)) {
-  const notifierBytes = fs.readFileSync(notifierOut);
-  fs.writeFileSync(path.join(rel, "notifier-integrity.json"), JSON.stringify({
-    version: agentPackage.version,
-    notifierSha256: crypto.createHash("sha256").update(notifierBytes).digest("hex"),
-    notifierSize: notifierBytes.length
-  }, null, 2));
+const notifierBytes = fs.readFileSync(notifierOut);
+fs.writeFileSync(path.join(rel, "notifier-integrity.json"), JSON.stringify({
+  version: agentPackage.version,
+  notifierSha256: crypto.createHash("sha256").update(notifierBytes).digest("hex"),
+  notifierSize: notifierBytes.length
+}, null, 2));
+
+for (const name of [
+  "notifier-companion-task.ps1",
+  "notifier-toast-identity.ps1",
+  "install-certificate-notification-pilot-v6.ps1",
+  "rollback-certificate-notification-pilot-v6.ps1",
+  "set-certificate-toast-pilot-flag-v6.ps1",
+  "collect-pilot-status-v6.ps1"
+]) {
+  fs.copyFileSync(path.join(root, "..", "installer", name), path.join(rel, name));
 }
+
+const manifestNames = [
+  "MonitorTI-Agent.exe",
+  "MonitorTI-Notifier.exe",
+  "config.json",
+  "notifier-companion-task.ps1",
+  "notifier-toast-identity.ps1",
+  "LEIA-ME.txt",
+  "notifier-integrity.json",
+  "install-certificate-notification-pilot-v6.ps1",
+  "rollback-certificate-notification-pilot-v6.ps1",
+  "set-certificate-toast-pilot-flag-v6.ps1",
+  "collect-pilot-status-v6.ps1"
+];
+const artifacts = Object.fromEntries(manifestNames.map((name) => {
+  const file = fs.readFileSync(path.join(rel, name));
+  return [name, {
+    size: file.length,
+    sha256: crypto.createHash("sha256").update(file).digest("hex")
+  }];
+}));
+fs.writeFileSync(path.join(rel, "manifest-pilot.json"), JSON.stringify({
+  schemaVersion: 1,
+  packageRevision: "6.1",
+  purpose: "LOCAL_REVIEW_ONLY",
+  artifacts
+}, null, 2) + "\n");
 
 console.log("Build concluido: " + path.join(rel, "MonitorTI-Agent.exe"));

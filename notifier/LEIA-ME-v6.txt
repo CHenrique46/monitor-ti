@@ -1,0 +1,16 @@
+HenriTech Control - revisão 6 - implementação local
+
+Esta revisão contém apenas a implementação local do toast nativo de certificados.
+Não instalar no Anderson, não reiniciar serviços e não enviar eventos.
+
+O Notifier usa textos locais allowlisted, não abre a janela grande para certificados
+e devolve status RECEIVED, DISPLAYED, DUPLICATE ou FAILED pelo Named Pipe.
+
+Identidade nativa:
+- AppUserModelID: HenriTech.Control.Notifier
+- Atalho controlado: HenriTech Control.lnk no Menu Iniciar do usuário interativo
+- Instalação: notifier-toast-identity.ps1 -Mode install
+- Rollback: notifier-toast-identity.ps1 -Mode remove
+
+O rollback remove o atalho somente quando ele aponta para MonitorTI-Notifier.exe
+com o argumento --companion; atalhos de terceiros não são removidos.

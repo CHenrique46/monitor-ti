@@ -1,4 +1,5 @@
 const { WebSocketServer } = require("ws");
+const { randomUUID } = require("crypto");
 const prisma = require("../prisma");
 const historicoService = require("../services/historico.service");
 const alertasService = require("../services/alertas.service");
@@ -9,8 +10,33 @@ const { persistOfficeInventory } = require("../inventory/persistence");
 const { queueComputerInventorySync } = require("../inventory/excelAutoSync");
 const logger = require("../logger");
 const agentUpdates = require("../services/agentUpdates.service");
+const PILOT_DEVICE_ID = "00000000-0000-4000-8000-000000000001";
+const PILOT_EVENT_TYPE = "CERTIFICATE_NOTIFICATION_TEST";
+const PILOT_MESSAGE_TYPE = "certificate_notification_test";
+const PILOT_ACK_TYPE = "certificate_notification_test_ack";
+const PILOT_CAPABILITY = "certificate_notification_test_v1";
+const UUID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const PILOT_ACK_STATUSES = new Set(["RECEIVED", "DISPLAYED", "DUPLICATE", "FAILED"]);
+const PILOT_ACK_CODES = new Set([
+  "PILOT_DISABLED",
+  "INVALID_EVENT",
+  "TOAST_UNAVAILABLE",
+  "TOAST_DISPLAY_FAILED",
+  "COMPANION_UNAVAILABLE"
+]);
 
 const HEARTBEAT_INTERVAL = 30000;
+
+function readPilotConfig(env = process.env) {
+  const enabled = env.MTI_CERTIFICATE_NOTIFICATION_TEST === "1";
+  const targetDeviceId = String(env.MTI_CERTIFICATE_NOTIFICATION_TARGET_DEVICE_ID || "");
+  const eventId = String(env.MTI_CERTIFICATE_NOTIFICATION_EVENT_ID || "");
+  if (!enabled || targetDeviceId !== PILOT_DEVICE_ID || !UUID_RE.test(eventId)) return null;
+  return Object.freeze({ targetDeviceId, eventId });
+}
+
+let pilotConfig = readPilotConfig();
+let pilotState = pilotConfig ? "pending" : "disabled";
 
 function summarizeReconciliationError(error) {
   const stack = String(error && error.stack || "")
@@ -37,6 +63,10 @@ const agentCaps = new Map();
 const connectionsByDeviceId = new Map();
 let wssRef = null;
 
+function logPilot(message) {
+  logger.logEvent(`[Monitor TI] ${message}`);
+}
+
 function mergeCapabilities(target, caps) {
   if (!Array.isArray(caps)) return;
   for (const cap of caps) {
@@ -58,6 +88,9 @@ function setCurrentConnection(ws) {
   agentCaps.set(ws.deviceId, new Set(ws.capabilities));
 }
 
+function isCurrentConnection(ws) {
+  return !!ws && ws.registered && connectionsByDeviceId.get(ws.deviceId) === ws;
+}
 
 function setCapabilities(deviceId, caps) {
   if (!deviceId) return;
@@ -162,6 +195,104 @@ function sendToAgent(deviceId, obj) {
   } catch (e) {
     return false;
   }
+}
+
+function sendCertificateNotificationTest(deviceId, send = sendToAgent, socket = null) {
+  if (!pilotConfig || deviceId !== pilotConfig.targetDeviceId) return false;
+  if (pilotState !== "pending") return false;
+  if (!hasCapability(pilotConfig.targetDeviceId, "notices")) return false;
+  if (!hasCapability(pilotConfig.targetDeviceId, PILOT_CAPABILITY)) {
+    logPilot("PILOT_CAPABILITY_MISSING");
+    return false;
+  }
+  const ws = socket || connectionsByDeviceId.get(deviceId);
+  if (send === sendToAgent && (!ws || ws.readyState !== 1 || (!socket && !isCurrentConnection(ws)))) return false;
+  logPilot(`PILOT_ELIGIBLE connectionId=${ws && ws.connectionId || "-"}`);
+  const payload = {
+    type: PILOT_MESSAGE_TYPE,
+    eventId: pilotConfig.eventId,
+    eventType: PILOT_EVENT_TYPE
+  };
+  pilotState = "sending";
+  logPilot(`PILOT_SEND_STARTED connectionId=${ws && ws.connectionId || "-"}`);
+
+  if (send !== sendToAgent) {
+    try {
+      const queued = send(deviceId, payload, (error) => {
+        if (error) {
+          pilotState = "failed";
+          logPilot(`PILOT_SEND_FAILED connectionId=${ws && ws.connectionId || "-"} code=SEND_CALLBACK_ERROR`);
+          return;
+        }
+        pilotState = "sent";
+        logPilot(`PILOT_SEND_QUEUED connectionId=${ws && ws.connectionId || "-"}`);
+      });
+      if (queued === false) {
+        pilotState = "failed";
+        logPilot(`PILOT_SEND_FAILED connectionId=${ws && ws.connectionId || "-"} code=SEND_REJECTED`);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      pilotState = "failed";
+      logPilot(`PILOT_SEND_FAILED connectionId=${ws && ws.connectionId || "-"} code=SEND_THROW`);
+      return false;
+    }
+  }
+
+  if (!ws) {
+    pilotState = "failed";
+    logPilot("PILOT_SEND_FAILED connectionId=- code=SOCKET_NOT_FOUND");
+    return false;
+  }
+  try {
+    ws.send(JSON.stringify(payload), (error) => {
+      if (error) {
+        pilotState = "failed";
+        logPilot(`PILOT_SEND_FAILED connectionId=${ws.connectionId} code=SEND_CALLBACK_ERROR`);
+        return;
+      }
+      pilotState = "sent";
+      logPilot(`PILOT_SEND_QUEUED connectionId=${ws.connectionId}`);
+    });
+    return true;
+  } catch (error) {
+    pilotState = "failed";
+    logPilot(`PILOT_SEND_FAILED connectionId=${ws.connectionId} code=SEND_THROW`);
+    return false;
+  }
+}
+
+async function maybeDispatchCertificateNotificationTest(deviceId, socket = null) {
+  return sendCertificateNotificationTest(deviceId, sendToAgent, socket);
+}
+
+function logPilotAck(ws, msg) {
+  if (!pilotConfig || !ws || ws.deviceId !== pilotConfig.targetDeviceId) return false;
+  if (!msg || msg.type !== PILOT_ACK_TYPE || msg.eventId !== pilotConfig.eventId) return false;
+  if (Object.keys(msg).some((key) => !["type", "eventId", "status", "errorCode"].includes(key))) return false;
+  if (!PILOT_ACK_STATUSES.has(msg.status)) return false;
+  const errorCode = msg.errorCode == null ? null : String(msg.errorCode);
+  if (errorCode !== null && !PILOT_ACK_CODES.has(errorCode)) return false;
+  if (pilotState !== "sent" && msg.status !== "RECEIVED") return false;
+  if (msg.status !== "RECEIVED") pilotState = msg.status === "FAILED" ? "failed" : "acknowledged";
+  logPilot(`PILOT_ACK_RECEIVED connectionId=${ws.connectionId || "-"} status=${msg.status}` +
+    ` code=${errorCode || "-"}`);
+  return true;
+}
+
+function resetPilotStateForTests() {
+  pilotState = pilotConfig ? "pending" : "disabled";
+}
+
+function getPilotStateForTests() {
+  return pilotState;
+}
+
+function reloadPilotConfigForTests(env = process.env) {
+  pilotConfig = readPilotConfig(env);
+  resetPilotStateForTests();
+  return pilotConfig;
 }
 
 function markOffline(deviceId, exceptWs, db = prisma) {
@@ -281,6 +412,7 @@ function setupWebSocket(server, dependencies = {}) {
   wss.stopHeartbeat = () => clearInterval(heartbeat);
 
   wss.on("connection", (ws) => {
+    ws.connectionId = randomUUID();
     ws.isAlive = true;
     ws.deviceId = null;
     ws.registered = false;
@@ -310,13 +442,25 @@ function setupWebSocket(server, dependencies = {}) {
         return;
       }
 
+      if (msg && msg.type === PILOT_ACK_TYPE) {
+        logPilotAck(ws, msg);
+        return;
+      }
+
       if (msg && msg.type === "capabilities" && (msg.deviceId || ws.deviceId)) {
         if (msg.deviceId && ws.deviceId && msg.deviceId !== ws.deviceId) return;
         const dev = ws.deviceId || msg.deviceId;
         applySocketCapabilities(ws, msg.data && msg.data.capabilities);
-        console.log("[Monitor TI] capacidades de " + dev + ": " + (Array.from(ws.registered ? ws.capabilities : ws.pendingCapabilities).join(",") || "(vazio)"));
+        if (!ws.registered) {
+          logPilot(`CAPABILITIES_BUFFERED connectionId=${ws.connectionId}`);
+        } else {
+          logPilot(`CAPABILITIES_APPLIED connectionId=${ws.connectionId}`);
+          await maybeDispatchCertificateNotificationTest(dev, ws);
+        }
+        console.log(`[Monitor TI] capacidades de ${dev}: ${Array.from(ws.registered ? ws.capabilities : ws.pendingCapabilities).join(",") || "(vazio)"}`);
         return;
       }
+
       if (msg && msg.type === "update_status") {
         if (!ws.deviceId) {
           logger.logEvent("[Monitor TI] update_status rejeitado: conexão não registrada");
@@ -512,7 +656,10 @@ function setupWebSocket(server, dependencies = {}) {
           ws.capabilities = new Set(ws.pendingCapabilities);
           setCurrentConnection(ws);
           applySocketCapabilities(ws, d.capabilities);
-          console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
+          logPilot(`REGISTER_COMPLETED connectionId=${ws.connectionId}`);
+          logPilot(`CAPABILITIES_APPLIED connectionId=${ws.connectionId}`);
+          await maybeDispatchCertificateNotificationTest(d.deviceId, ws);
+            console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
            ws.send(JSON.stringify({ type: "register_ack", protocolVersion: 1, deviceId: d.deviceId }));
            ws.send(JSON.stringify({
             type: "remote_action_reconcile_request",
@@ -609,6 +756,7 @@ function setupWebSocket(server, dependencies = {}) {
         connectionsByDeviceId.delete(ws.deviceId);
         clearCapabilities(ws.deviceId);
       }
+      logPilot(`CONNECTION_CLOSED connectionId=${ws.connectionId} registered=${ws.registered ? "true" : "false"}`);
       markOffline(ws.deviceId, ws, db);
     });
 
@@ -625,6 +773,14 @@ function setupWebSocket(server, dependencies = {}) {
 module.exports = {
   setupWebSocket,
   sendToAgent,
+  sendCertificateNotificationTest,
+  maybeDispatchCertificateNotificationTest,
+  handleCertificateNotificationTestAck: logPilotAck,
+  reloadPilotConfigForTests,
+  resetPilotStateForTests,
+  getPilotStateForTests,
+  PILOT_DEVICE_ID,
+  PILOT_CAPABILITY,
   getUpdateState,
   setUpdateState,
   clearUpdateState,

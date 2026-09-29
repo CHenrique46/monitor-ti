@@ -1,6 +1,6 @@
 param(
   [ValidateSet("install","create","update","remove","run","query","queryxml","state")]
-  [string]$Mode = "install",
+  [string]$Mode = "query",
   [string]$InstallDir = $PSScriptRoot
 )
 
@@ -13,6 +13,7 @@ $Executable = [System.IO.Path]::Combine($InstallDir, "MonitorTI-Notifier.exe")
 $WorkingDirectory = $InstallDir
 $Arguments = '--companion'
 $GroupId = 'S-1-5-11'
+$ToastIdentityScript = [System.IO.Path]::Combine($PSScriptRoot, "notifier-toast-identity.ps1")
 
 function Get-NotifierTask {
   Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -168,6 +169,7 @@ function New-NotifierTaskRegistrationArgs {
 function Install-Or-UpdateTask {
   $current = Get-NotifierTask
   if (Test-NotifierTaskMatches $current) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ToastIdentityScript -Mode install -InstallDir $InstallDir | Out-Null
     Write-Output "unchanged"
     return
   }
@@ -178,10 +180,12 @@ function Install-Or-UpdateTask {
   if (-not (Test-NotifierTaskMatches $verified)) {
     throw "tarefa registrada, mas nao validada com a definicao esperada"
   }
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ToastIdentityScript -Mode install -InstallDir $InstallDir | Out-Null
   Write-Output ($(if ($created) { "created" } else { "updated" }))
 }
 
 function Remove-Task {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ToastIdentityScript -Mode remove -InstallDir $InstallDir | Out-Null
   $current = Get-NotifierTask
   if ($current) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
