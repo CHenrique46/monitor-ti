@@ -40,8 +40,9 @@ function makeRuntime(options = {}) {
   let disconnectCalls = 0;
   let tickCalls = 0;
   let stopped = false;
+  let stopCompleted = false;
   const scheduler = {
-    stop() { stopped = true; order.push("scheduler-stop"); },
+    async stop() { stopped = true; order.push("scheduler-stop"); await new Promise((resolve) => setTimeout(resolve, options.schedulerStopDelay || 0)); stopCompleted = true; order.push("scheduler-stopped"); },
     tick() { if (!stopped) tickCalls++; }
   };
   const prisma = {
@@ -63,7 +64,7 @@ function makeRuntime(options = {}) {
     setShuttingDown: () => order.push("shutting-down"),
     log: (message) => order.push(message)
   });
-  return { controller, processRef, server, wss, prisma, scheduler, order, get disconnectCalls() { return disconnectCalls; }, get tickCalls() { return tickCalls; } };
+  return { controller, processRef, server, wss, prisma, scheduler, order, get disconnectCalls() { return disconnectCalls; }, get tickCalls() { return tickCalls; }, get stopCompleted() { return stopCompleted; } };
 }
 
 test("SIGINT and SIGTERM are single-shot and exit cleanly", async () => {
@@ -124,10 +125,11 @@ test("slow or failed Prisma disconnect preserves controlled exit", async () => {
 });
 
 test("scheduler stops before cleanup and no new tick starts", async () => {
-  const runtime = makeRuntime({ cleanup: async () => { await new Promise((resolve) => setTimeout(resolve, 10)); runtime.scheduler.tick(); } });
+  const runtime = makeRuntime({ schedulerStopDelay: 10, cleanup: async () => { assert.equal(runtime.stopCompleted, true); runtime.scheduler.tick(); } });
   await runtime.controller.shutdown("SIGINT");
   assert.equal(runtime.tickCalls, 0);
   assert.ok(runtime.order.indexOf("scheduler-stop") < runtime.order.indexOf("prisma"));
+  assert.ok(runtime.order.indexOf("scheduler-stopped") < runtime.order.indexOf("prisma"));
 });
 
 test("total shutdown remains below the configured limit", async () => {

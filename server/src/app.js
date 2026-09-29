@@ -30,6 +30,8 @@ const avisosService = require("./services/avisos.service");
 const maintenanceScheduler = require("./services/maintenanceScheduler.service");
 const { createExcelSyncWorker } = require("./inventory/excelSyncWorker");
 const { createPortalService } = require("./services/portal.service");
+const { createCertificateReleaseService } = require("./services/certificateRelease.service");
+const { createCertificateReleaseCleanupScheduler, startConfiguredCertificateReleaseCleanupScheduler } = require("./services/certificateReleaseCleanupScheduler.service");
 const { browserNotificationHub } = require("./services/browserNotificationHub");
 const { createBrowserNotificationRouters } = require("./routes/browserNotification.routes");
 const certificateCatalogSyncService = require("./services/certificateCatalogSync.service");
@@ -41,7 +43,9 @@ const app = express();
 app.locals.shuttingDown = false;
 const authService = createAuthService();
 const excelSyncWorker = createExcelSyncWorker({ db: prisma, log: (message) => logEvent(`[Monitor TI] ${message}`) });
-const portalService = createPortalService({ db: prisma, browserNotifications: browserNotificationHub });
+const certificateReleaseService = createCertificateReleaseService({ db: prisma, log: logEvent });
+const certificateReleaseCleanupScheduler = createCertificateReleaseCleanupScheduler({ service: certificateReleaseService, log: logEvent });
+const portalService = createPortalService({ db: prisma, releaseService: certificateReleaseService, browserNotifications: browserNotificationHub });
 const smbCredentialConnection = createSmbCredentialConnection();
 
 app.use(express.json());
@@ -134,7 +138,7 @@ async function startServer() {
     const shutdownController = createShutdownController({
       server,
       wss,
-      schedulers: [certificateCatalogSyncScheduler, maintenanceScheduler, avisosService, historicoService, excelSyncWorker],
+      schedulers: [certificateReleaseCleanupScheduler, certificateCatalogSyncScheduler, maintenanceScheduler, avisosService, historicoService, excelSyncWorker],
       prisma,
       cleanup: smbCredentialConnection.disconnect,
       setShuttingDown: (value) => { app.locals.shuttingDown = value; },
@@ -156,6 +160,7 @@ async function startServer() {
     avisosService.iniciarAgendador();
     maintenanceScheduler.start();
     excelSyncWorker.start();
+    app.locals.certificateReleaseCleanup = startConfiguredCertificateReleaseCleanupScheduler({ scheduler: certificateReleaseCleanupScheduler, log: logEvent });
     return { server, wss, shutdown: shutdownController.shutdown, unregisterSignals };
 }
 
