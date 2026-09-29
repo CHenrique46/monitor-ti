@@ -12,7 +12,7 @@ const remoteActions = require("./remoteActions");
 const { createRemoteActionStore } = require("./remoteActionStore");
 const { collectOfficeInventory } = require("./inventory/office");
 const { createOfficeInventorySender, scheduleOfficeInventory } = require("./inventory/officeProtocol");
-const { selectLanIPv4 } = require("./network");
+const { selectLanIPv4, preserveLanIPv4 } = require("./network");
 const { createConnectionLifecycle } = require("./connectionLifecycle");
 const { createRegistry64Adapter, ensureBrowserNotificationPolicies } = require("./browserNotificationPolicy");
 
@@ -346,7 +346,7 @@ function cpuUsagePercent() {
   return Math.max(0, Math.min(100, Math.round(usage * 10) / 10));
 }
 
-async function collectMetrics(deviceId) {
+async function collectMetrics(deviceId, ip = null) {
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
 
@@ -362,6 +362,7 @@ async function collectMetrics(deviceId) {
 
   return {
     deviceId,
+    ip,
     cpu: cpuUsagePercent(),
     ramTotal: totalMem,
     ramUsada: totalMem - freeMem,
@@ -677,7 +678,8 @@ function startMetrics(ws, machine) {
   metricsTimer = setInterval(async () => {
     if (ws.readyState !== WebSocket.OPEN) return;
     try {
-      const metrics = await collectMetrics(machine.deviceId);
+      machine.ip = preserveLanIPv4(machine.ip, os.networkInterfaces());
+      const metrics = await collectMetrics(machine.deviceId, machine.ip);
       ws.send(JSON.stringify({ type: "metrics", data: metrics }));
     } catch (e) {
       // ignora falha pontual
@@ -716,6 +718,7 @@ const connectionLifecycle = createConnectionLifecycle({
   onConnect: (ws) => { activeWs = ws; },
   onOpen: (ws, currentMachine) => {
     logEvent("Conectado ao Monitor TI Server.");
+    currentMachine.ip = preserveLanIPv4(currentMachine.ip, os.networkInterfaces());
     ws.send(JSON.stringify({ type: "register", data: currentMachine }));
     logEvent("register enviado");
     startMetrics(ws, currentMachine);

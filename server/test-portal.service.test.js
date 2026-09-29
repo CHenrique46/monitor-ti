@@ -26,6 +26,9 @@ function database(computers = [{ id: 3, ip: "192.168.40.20", hostname: "PC-03", 
   };
 }
 
+const testIpConfirmation = { isConfirmed: () => true };
+function portalService(options = {}) { return createPortalService({ ...options, ipConfirmation: testIpConfirmation }); }
+
 async function internalSession(service, ip = "192.168.40.20") {
   const created = await service.createSession(ip);
   return service.getSession(created.id, ip);
@@ -34,18 +37,31 @@ async function internalSession(service, ip = "192.168.40.20") {
 test("valida IP, normaliza IPv4 mapeado e bloqueia loopback, offline e ambiguidade", async () => {
   assert.equal(normalizeIp("192.168.40.20"), "192.168.40.20");
   assert.equal(normalizeIp("::ffff:192.168.40.20"), "192.168.40.20");
-  assert.equal(normalizeIp("2001:db8::20"), "2001:db8::20");
+  assert.equal(normalizeIp("2001:0DB8:0:0:0:0:0:20"), "2001:db8::20");
   assert.equal(normalizeIp("not-an-ip"), null);
-  await assert.rejects(() => createPortalService({ db: database([{ id: 1, ip: "127.0.0.1", status: "online" }]) }).createSession("127.0.0.1"), { code: "PORTAL_LOOPBACK_BLOCKED" });
-  await assert.rejects(() => createPortalService({ db: database([{ id: 1, ip: "192.168.40.20", status: "offline" }]) }).createSession("192.168.40.20"), { code: "PORTAL_COMPUTER_NOT_FOUND" });
-  await assert.rejects(() => createPortalService({ db: database([{ id: 1, ip: "192.168.40.20", status: "online" }, { id: 2, ip: "192.168.40.20", status: "online" }]) }).createSession("192.168.40.20"), { code: "PORTAL_COMPUTER_AMBIGUOUS" });
-  await assert.rejects(() => createPortalService({ db: database() }).createSession("not-an-ip"), { code: "PORTAL_IP_INVALID" });
+  await assert.rejects(() => portalService({ db: database([{ id: 1, ip: "127.0.0.1", status: "online" }]) }).createSession("127.0.0.1"), { code: "PORTAL_LOOPBACK_BLOCKED" });
+  await assert.rejects(() => portalService({ db: database([{ id: 1, ip: "192.168.40.20", status: "offline" }]) }).createSession("192.168.40.20"), { code: "PORTAL_COMPUTER_NOT_FOUND" });
+  await assert.rejects(() => portalService({ db: database([{ id: 1, ip: "192.168.40.20", status: "online" }, { id: 2, ip: "192.168.40.20", status: "online" }]) }).createSession("192.168.40.20"), { code: "PORTAL_COMPUTER_AMBIGUOUS" });
+  await assert.rejects(() => portalService({ db: database() }).createSession("not-an-ip"), { code: "PORTAL_IP_INVALID" });
+});
+
+test("identifica portal pelo IP efetivo da requisição, não por X-Forwarded-For ou hostname", async () => {
+  const service = portalService({ db: database([{ id: 77, ip: "192.168.40.77", hostname: "FICTITIOUS-77", status: "online" }]) });
+  const controller = createPortalController({ service });
+  let captured;
+  const response = { set: () => {}, status: () => ({ json: () => {} }) };
+  const original = service.createSession;
+  service.createSession = async (ip) => { captured = ip; return original(ip); };
+  await controller.start({ ip: "::ffff:192.168.40.77", headers: { "x-forwarded-for": "192.168.40.1" }, body: { hostname: "FICTITIOUS-OTHER" } }, response);
+  assert.equal(captured, "::ffff:192.168.40.77");
+  assert.equal(service._sessions.size, 1);
+  assert.equal(Array.from(service._sessions.values())[0].computerId, 77);
 });
 
 test("usa sessão interna, ignora identidade forjada e produz cookie de 15 minutos", async () => {
   let now = 1000;
   const db = database();
-  const service = createPortalService({ db, now: () => now, cookieSecure: true, randomBytes: () => Buffer.alloc(32, 7) });
+  const service = portalService({ db, now: () => now, cookieSecure: true, randomBytes: () => Buffer.alloc(32, 7) });
   const created = await service.createSession("192.168.40.20");
   const token = created.id;
   const session = await service.getSession(token, "192.168.40.20");
@@ -65,7 +81,7 @@ test("usa sessão interna, ignora identidade forjada e produz cookie de 15 minut
 
 test("lista somente a estação da sessão com paginação e DTO público", async () => {
   const db = database([{ id: 3, ip: "192.168.40.20", hostname: "PC-03", status: "online" }, { id: 4, ip: "192.168.40.21", hostname: "PC-04", status: "online" }], [{ id: 1, computadorId: 3, certificadoId: 7, motivo: "troca", solicitadoEm: new Date() }, { id: 2, computadorId: 4, certificadoId: 7, solicitadoEm: new Date() }]);
-  const service = createPortalService({ db });
+  const service = portalService({ db });
   const session = await internalSession(service);
   const result = await service.listOwnRequests(session, { page: 1, pageSize: 10, computadorId: 4 });
   assert.deepEqual(result.items.map((item) => item.id), [1]);
@@ -77,7 +93,7 @@ test("portal projeta liberação sem arquivo ou localização e preserva a expir
   const expiresAt = new Date("2026-09-18T12:00:00.000Z");
   const db = database([{ id: 3, ip: "192.168.40.20", hostname: "PC-03", usuario: "tech", status: "online" }], [{ id: 1, computadorId: 3, certificadoId: 7, estado: "APROVADA", statusLiberacao: "LIBERADO" }]);
   const releaseService = { releaseStatus: () => "LIBERADO", publicRelease: () => ({ nomeArquivoLiberado: "secret.pfx", compartilhamento: "\\\\server\\share", liberadoEm: new Date(), releasedAt: new Date(), expiresAt }) };
-  const service = createPortalService({ db, releaseService });
+  const service = portalService({ db, releaseService });
   const result = await service.listOwnRequests({ computerId: 3 }, { page: 1, pageSize: 10 });
   assert.deepEqual(result.items[0].liberacao, { liberadoEm: result.items[0].liberacao.liberadoEm, releasedAt: result.items[0].liberacao.releasedAt, expiresAt });
   const text = JSON.stringify(result);
@@ -87,7 +103,7 @@ test("portal projeta liberação sem arquivo ou localização e preserva a expir
 
 test("portal expirado não retorna informações do arquivo", async () => {
   const db = database([{ id: 3, ip: "192.168.40.20", hostname: "PC-03", usuario: "tech", status: "online" }], [{ id: 1, computadorId: 3, certificadoId: 7, estado: "APROVADA", statusLiberacao: "LIBERADO" }]);
-  const service = createPortalService({ db, releaseService: { releaseStatus: () => "EXPIRADA", publicRelease: () => null } });
+  const service = portalService({ db, releaseService: { releaseStatus: () => "EXPIRADA", publicRelease: () => null } });
   const result = await service.listOwnRequests({ computerId: 3 }, { page: 1, pageSize: 10 });
   assert.equal(result.items[0].statusLiberacao, "EXPIRADA");
   assert.equal(result.items[0].liberacao, undefined);
@@ -104,7 +120,7 @@ test("apresentação do funcionário não usa cópia, UNC ou erro de compartilha
 
 test("estados, motivo de negativa e transições são restritos", async () => {
   const db = database();
-  const service = createPortalService({ db });
+  const service = portalService({ db });
   await assert.rejects(() => service.decideRequest(1, { estado: "REJEITADA" }, "admin"), { code: "INVALID_STATE" });
   await assert.rejects(() => service.decideRequest(1, { estado: "CANCELADA" }, "admin"), { code: "INVALID_STATE" });
   await assert.rejects(() => service.decideRequest(1, { estado: "NEGADA", motivoNegativa: "  " }, "admin"), { code: "DENIAL_REASON_REQUIRED" });
@@ -120,7 +136,7 @@ test("violação P2002 concorrente vira conflito e cria uma única pendente", as
   const db = database();
   db.solicitacaoCertificado.findFirst = async () => null;
   db.solicitacaoCertificado.create = async ({ data }) => { await new Promise((resolve) => setTimeout(resolve, 5)); creates += 1; if (creates > 1) throw { code: "P2002" }; return { id: 1, estado: "PENDENTE", ...data, certificado: certificate() }; };
-  const service = createPortalService({ db });
+  const service = portalService({ db });
   const session = await internalSession(service);
   const results = await Promise.allSettled([service.createRequest(session, { certificadoId: 7 }), service.createRequest(session, { certificadoId: 7 })]);
   assert.equal(results.filter((item) => item.status === "fulfilled").length, 1);
@@ -148,7 +164,7 @@ test("resumo ADMIN conta somente pendentes e retorna apenas o último marcador",
       findFirst: async (query) => { assert.deepEqual(query.where, { estado: "PENDENTE" }); assert.deepEqual(query.select, { id: true, solicitadoEm: true }); return latest; }
     }
   };
-  const service = createPortalService({ db });
+  const service = portalService({ db });
   assert.deepEqual(await service.pendingRequestSummary(), { pendentes: 1, ultimaSolicitacaoId: 9, ultimaSolicitacaoEm: latest.solicitadoEm });
   let statusCode;
   let body;
@@ -173,7 +189,7 @@ test("controller usa req.ip e ignora X-Forwarded-For e identidade do body", asyn
 test("logout invalida sessão e ADMIN pode aprovar somente pendente", async () => {
   const db = database();
   db.requests.push({ id: 1, computadorId: 3, certificadoId: 7, estado: "PENDENTE" });
-  const service = createPortalService({ db, releaseService: { releaseRequest: async () => { if (db.requests[0].estado !== "PENDENTE") throw Object.assign(new Error("A solicitação não está pendente."), { code: "INVALID_TRANSITION" }); db.requests[0].estado = "APROVADA"; return { ...db.requests[0], certificado: certificate(), computador: { id: 3, hostname: "PC-03", ip: "192.168.40.20", usuario: "tech" } }; }, publicRelease: () => null } });
+  const service = portalService({ db, releaseService: { releaseRequest: async () => { if (db.requests[0].estado !== "PENDENTE") throw Object.assign(new Error("A solicitação não está pendente."), { code: "INVALID_TRANSITION" }); db.requests[0].estado = "APROVADA"; return { ...db.requests[0], certificado: certificate(), computador: { id: 3, hostname: "PC-03", ip: "192.168.40.20", usuario: "tech" } }; }, publicRelease: () => null } });
   const approved = await service.decideRequest(1, { estado: "APROVADA" }, "admin");
   assert.equal(approved.estado, "APROVADA");
   await assert.rejects(() => service.decideRequest(1, { estado: "NEGADA", motivoNegativa: "tarde" }, "admin"), { code: "INVALID_TRANSITION" });

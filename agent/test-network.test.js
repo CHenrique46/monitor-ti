@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { isPrivateIPv4, selectLanIPv4 } = require("./src/network");
+const { isPrivateIPv4, selectLanIPv4, preserveLanIPv4 } = require("./src/network");
 
 function ipv4(address, extra = {}) {
   return { address, family: "IPv4", internal: false, ...extra };
@@ -63,4 +63,10 @@ test("reconhece somente RFC1918 como privado", () => {
   assert.equal(isPrivateIPv4("192.168.255.254"), true);
   assert.equal(isPrivateIPv4("127.0.0.1"), false);
   assert.equal(isPrivateIPv4("0.0.0.0"), false);
+});
+
+test("reconexão preserva IP válido quando a enumeração das interfaces falha", () => {
+  assert.equal(preserveLanIPv4("192.168.40.77", {}), "192.168.40.77");
+  assert.equal(preserveLanIPv4("192.168.40.77", { Ethernet: [ipv4("192.168.40.78")] }), "192.168.40.78");
+  assert.equal(preserveLanIPv4(null, {}), null);
 });
