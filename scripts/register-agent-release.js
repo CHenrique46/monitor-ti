@@ -27,6 +27,7 @@ const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const AGENT_NAME = "MonitorTI-Agent.exe";
 const NOTIFIER_NAME = "MonitorTI-Notifier.exe";
 const INTEGRITY_NAME = "notifier-integrity.json";
+const PACKAGE_MANIFEST_NAME = "package-manifest.json";
 
 function sha256Of(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
@@ -35,9 +36,10 @@ function sha256Of(buf) {
 function buildZip(dir, version, packageMode) {
   const zipName = "MonitorTI-Agent-" + version + ".zip";
   const zipPath = path.join(dir, zipName);
+  const manifestName = packageMode === "agent-only" ? PACKAGE_MANIFEST_NAME : "manifest.json";
   const entries = packageMode === "agent-only"
-    ? [AGENT_NAME, "manifest.json"]
-    : [AGENT_NAME, NOTIFIER_NAME, "manifest.json", INTEGRITY_NAME];
+    ? [AGENT_NAME, manifestName]
+    : [AGENT_NAME, NOTIFIER_NAME, manifestName, INTEGRITY_NAME];
   const r = spawnSync(
     "tar",
     ["-a", "-cf", zipPath, "-C", dir, ...entries],
@@ -112,8 +114,21 @@ async function main() {
       fs.writeFileSync(path.join(dir, INTEGRITY_NAME), integrity);
       files.push({ name: INTEGRITY_NAME, sha256: sha256Of(integrity), size: integrity.length });
     }
-    const manifest = { schemaVersion: 1, version, packageMode, files };
-    fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
+    const manifest = packageMode === "agent-only"
+      ? {
+        schemaVersion: 1,
+        version,
+        packageMode,
+        files,
+        notifierAction: "preserve",
+        configAction: "preserve",
+        serviceAction: "restart"
+      }
+      : { schemaVersion: 1, version, packageMode, files };
+    fs.writeFileSync(
+      path.join(dir, packageMode === "agent-only" ? PACKAGE_MANIFEST_NAME : "manifest.json"),
+      JSON.stringify(manifest, null, 2) + "\n"
+    );
     console.log("Manifest gravado.");
 
     const { zipName, zipSha256, zipSize } = buildZip(dir, version, packageMode);
