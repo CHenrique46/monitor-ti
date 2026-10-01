@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
+  [string]$SourceRoot,
   [string]$ProductionRoot = "C:\Projetos\monitor-ti",
   [string]$ServiceName = "HenriTechServer",
   [string]$HealthUrl = "http://127.0.0.1:4000/health",
@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($SourceRoot)) { $SourceRoot = Split-Path -Parent $PSScriptRoot }
 $files = @(
   "server/src/controllers/agentUpdate.controller.js",
   "server/src/services/releases.service.js",
@@ -36,16 +37,13 @@ $serviceProcess = $null
 if ([int]$service.ProcessId -gt 0) {
   $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$($service.ProcessId)" -ErrorAction SilentlyContinue
 }
-$nodeProcesses = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue | Where-Object {
-  $_.CommandLine -match '(?i)(^|[\\/])src[\\/]app\.js([\s"]|$)'
+$nodeProcesses = @(Get-CimInstance Win32_Process -Filter "Name='node.exe' AND ParentProcessId=$($service.ProcessId)" -ErrorAction SilentlyContinue | Where-Object {
+  $_.CommandLine -match '(?i)(^|[\s"\\/])src[\\/]app\.js([\s"]|$)'
 })
-$associated = if ($serviceProcess -and $serviceProcess.Name -eq "node.exe") {
-  @($serviceProcess)
-} else {
-  @($nodeProcesses | Where-Object { $_.ParentProcessId -eq $service.ProcessId })
-}
+$associated = if ($serviceProcess -and $serviceProcess.Name -eq "node.exe") { @($serviceProcess) } else { $nodeProcesses }
+$associated = @($associated)
 if ($associated.Count -ne 1) { throw "processo node.exe associado ao serviço não foi resolvido unicamente; nenhuma alteração executada" }
-if ($associated[0].CommandLine -notmatch '(?i)(^|[\\/])src[\\/]app\.js([\s"]|$)') { throw "processo associado não executa src/app.js" }
+if ($associated[0].CommandLine -notmatch '(?i)(^|[\s"\\/])src[\\/]app\.js([\s"]|$)') { throw "processo associado não executa src/app.js" }
 
 $sourceRecords = @()
 foreach ($relative in $files) {
