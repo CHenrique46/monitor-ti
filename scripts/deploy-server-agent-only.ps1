@@ -2,7 +2,7 @@
 param(
   [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
   [string]$ProductionRoot = "C:\Projetos\monitor-ti",
-  [string]$ServiceName = "MonitorTIServer",
+  [string]$ServiceName = "HenriTechServer",
   [string]$HealthUrl = "http://127.0.0.1:4000/health",
   [switch]$Execute
 )
@@ -23,6 +23,15 @@ $service = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAct
 if (-not $service) { throw "serviço $ServiceName não encontrado; nenhuma alteração executada" }
 
 $servicePath = [string]$service.PathName
+$wrapperXml = "C:\ProgramData\HenriTech\service\HenriTechServer.xml"
+RequireFile $wrapperXml "configuração do wrapper"
+[xml]$wrapper = Get-Content -Raw -LiteralPath $wrapperXml
+$wrapperExecutable = [string]$wrapper.service.executable
+$wrapperArguments = [string]$wrapper.service.arguments
+$wrapperWorkingDirectory = [string]$wrapper.service.workingdirectory
+if ($servicePath -notmatch '(?i)HenriTechServer\.exe') { throw "PathName do serviço não aponta para o wrapper HenriTechServer" }
+if ($wrapperExecutable -notmatch '(?i)node\.exe' -or $wrapperArguments -ne "src/app.js") { throw "configuração do wrapper não inicia node.exe src/app.js" }
+if ([IO.Path]::GetFullPath($wrapperWorkingDirectory) -ne [IO.Path]::GetFullPath((Join-Path $ProductionRoot "server"))) { throw "workingdirectory do wrapper diverge do diretório efetivo" }
 $serviceProcess = $null
 if ([int]$service.ProcessId -gt 0) {
   $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$($service.ProcessId)" -ErrorAction SilentlyContinue
@@ -54,6 +63,8 @@ if (Test-Path -LiteralPath $envPath -PathType Leaf) {
 
 $preflight = [ordered]@{
   ServiceName = $ServiceName; ServicePathName = $servicePath; ServiceState = [string]$service.State
+  WrapperXml = $wrapperXml; WrapperXmlSha256 = Hash $wrapperXml; WrapperExecutable = $wrapperExecutable
+  WrapperArguments = $wrapperArguments; WrapperWorkingDirectory = $wrapperWorkingDirectory
   ServiceProcessId = [int]$service.ProcessId; AssociatedProcessId = [int]$associated[0].ProcessId
   AssociatedExecutable = [string]$associated[0].ExecutablePath; AssociatedCommandLine = [string]$associated[0].CommandLine
   ProductionRoot = $ProductionRoot; SourceRoot = $SourceRoot; HealthUrl = $HealthUrl
@@ -64,7 +75,7 @@ if (-not $Execute) {
   exit 0
 }
 
-$backupRoot = Join-Path $ProductionRoot "server/backups"
+$backupRoot = "C:\ProgramData\HenriTech\backups"
 New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
 $backupDir = Join-Path $backupRoot ("agent-only-v129-" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $backupDir -ErrorAction Stop | Out-Null
