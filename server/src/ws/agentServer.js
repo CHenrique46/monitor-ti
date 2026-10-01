@@ -34,7 +34,30 @@ const updateStates = new Map();
 // (ex.: Notifier instalado). Evita despachar notice_show para agents
 // que não conseguem exibir avisos.
 const agentCaps = new Map();
+const connectionsByDeviceId = new Map();
 let wssRef = null;
+
+function mergeCapabilities(target, caps) {
+  if (!Array.isArray(caps)) return;
+  for (const cap of caps) {
+    if (typeof cap === "string" && cap.length > 0 && cap.length <= 100) target.add(cap);
+  }
+}
+
+function applySocketCapabilities(ws, caps) {
+  if (!ws || !Array.isArray(caps)) return;
+  mergeCapabilities(ws.registered ? ws.capabilities : ws.pendingCapabilities, caps);
+  if (ws.registered && ws.deviceId && connectionsByDeviceId.get(ws.deviceId) === ws) {
+    agentCaps.set(ws.deviceId, new Set(ws.capabilities));
+  }
+}
+
+function setCurrentConnection(ws) {
+  if (!ws || !ws.registered || !ws.deviceId) return;
+  connectionsByDeviceId.set(ws.deviceId, ws);
+  agentCaps.set(ws.deviceId, new Set(ws.capabilities));
+}
+
 
 function setCapabilities(deviceId, caps) {
   if (!deviceId) return;
@@ -131,19 +154,14 @@ function applyRegisterUpdateSuccess(deviceId, agentVersion) {
 // Envia uma mensagem para o Agent conectado com o deviceId informado.
 // Retorna true se havia um Agent conectado.
 function sendToAgent(deviceId, obj) {
-  if (!wssRef) return false;
-  let found = false;
-  wssRef.clients.forEach((ws) => {
-    if (ws.deviceId === deviceId && ws.readyState === ws.OPEN) {
-      try {
-        ws.send(JSON.stringify(obj));
-        found = true;
-      } catch (e) {
-        // falha ao enviar para este cliente
-      }
-    }
-  });
-  return found;
+  const ws = connectionsByDeviceId.get(deviceId);
+  if (!ws || !ws.registered || ws.deviceId !== deviceId || ws.readyState !== ws.OPEN) return false;
+  try {
+    ws.send(JSON.stringify(obj));
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function markOffline(deviceId, exceptWs, db = prisma) {
@@ -263,6 +281,9 @@ function setupWebSocket(server, dependencies = {}) {
   wss.on("connection", (ws) => {
     ws.isAlive = true;
     ws.deviceId = null;
+    ws.registered = false;
+    ws.capabilities = new Set();
+    ws.pendingCapabilities = new Set();
 
     ws.on("pong", () => {
       ws.isAlive = true;
@@ -288,12 +309,12 @@ function setupWebSocket(server, dependencies = {}) {
       }
 
       if (msg && msg.type === "capabilities" && (msg.deviceId || ws.deviceId)) {
-        const dev = msg.deviceId || ws.deviceId;
-        setCapabilities(dev, msg.data && msg.data.capabilities);
-        console.log(`[Monitor TI] capacidades de ${dev}: ${getCapabilities(dev).join(",") || "(vazio)"}`);
+        if (msg.deviceId && ws.deviceId && msg.deviceId !== ws.deviceId) return;
+        const dev = ws.deviceId || msg.deviceId;
+        applySocketCapabilities(ws, msg.data && msg.data.capabilities);
+        console.log("[Monitor TI] capacidades de " + dev + ": " + (Array.from(ws.registered ? ws.capabilities : ws.pendingCapabilities).join(",") || "(vazio)"));
         return;
       }
-
       if (msg && msg.type === "update_status") {
         if (!ws.deviceId) {
           logger.logEvent("[Monitor TI] update_status rejeitado: conexão não registrada");
@@ -485,8 +506,11 @@ function setupWebSocket(server, dependencies = {}) {
             }
           });
           ws.deviceId = d.deviceId;
-           applyRegisterCapabilities(d.deviceId, d.capabilities);
-           console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
+          ws.registered = true;
+          ws.capabilities = new Set(ws.pendingCapabilities);
+          setCurrentConnection(ws);
+          applySocketCapabilities(ws, d.capabilities);
+          console.log(`[Monitor TI] registrado: ${d.hostname} (${d.deviceId})`);
            ws.send(JSON.stringify({ type: "register_ack", protocolVersion: 1, deviceId: d.deviceId }));
            ws.send(JSON.stringify({
             type: "remote_action_reconcile_request",
@@ -579,6 +603,10 @@ function setupWebSocket(server, dependencies = {}) {
     });
 
     ws.on("close", () => {
+      if (ws.deviceId && connectionsByDeviceId.get(ws.deviceId) === ws) {
+        connectionsByDeviceId.delete(ws.deviceId);
+        clearCapabilities(ws.deviceId);
+      }
       markOffline(ws.deviceId, ws, db);
     });
 

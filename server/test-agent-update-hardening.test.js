@@ -46,7 +46,7 @@ function baseDb(computer) {
 test("semver bloqueia igualdade e downgrade e permite upgrade", async () => {
   const c = { id: 162, deviceId: "dev-162", hostname: "PC-162", status: "online", agentVersion: "1.1.19" };
   const db = baseDb(c);
-  const release = { id: 10, version: "1.1.22", packageName: "pkg.zip", packageSha256: "sha", packageSize: 10, manifest: { version: "1.1.22", files: [{ name: "MonitorTI-Agent.exe", sha256: "agent", size: 1 }, { name: "MonitorTI-Notifier.exe", sha256: "notifier", size: 1 }] } };
+  const release = { id: 10, version: "1.1.22", packageMode: "full", packageName: "pkg.zip", packageSha256: "a".repeat(64), packageSize: 10, manifest: { version: "1.1.22", packageMode: "full", files: [{ name: "MonitorTI-Agent.exe", sha256: "b".repeat(64), size: 1 }, { name: "MonitorTI-Notifier.exe", sha256: "c".repeat(64), size: 1 }, { name: "notifier-integrity.json", sha256: "d".repeat(64), size: 1 }] } };
   const sent = [];
   const deps = { prisma: db, releasesService: { getActiveRelease: async () => release, hasArtifact: () => true }, agentServer: { sendToAgent: (device, command) => { sent.push({ device, command }); return true; } } };
   const ok = response(); await request({ params: { id: "162" }, humanUser: { username: "admin" }, deps }, ok);
@@ -71,15 +71,18 @@ function packageRelease(id, version, active = false) {
     sha256: "agent-sha",
     size: 100,
     packageName: `MonitorTI-Agent-${version}.zip`,
-    packageSha256: "package-sha",
+    packageSha256: "a".repeat(64),
     packageSize: 200,
     manifest: {
       version,
+      packageMode: "full",
       files: [
-        { name: "MonitorTI-Agent.exe", sha256: "agent-sha", size: 100 },
-        { name: "MonitorTI-Notifier.exe", sha256: "notifier-sha", size: 50 }
+        { name: "MonitorTI-Agent.exe", sha256: "b".repeat(64), size: 100 },
+        { name: "MonitorTI-Notifier.exe", sha256: "c".repeat(64), size: 50 },
+        { name: "notifier-integrity.json", sha256: "d".repeat(64), size: 1 }
       ]
-    }
+    },
+    packageMode: "full"
   };
 }
 
