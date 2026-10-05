@@ -15,6 +15,56 @@ const SKIPPED_PROFILE_NAMES = new Set([
   "wsiaccount"
 ]);
 
+function sameIdentity(expected, actual) {
+  return Number.isFinite(Number(expected.dev)) && Number.isFinite(Number(expected.ino))
+    && Number(expected.dev) > 0 && Number(expected.ino) > 0
+    && Number(expected.dev) === Number(actual.dev) && Number(expected.ino) === Number(actual.ino);
+}
+
+function markCleanupWarning(result, warning) {
+  result.status = "PARTIAL";
+  if (!result.warnings.includes(warning) && result.warnings.length < 20) result.warnings.push(warning);
+}
+
+async function revalidateDeletionTarget(fsPromises, target, expectedInfo, expectedComponents, result, context, now, minimumAgeDays) {
+  if (!Array.isArray(expectedComponents) || expectedComponents.length === 0) return null;
+  for (const component of expectedComponents) {
+    let current;
+    try {
+      current = await fsPromises.lstat(component.path);
+    } catch (error) {
+      current = { error };
+    }
+    if (current.error || !sameIdentity(component.info, current)) {
+      markCleanupWarning(result, "file_changed_before_delete");
+      context.cleanupStopped = true;
+      return null;
+    }
+    if (component.path === target && (!current.isFile() || current.isSymbolicLink() || !sameIdentity(expectedInfo, current))) {
+      markCleanupWarning(result, "file_changed_before_delete");
+      context.cleanupStopped = true;
+      return null;
+    }
+    if (component.path !== target && (!current.isDirectory() || current.isSymbolicLink())) {
+      markCleanupWarning(result, "reparse_point_changed_before_delete");
+      context.cleanupStopped = true;
+      return null;
+    }
+  }
+  let latest;
+  try {
+    latest = await fsPromises.lstat(target);
+  } catch (error) {
+    latest = { error };
+  }
+  if (latest.error || latest.mtimeMs > now() - minimumAgeDays * 24 * 60 * 60 * 1000) {
+    markCleanupWarning(result, "file_not_old_enough_before_delete");
+    context.cleanupStopped = true;
+    return null;
+  }
+  return latest;
+}
+
 function createDiskCleanupAnalyzer(deps = {}) {
   const fsPromises = deps.fsPromises || fs.promises;
   const now = deps.now || (() => Date.now());
@@ -44,6 +94,7 @@ function createDiskCleanupAnalyzer(deps = {}) {
       deletedBytes: 0,
       failedBytes: 0,
       failedItems: 0,
+      timedOutItems: 0,
       status: "OK",
       truncated: false,
       warnings: []
@@ -151,6 +202,12 @@ function createDiskCleanupAnalyzer(deps = {}) {
 
   function canInspect(context, result) {
     if (context.truncated) return false;
+    if (context.cleanupStopped) {
+      context.truncated = true;
+      result.truncated = true;
+      markWarning(result, "cleanup_timeout");
+      return false;
+    }
     if (expired(context)) {
       context.truncated = true;
       result.truncated = true;
@@ -175,6 +232,21 @@ function createDiskCleanupAnalyzer(deps = {}) {
     }
   }
 
+  async function capturePathComponents(target, targetInfo) {
+    const volumeRoot = path.parse(target).root;
+    const relative = path.relative(volumeRoot, target);
+    const components = [];
+    let current = volumeRoot;
+    for (const part of ["", ...relative.split(path.sep).filter(Boolean)]) {
+      if (part) current = path.join(current, part);
+      const isTarget = path.normalize(current).toLowerCase() === path.normalize(target).toLowerCase();
+      const info = isTarget ? targetInfo : await statEntry(current);
+      if (info.error || info.isSymbolicLink()) return null;
+      components.push({ path: current, info });
+    }
+    return components;
+  }
+
   async function walkFiles(root, result, context, options = {}) {
     const rootInfo = await statEntry(root);
     if (rootInfo.error) {
@@ -189,6 +261,7 @@ function createDiskCleanupAnalyzer(deps = {}) {
       markWarning(result, "reparse_point_skipped");
       return;
     }
+    const rootComponents = await capturePathComponents(root, rootInfo);
 
     if (rootInfo.isFile()) {
       if (!canInspect(context, result)) return;
@@ -200,10 +273,11 @@ function createDiskCleanupAnalyzer(deps = {}) {
           result.eligibleBytes += size;
           result.eligibleFiles += 1;
           if (onEligibleFile && options.allowCleanup !== false) {
-            const outcome = await onEligibleFile(root, rootInfo, result, context);
+            const outcome = await onEligibleFile(root, rootInfo, result, context, rootComponents);
             result.deletedBytes += Number(outcome && outcome.deletedBytes) || 0;
             result.failedBytes += Number(outcome && outcome.failedBytes) || 0;
             result.failedItems += Number(outcome && outcome.failedItems) || 0;
+            result.timedOutItems += Number(outcome && outcome.timedOutItems) || 0;
             result.skippedLocked += Number(outcome && outcome.skippedLocked) || 0;
           }
         } else {
@@ -213,7 +287,7 @@ function createDiskCleanupAnalyzer(deps = {}) {
       return;
     }
 
-    const visit = async (directory, depth) => {
+    const visit = async (directory, depth, components) => {
       if (!canInspect(context, result) || depth > maxDepth) {
         if (depth > maxDepth) {
           result.skippedItems += 1;
@@ -246,7 +320,7 @@ function createDiskCleanupAnalyzer(deps = {}) {
           continue;
         }
         if (info.isDirectory()) {
-          await visit(target, depth + 1);
+          await visit(target, depth + 1, components.concat({ path: target, info }));
           if (context.truncated) return;
           continue;
         }
@@ -262,10 +336,11 @@ function createDiskCleanupAnalyzer(deps = {}) {
             result.eligibleBytes += size;
             result.eligibleFiles += 1;
             if (onEligibleFile && options.allowCleanup !== false) {
-              const outcome = await onEligibleFile(target, info, result, context);
+              const outcome = await onEligibleFile(target, info, result, context, components.concat({ path: target, info }));
               result.deletedBytes += Number(outcome && outcome.deletedBytes) || 0;
               result.failedBytes += Number(outcome && outcome.failedBytes) || 0;
               result.failedItems += Number(outcome && outcome.failedItems) || 0;
+              result.timedOutItems += Number(outcome && outcome.timedOutItems) || 0;
               result.skippedLocked += Number(outcome && outcome.skippedLocked) || 0;
             }
           } else {
@@ -276,7 +351,7 @@ function createDiskCleanupAnalyzer(deps = {}) {
     };
 
     try {
-      await visit(root, 0);
+      await visit(root, 0, rootComponents || []);
     } catch (error) {
       result.skippedItems += 1;
       markWarning(result, "enumeration_error");
@@ -438,23 +513,29 @@ function createSafeDiskCleanupExecutor(deps = {}) {
   const analyzer = createDiskCleanupAnalyzer({
     ...deps,
     includeRecycleBin: false,
-    onEligibleFile: async (target, info) => {
+    onEligibleFile: async (target, info, result, context, components) => {
       processed += 1;
       if (processed > 1 && processed % batchSize === 0) await sleep();
+      const latest = await revalidateDeletionTarget(fsPromises, target, info, components, result, context, deps.now || (() => Date.now()), deps.minimumFileAgeDays ?? MINIMUM_FILE_AGE_DAYS);
+      if (!latest) return { failedBytes: Number(info.size) || 0, failedItems: 1 };
+      const startedAt = Date.now();
       try {
-        await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => {
-            const error = new Error("timeout ao remover arquivo temporario");
-            error.code = "ETIMEDOUT";
-            reject(error);
-          }, fileTimeoutMs);
-          removeFile(target)
-            .then(resolve, reject)
-            .finally(() => clearTimeout(timer));
-        });
-        return { deletedBytes: Number(info.size) || 0 };
+        // Node's path-based removal has no atomic check-and-delete primitive; observed identity changes are refused, but a residual concurrent race remains.
+        await removeFile(target);
+        const timedOut = Date.now() - startedAt > fileTimeoutMs;
+        if (timedOut) {
+          context.cleanupStopped = true;
+          result.truncated = true;
+          markCleanupWarning(result, "cleanup_timeout");
+        }
+        return { deletedBytes: Number(latest.size) || 0, timedOutItems: timedOut ? 1 : 0 };
       } catch (error) {
         const locked = ["EACCES", "EBUSY", "EPERM", "ETIMEDOUT"].includes(error && error.code);
+        if (Date.now() - startedAt > fileTimeoutMs || error && error.code === "ETIMEDOUT") {
+          context.cleanupStopped = true;
+          result.truncated = true;
+          markCleanupWarning(result, "cleanup_timeout");
+        }
         return {
           skippedLocked: locked ? 1 : 0,
           failedBytes: Number(info.size) || 0,
@@ -475,6 +556,7 @@ function createSafeDiskCleanupExecutor(deps = {}) {
       deletedBytes,
       failedBytes,
       failedItems: result.categories.reduce((sum, item) => sum + (Number(item.failedItems) || 0), 0),
+      timedOutItems: result.categories.reduce((sum, item) => sum + (Number(item.timedOutItems) || 0), 0),
       skippedRecent: result.categories.reduce((sum, item) => sum + (Number(item.skippedRecent) || 0), 0),
       skippedLocked,
       roots: [],

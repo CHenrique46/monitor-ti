@@ -271,6 +271,24 @@ test("system_maintenance executa todas as etapas sequencialmente", async () => {
   assert.equal(result.notification.attempts, 1);
 });
 
+test("system_maintenance aguarda limpeza lenta antes da próxima etapa", async () => {
+  const calls = [];
+  const result = await createSystemMaintenanceExecutor(maintenanceSuccessDeps({
+    timeouts: { tempCleanupMs: 1 },
+    cleanupTemp: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      calls.push("cleanup");
+      return { roots: [], blocked: [], errors: [] };
+    },
+    runSfc: async () => { calls.push("sfc"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; }
+  }))();
+
+  assert.deepEqual(calls.slice(0, 2), ["cleanup", "sfc"]);
+  assert.equal(result.steps[0].timedOut, true);
+  assert.equal(result.steps[0].status, "FAILED");
+  assert.equal(result.overallStatus, "FAILED");
+});
+
 test("system_maintenance registra limpeza parcial por arquivo bloqueado", async () => {
   const exec = createSystemMaintenanceExecutor(maintenanceSuccessDeps({
     cleanupTemp: async () => ({

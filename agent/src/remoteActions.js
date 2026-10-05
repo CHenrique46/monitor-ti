@@ -426,22 +426,31 @@ function createSystemMaintenanceExecutor(deps = {}) {
 
     try {
       const startedAt = Date.now();
-      const cleanupResult = normalizeCleanupResult(await withTimeout(cleanup(), timeouts.tempCleanupMs, "timeout ao limpar temporarios"));
+      const cleanupResult = normalizeCleanupResult(await cleanup());
+      if (Date.now() - startedAt > timeouts.tempCleanupMs) {
+        cleanupResult.timedOut = true;
+        cleanupResult.truncated = true;
+        cleanupResult.warnings = Array.isArray(cleanupResult.warnings) ? cleanupResult.warnings : [];
+        if (!cleanupResult.warnings.includes("cleanup_timeout")) cleanupResult.warnings.push("cleanup_timeout");
+      }
       const blockedCount = cleanupResult.blockedCount;
       const errorCount = cleanupResult.errorsCount;
-      const failed = errorCount > 0;
+      const failed = errorCount > 0 || cleanupResult.timedOut;
       hasFailure = hasFailure || failed;
       steps.push({
         key: "temp_cleanup",
         status: failed ? "FAILED" : "SUCCESS",
         durationMs: Date.now() - startedAt,
         message: failed
-          ? `Falha ao acessar ${errorCount} local(is) de temporários.`
+          ? cleanupResult.timedOut && errorCount === 0
+          ? "Limpeza de temporários excedeu o prazo, mas terminou antes da próxima etapa."
+          : `Falha ao acessar ${errorCount} local(is) de temporários.`
           : blockedCount
           ? `Limpeza concluída; ${blockedCount} arquivo(s)/diretório(s) em uso foram ignorados.`
           : "Temporários do usuário e do Windows limpos.",
         blockedCount,
         errorsCount: errorCount,
+        timedOut: !!cleanupResult.timedOut,
         truncated: !!cleanupResult.truncated,
         details: cleanupResult
       });
