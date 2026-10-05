@@ -2,6 +2,7 @@
 param(
   [string]$ServerUrl = "http://127.0.0.1:4000",
   [int]$ObservationSeconds = 60,
+  [int]$PostSuccessObservationSeconds = 60,
   [int]$OnlyId = 0,
   [switch]$Execute
 )
@@ -79,7 +80,8 @@ function Select-InactiveRelease($Response) {
 
 function Observe($Expected) {
   $samples = @()
-  $deadline = (Get-Date).ToUniversalTime().AddSeconds($ObservationSeconds)
+  $updateDeadline = (Get-Date).ToUniversalTime().AddSeconds($ObservationSeconds)
+  $postSuccessDeadline = $null
   do {
     $target = $null
     $targetError = $null
@@ -99,12 +101,17 @@ function Observe($Expected) {
     }
     $reconnected = $target -and [string]$target.status -eq "online" -and [string]$target.agentVersion -eq $targetVersion
     if ($persistentStatus -in @("FAILED", "ROLLBACK")) { throw "canario $($Expected.Hostname) terminou $persistentStatus" }
-    if ($persistentStatus -eq "SUCCESS" -and $reconnected) { return $samples }
-    if ((Get-Date).ToUniversalTime() -ge $deadline) {
-      throw "timeout aguardando $($Expected.Hostname): update=$persistentStatus, station=$([string]$samples[-1].Status)"
+    if ($persistentStatus -eq "SUCCESS" -and $reconnected -and $null -eq $postSuccessDeadline) {
+      $postSuccessDeadline = (Get-Date).ToUniversalTime().AddSeconds($PostSuccessObservationSeconds)
+    }
+    $now = (Get-Date).ToUniversalTime()
+    if ($null -ne $postSuccessDeadline) {
+      if ($now -ge $postSuccessDeadline) { return $samples }
+    } elseif ($now -ge $updateDeadline) {
+      throw "timeout aguardando atualizacao/reconexao de $($Expected.Hostname): update=$persistentStatus, station=$([string]$samples[-1].Status)"
     }
     Start-Sleep -Seconds 5
-  } while ((Get-Date).ToUniversalTime() -lt $deadline)
+  } while ($true)
   return $samples
 }
 
@@ -114,6 +121,7 @@ if (-not $Execute) {
     Release = $targetVersion
     SequentialTargets = $targets
     ObservationSecondsPerTarget = $ObservationSeconds
+    PostSuccessObservationSeconds = $PostSuccessObservationSeconds
     PostSent = $false
     Note = "Use -Execute somente apos revisao; nenhum login ou POST e feito neste modo."
   } | ConvertTo-Json -Depth 8
