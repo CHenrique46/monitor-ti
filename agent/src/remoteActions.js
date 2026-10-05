@@ -1,9 +1,8 @@
 const { execFile: defaultExecFile } = require("child_process");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const { createWallpaperExecutor } = require("./wallpaper");
-const { createDiskCleanupAnalyzer } = require("./diskCleanupAnalysis");
+const { createDiskCleanupAnalyzer, createSafeDiskCleanupExecutor } = require("./diskCleanupAnalysis");
 
 const ALLOWED_ACTIONS = {
   spooler_reset: true,
@@ -373,22 +372,7 @@ function createSystemMaintenanceExecutor(deps = {}) {
       );
     }
   };
-  const cleanup = deps.cleanupTemp || (async () => {
-    const userTemp = deps.userTempPath || process.env.TEMP || process.env.TMP || os.tmpdir();
-    const windowsTemp = deps.windowsTempPath || path.join(process.env.WINDIR || "C:\\Windows", "Temp");
-    const user = await removeDirectoryContents(userTemp);
-    const windows = await removeDirectoryContents(windowsTemp);
-    const blockedCount = user.blockedCount + windows.blockedCount;
-    const errorsCount = user.errorsCount + windows.errorsCount;
-    return {
-      roots: [user, windows],
-      blocked: [...user.blocked, ...windows.blocked].slice(0, MAINTENANCE_DETAIL_LIMIT),
-      errors: [...user.errors, ...windows.errors].slice(0, MAINTENANCE_DETAIL_LIMIT),
-      blockedCount,
-      errorsCount,
-      truncated: blockedCount > MAINTENANCE_DETAIL_LIMIT || errorsCount > MAINTENANCE_DETAIL_LIMIT || user.truncated || windows.truncated
-    };
-  });
+  const cleanup = deps.cleanupTemp || createSafeDiskCleanupExecutor(deps);
   const runSfc = deps.runSfc || (() => runTool("sfc.exe", ["/scannow"], timeouts.sfcMs));
   const runDism = deps.runDism || (() => runTool("dism.exe", ["/Online", "/Cleanup-Image", "/RestoreHealth"], timeouts.dismMs));
   const flushDns = deps.flushDns || (() => runTool("ipconfig.exe", ["/flushdns"], timeouts.dnsFlushMs));
@@ -442,22 +426,34 @@ function createSystemMaintenanceExecutor(deps = {}) {
 
     try {
       const startedAt = Date.now();
-      const cleanupResult = normalizeCleanupResult(await withTimeout(cleanup(), timeouts.tempCleanupMs, "timeout ao limpar temporarios"));
+      const cleanupResult = normalizeCleanupResult(await cleanup());
+      if (Date.now() - startedAt > timeouts.tempCleanupMs) {
+        cleanupResult.timedOut = true;
+        cleanupResult.truncated = true;
+        cleanupResult.warnings = Array.isArray(cleanupResult.warnings) ? cleanupResult.warnings : [];
+        if (!cleanupResult.warnings.includes("cleanup_timeout")) cleanupResult.warnings.push("cleanup_timeout");
+      }
       const blockedCount = cleanupResult.blockedCount;
       const errorCount = cleanupResult.errorsCount;
-      const failed = errorCount > 0;
+      const failed = errorCount > 0 || cleanupResult.timedOut;
       hasFailure = hasFailure || failed;
       steps.push({
         key: "temp_cleanup",
         status: failed ? "FAILED" : "SUCCESS",
         durationMs: Date.now() - startedAt,
         message: failed
-          ? `Falha ao acessar ${errorCount} local(is) de temporários.`
+          ? cleanupResult.executionBlocked
+          ? "Limpeza destrutiva não executada: mecanismo seguro contra substituição concorrente indisponível."
+          : cleanupResult.timedOut && errorCount === 0
+          ? "Limpeza de temporários excedeu o prazo, mas terminou antes da próxima etapa."
+          : `Falha ao acessar ${errorCount} local(is) de temporários.`
           : blockedCount
           ? `Limpeza concluída; ${blockedCount} arquivo(s)/diretório(s) em uso foram ignorados.`
           : "Temporários do usuário e do Windows limpos.",
         blockedCount,
         errorsCount: errorCount,
+        timedOut: !!cleanupResult.timedOut,
+        executionBlocked: !!cleanupResult.executionBlocked,
         truncated: !!cleanupResult.truncated,
         details: cleanupResult
       });

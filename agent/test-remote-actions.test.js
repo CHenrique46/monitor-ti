@@ -1,5 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const {
   createRemoteActionRuntime,
@@ -269,6 +272,59 @@ test("system_maintenance executa todas as etapas sequencialmente", async () => {
   assert.equal(result.rebootRecommended, true);
   assert.equal(result.notification.status, "SUCCESS");
   assert.equal(result.notification.attempts, 1);
+});
+
+test("system_maintenance aguarda limpeza lenta antes da próxima etapa", async () => {
+  const calls = [];
+  const result = await createSystemMaintenanceExecutor(maintenanceSuccessDeps({
+    timeouts: { tempCleanupMs: 1 },
+    cleanupTemp: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      calls.push("cleanup");
+      return { roots: [], blocked: [], errors: [] };
+    },
+    runSfc: async () => { calls.push("sfc"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; }
+  }))();
+
+  assert.deepEqual(calls.slice(0, 2), ["cleanup", "sfc"]);
+  assert.equal(result.steps[0].timedOut, true);
+  assert.equal(result.steps[0].status, "FAILED");
+  assert.equal(result.overallStatus, "FAILED");
+});
+
+test("system_maintenance continua após bloquear cleanup sem remoção segura", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "mti-maintenance-blocked-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const users = path.join(root, "Users");
+  const windows = path.join(root, "Windows", "Temp");
+  const temp = path.join(root, "ConfiguredTemp");
+  await fs.promises.mkdir(path.join(users, "alice", "AppData", "Local", "Temp"), { recursive: true });
+  await fs.promises.mkdir(windows, { recursive: true });
+  await fs.promises.mkdir(temp, { recursive: true });
+  const target = path.join(temp, "eligible.tmp");
+  const now = Date.now();
+  await fs.promises.writeFile(target, Buffer.alloc(16));
+  await fs.promises.utimes(target, new Date(now - 8 * 86400000), new Date(now - 8 * 86400000));
+  const calls = [];
+  const result = await createSystemMaintenanceExecutor({
+    systemDrive: root,
+    usersDir: users,
+    windowsDir: path.join(root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => now,
+    runSfc: async () => { calls.push("sfc"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; },
+    runDism: async () => { calls.push("dism"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; },
+    flushDns: async () => { calls.push("dns"); return { exitCode: 0, durationMs: 1, stdout: "", stderr: "" }; },
+    notifyUser: async () => ({ ok: true })
+  })();
+  assert.deepEqual(calls, ["sfc", "dism", "dns"]);
+  assert.equal(result.steps[0].executionBlocked, true);
+  assert.equal(result.steps[0].status, "FAILED");
+  assert.equal(result.steps[0].details.actualFreedBytes, null);
+  assert.equal(result.steps[0].details.deletedBytes, null);
+  assert.equal(result.overallStatus, "FAILED");
+  assert.equal(fs.existsSync(target), true);
 });
 
 test("system_maintenance registra limpeza parcial por arquivo bloqueado", async () => {

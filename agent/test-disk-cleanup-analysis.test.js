@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { createDiskCleanupAnalyzer } = require("./src/diskCleanupAnalysis");
+const { createDiskCleanupAnalyzer, createSafeDiskCleanupExecutor } = require("./src/diskCleanupAnalysis");
 
 async function fixture() {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "mti-disk-analysis-"));
@@ -35,6 +35,88 @@ test("arquivos de TEMP com pelo menos 7 dias entram na estimativa", async (t) =>
   await fs.promises.utimes(target, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
   const result = await f.analyze()();
   assert.equal(result.categories.find((item) => item.id === "USER_TEMP").eligibleBytes, 12);
+});
+
+test("limpeza segura contabiliza arquivo bloqueado sem removê-lo", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "locked-temp");
+  const target = path.join(temp, "locked.tmp");
+  await fs.promises.mkdir(temp);
+  await fs.promises.writeFile(target, Buffer.alloc(13));
+  await fs.promises.utimes(target, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+  const removeFile = async () => {
+    const error = new Error("arquivo bloqueado");
+    error.code = "EBUSY";
+    throw error;
+  };
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now,
+    secureRemoveFile: removeFile
+  })();
+  assert.equal(result.actualFreedBytes, 0);
+  assert.equal(result.skippedLocked, 1);
+  assert.equal(result.failedItems, 1);
+  assert.equal(fs.existsSync(target), true);
+});
+
+test("limpeza destrutiva é recusada sem mecanismo seguro", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "blocked-cleanup-temp");
+  const target = path.join(temp, "eligible.tmp");
+  await fs.promises.mkdir(temp);
+  await fs.promises.writeFile(target, Buffer.alloc(14));
+  await fs.promises.utimes(target, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now
+  })();
+  assert.equal(result.executionBlocked, true);
+  assert.equal(result.executionBlockedReason, "SECURE_REMOVAL_UNAVAILABLE");
+  assert.equal(result.actualFreedBytes, null);
+  assert.equal(result.deletedBytes, null);
+  assert.equal(result.errorsCount, 1);
+  assert.equal(result.estimatedRecoverableBytes, 14);
+  assert.equal(fs.existsSync(target), true);
+});
+
+test("limpeza lenta registra a exclusao depois do prazo sem retornar antes", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "timeout-temp");
+  const target = path.join(temp, "timeout.tmp");
+  await fs.promises.mkdir(temp);
+  await fs.promises.writeFile(target, Buffer.alloc(15));
+  await fs.promises.utimes(target, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+  const removeFile = () => new Promise((resolve) => setTimeout(async () => {
+    await fs.promises.rm(target);
+    resolve();
+  }, 10));
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now,
+    cleanupFileTimeoutMs: 1,
+    secureRemoveFile: removeFile
+  })();
+  assert.equal(result.actualFreedBytes, 15);
+  assert.equal(result.deletedBytes, 15);
+  assert.equal(result.timedOutItems, 1);
+  assert.equal(fs.existsSync(target), false);
+  assert.ok(result.warnings.includes("cleanup_timeout"));
 });
 
 test("arquivos recentes são observados mas não elegíveis", async (t) => {
@@ -197,4 +279,152 @@ test("reparse point configurado em OTHER_TEMP não é seguido", async (t) => {
   const category = result.categories.find((item) => item.id === "OTHER_TEMP");
   assert.equal(category.additionalTempDirectoriesDetected, 0);
   assert.ok(category.warnings.includes("reparse_point_skipped"));
+});
+
+test("limpeza segura remove apenas arquivos antigos e nao inclui Lixeira", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "safe-temp");
+  await fs.promises.mkdir(temp);
+  const old = path.join(temp, "old.tmp");
+  const recent = path.join(temp, "recent.tmp");
+  await fs.promises.writeFile(old, Buffer.alloc(7));
+  await fs.promises.writeFile(recent, Buffer.alloc(11));
+  await fs.promises.utimes(old, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now,
+    cleanupBatchSize: 1,
+    cleanupYieldMs: 0,
+    secureRemoveFile: async (target) => fs.promises.rm(target)
+  })();
+  assert.equal(result.actualFreedBytes, 7);
+  assert.equal(result.deletedBytes, 7);
+  assert.equal(result.categories.some((item) => item.id === "RECYCLE_BIN"), false);
+  assert.equal(fs.existsSync(old), false);
+  assert.equal(fs.existsSync(recent), true);
+  assert.equal(result.skippedRecent, 1);
+});
+
+test("remoção lenta termina antes do retorno e impede novas exclusões", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "slow-temp");
+  await fs.promises.mkdir(temp);
+  const first = path.join(temp, "a.tmp");
+  const second = path.join(temp, "b.tmp");
+  const old = new Date(f.now - 8 * 86400000);
+  await fs.promises.writeFile(first, Buffer.alloc(5));
+  await fs.promises.writeFile(second, Buffer.alloc(6));
+  await fs.promises.utimes(first, old, old);
+  await fs.promises.utimes(second, old, old);
+  const startedAt = Date.now();
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now,
+    cleanupFileTimeoutMs: 1,
+    secureRemoveFile: async (target) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await fs.promises.rm(target);
+    }
+  })();
+  assert.ok(Date.now() - startedAt >= 20);
+  assert.equal(result.deletedBytes, 5);
+  assert.equal(result.timedOutItems, 1);
+  assert.equal(fs.existsSync(first), false);
+  assert.equal(fs.existsSync(second), true);
+  assert.ok(result.warnings.includes("cleanup_timeout"));
+});
+
+test("substituição do arquivo entre análise e exclusão é recusada", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "replacement-temp");
+  const target = path.join(temp, "target.tmp");
+  await fs.promises.mkdir(temp);
+  await fs.promises.writeFile(target, Buffer.alloc(7));
+  await fs.promises.utimes(target, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+  let replaced = false;
+  const fsPromises = {
+    lstat: async (item) => {
+      const info = await fs.promises.lstat(item);
+      if (!replaced && item === target) {
+        replaced = true;
+        await fs.promises.rm(item);
+        await fs.promises.writeFile(item, Buffer.alloc(9));
+        await fs.promises.utimes(item, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+      }
+      return info;
+    },
+    readdir: fs.promises.readdir.bind(fs.promises),
+    rm: fs.promises.rm.bind(fs.promises),
+    statfs: fs.promises.statfs ? fs.promises.statfs.bind(fs.promises) : undefined
+  };
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now,
+    fsPromises,
+    secureRemoveFile: async (item) => fs.promises.rm(item)
+  })();
+  assert.equal(result.deletedBytes, 0);
+  assert.equal(result.failedItems, 1);
+  assert.equal(fs.existsSync(target), true);
+  assert.equal((await fs.promises.stat(target)).size, 9);
+  assert.ok(result.warnings.includes("file_changed_before_delete"));
+});
+
+test("troca de diretório por reparse point entre análise e exclusão é recusada", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "reparse-swap-temp");
+  const moved = path.join(f.root, "reparse-swap-original");
+  const outside = path.join(f.root, "reparse-swap-outside");
+  const target = path.join(temp, "target.tmp");
+  await fs.promises.mkdir(temp);
+  await fs.promises.mkdir(outside);
+  await fs.promises.writeFile(target, Buffer.alloc(8));
+  await fs.promises.writeFile(path.join(outside, "target.tmp"), Buffer.alloc(12));
+  await fs.promises.utimes(target, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+  let swapped = false;
+  const fsPromises = {
+    lstat: async (item) => {
+      const info = await fs.promises.lstat(item);
+      if (!swapped && item === target) {
+        swapped = true;
+        await fs.promises.rename(temp, moved);
+        await fs.promises.symlink(outside, temp, "junction");
+      }
+      return info;
+    },
+    readdir: fs.promises.readdir.bind(fs.promises),
+    rm: fs.promises.rm.bind(fs.promises),
+    statfs: fs.promises.statfs ? fs.promises.statfs.bind(fs.promises) : undefined
+  };
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now,
+    fsPromises,
+    secureRemoveFile: async (item) => fs.promises.rm(item)
+  })();
+  assert.equal(result.deletedBytes, 0);
+  assert.equal(result.failedItems, 1);
+  assert.equal(fs.existsSync(path.join(temp, "target.tmp")), true);
+  assert.equal(fs.existsSync(path.join(moved, "target.tmp")), true);
+  assert.ok(result.warnings.includes("file_changed_before_delete") || result.warnings.includes("reparse_point_changed_before_delete"));
 });
