@@ -442,7 +442,9 @@ function createSystemMaintenanceExecutor(deps = {}) {
         status: failed ? "FAILED" : "SUCCESS",
         durationMs: Date.now() - startedAt,
         message: failed
-          ? cleanupResult.timedOut && errorCount === 0
+          ? cleanupResult.executionBlocked
+          ? "Limpeza destrutiva não executada: mecanismo seguro contra substituição concorrente indisponível."
+          : cleanupResult.timedOut && errorCount === 0
           ? "Limpeza de temporários excedeu o prazo, mas terminou antes da próxima etapa."
           : `Falha ao acessar ${errorCount} local(is) de temporários.`
           : blockedCount
@@ -451,6 +453,7 @@ function createSystemMaintenanceExecutor(deps = {}) {
         blockedCount,
         errorsCount: errorCount,
         timedOut: !!cleanupResult.timedOut,
+        executionBlocked: !!cleanupResult.executionBlocked,
         truncated: !!cleanupResult.truncated,
         details: cleanupResult
       });

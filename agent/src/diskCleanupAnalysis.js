@@ -507,21 +507,21 @@ function createSafeDiskCleanupExecutor(deps = {}) {
   const yieldMs = deps.cleanupYieldMs ?? 10;
   const fileTimeoutMs = deps.cleanupFileTimeoutMs ?? 5000;
   const fsPromises = deps.fsPromises || fs.promises;
-  const removeFile = deps.removeFile || ((target) => fsPromises.rm(target, { force: true, recursive: false }));
+  const secureRemoveFile = deps.secureRemoveFile;
+  const secureRemovalAvailable = typeof secureRemoveFile === "function";
   let processed = 0;
   const sleep = () => new Promise((resolve) => setTimeout(resolve, yieldMs));
   const analyzer = createDiskCleanupAnalyzer({
     ...deps,
     includeRecycleBin: false,
-    onEligibleFile: async (target, info, result, context, components) => {
+    onEligibleFile: secureRemovalAvailable ? async (target, info, result, context, components) => {
       processed += 1;
       if (processed > 1 && processed % batchSize === 0) await sleep();
       const latest = await revalidateDeletionTarget(fsPromises, target, info, components, result, context, deps.now || (() => Date.now()), deps.minimumFileAgeDays ?? MINIMUM_FILE_AGE_DAYS);
       if (!latest) return { failedBytes: Number(info.size) || 0, failedItems: 1 };
       const startedAt = Date.now();
       try {
-        // Node's path-based removal has no atomic check-and-delete primitive; observed identity changes are refused, but a residual concurrent race remains.
-        await removeFile(target);
+        await secureRemoveFile(target, latest, components);
         const timedOut = Date.now() - startedAt > fileTimeoutMs;
         if (timedOut) {
           context.cleanupStopped = true;
@@ -542,10 +542,29 @@ function createSafeDiskCleanupExecutor(deps = {}) {
           failedItems: 1
         };
       }
-    }
+    } : undefined
   });
   return async function executeSafeDiskCleanup() {
     const result = await analyzer();
+    if (!secureRemovalAvailable) {
+      return {
+        ...result,
+        analysisOnly: true,
+        executionBlocked: true,
+        executionBlockedReason: "SECURE_REMOVAL_UNAVAILABLE",
+        actualFreedBytes: null,
+        deletedBytes: null,
+        failedBytes: null,
+        failedItems: 0,
+        timedOutItems: 0,
+        skippedLocked: 0,
+        roots: [],
+        blocked: [],
+        errors: [{ code: "SECURE_REMOVAL_UNAVAILABLE", message: "Limpeza destrutiva recusada: não há mecanismo seguro contra substituição concorrente." }],
+        blockedCount: 0,
+        errorsCount: 1
+      };
+    }
     const deletedBytes = result.categories.reduce((sum, item) => sum + (Number(item.deletedBytes) || 0), 0);
     const failedBytes = result.categories.reduce((sum, item) => sum + (Number(item.failedBytes) || 0), 0);
     const skippedLocked = result.categories.reduce((sum, item) => sum + (Number(item.skippedLocked) || 0), 0);
