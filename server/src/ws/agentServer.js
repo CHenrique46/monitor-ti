@@ -10,6 +10,7 @@ const { persistOfficeInventory } = require("../inventory/persistence");
 const { queueComputerInventorySync } = require("../inventory/excelAutoSync");
 const logger = require("../logger");
 const agentUpdates = require("../services/agentUpdates.service");
+const { normalizeIp } = require("../networkIp");
 const PILOT_DEVICE_ID = "00000000-0000-4000-8000-000000000001";
 const PILOT_EVENT_TYPE = "CERTIFICATE_NOTIFICATION_TEST";
 const PILOT_MESSAGE_TYPE = "certificate_notification_test";
@@ -353,11 +354,13 @@ function handleMetrics(d, db = prisma) {
         return resolve(false);
       }
 
+      const reportedIp = normalizeIp(d.ip);
       await db.computador.update({
         where: { deviceId: d.deviceId },
         data: {
           status: "online",
           ultimaConexao: new Date(),
+          ...(reportedIp ? { ip: reportedIp } : {}),
           cpuUso: cpu,
           ramTotal,
           ramUsada,
@@ -599,6 +602,7 @@ function setupWebSocket(server, dependencies = {}) {
 
       if (msg && msg.type === "register" && msg.data && msg.data.deviceId) {
         const d = msg.data;
+        const reportedIp = normalizeIp(d.ip);
         try {
           if (d.updateStatusOnly === true) {
             const existing = await db.computador.findUnique({ where: { deviceId: d.deviceId }, select: { id: true } });
@@ -613,7 +617,7 @@ function setupWebSocket(server, dependencies = {}) {
               deviceId: d.deviceId,
               hostname: d.hostname || "",
               usuario: d.usuario || null,
-              ip: d.ip || null,
+              ip: reportedIp,
               sistema: d.sistema || null,
               arquitetura: d.arquitetura || null,
               processador: d.processador || null,
@@ -633,7 +637,7 @@ function setupWebSocket(server, dependencies = {}) {
             update: {
               hostname: d.hostname || "",
               usuario: d.usuario || null,
-              ip: d.ip || null,
+              ...(reportedIp ? { ip: reportedIp } : {}),
               sistema: d.sistema || null,
               arquitetura: d.arquitetura || null,
               processador: d.processador || null,
