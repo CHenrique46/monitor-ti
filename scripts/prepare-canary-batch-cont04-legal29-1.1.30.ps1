@@ -36,6 +36,25 @@ function Read-Update($Expected) {
   return Get-Json ("/api/computadores/{0}/agent-update" -f $Expected.Id)
 }
 
+function Select-InactiveRelease($Response) {
+  $items = if ($null -eq $Response) {
+    @()
+  } elseif ($Response.PSObject.Properties.Name -contains "items") {
+    @($Response.items)
+  } elseif ($Response.PSObject.Properties.Name -contains "data") {
+    @($Response.data)
+  } else {
+    @($Response)
+  }
+  $matches = @($items | Where-Object { [string]$_.version -eq $targetVersion })
+  if ($matches.Count -eq 0) { throw "release $targetVersion nao encontrada" }
+  if ($matches.Count -gt 1) { throw "release $targetVersion retornou multiplos registros" }
+  $activeValue = $matches[0].active
+  $isActive = ($activeValue -is [bool] -and $activeValue) -or ([string]$activeValue -match "^(?i:true|1)$")
+  if ($isActive) { throw "release $targetVersion esta ativa" }
+  return $matches[0]
+}
+
 function Observe($Expected) {
   $samples = @()
   $deadline = (Get-Date).ToUniversalTime().AddSeconds($ObservationSeconds)
@@ -79,9 +98,7 @@ try {
 } finally { $password = $null }
 if ($login.StatusCode -ne 200) { throw "login ADMIN falhou" }
 
-$releaseList = @(Get-Json "/api/agent/releases")
-$release = $releaseList | Where-Object { $_.version -eq $targetVersion }
-if (-not $release -or $release.active) { throw "release $targetVersion ausente ou ativa" }
+$release = Select-InactiveRelease (Get-Json "/api/agent/releases")
 
 $results = @()
 foreach ($expected in $targets) {
