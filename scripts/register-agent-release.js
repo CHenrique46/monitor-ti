@@ -1,5 +1,5 @@
 // Registra uma nova release (multi-arquivo) do Agent no servidor.
-// Uso: node scripts/register-agent-release.js <versao> <agentExe> <notifierExe> [--activate]
+// Uso: node scripts/register-agent-release.js <versao> <agentExe> [<notifierExe>] [--agent-only] [--activate]
 //
 // Para releases 1.0.x (legadas, arquivo único) informe o mesmo exe duas vezes,
 // ou use o formato antigo: <versao> <exe> [--activate] (sem notifier).
@@ -27,17 +27,22 @@ const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const AGENT_NAME = "MonitorTI-Agent.exe";
 const NOTIFIER_NAME = "MonitorTI-Notifier.exe";
 const INTEGRITY_NAME = "notifier-integrity.json";
+const PACKAGE_MANIFEST_NAME = "package-manifest.json";
 
 function sha256Of(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
-function buildZip(dir, version) {
+function buildZip(dir, version, packageMode) {
   const zipName = "MonitorTI-Agent-" + version + ".zip";
   const zipPath = path.join(dir, zipName);
+  const manifestName = packageMode === "agent-only" ? PACKAGE_MANIFEST_NAME : "manifest.json";
+  const entries = packageMode === "agent-only"
+    ? [AGENT_NAME, manifestName]
+    : [AGENT_NAME, NOTIFIER_NAME, manifestName, INTEGRITY_NAME];
   const r = spawnSync(
     "tar",
-    ["-a", "-cf", zipPath, "-C", dir, AGENT_NAME, NOTIFIER_NAME, "manifest.json", INTEGRITY_NAME],
+    ["-a", "-cf", zipPath, "-C", dir, ...entries],
     { windowsHide: true }
   );
   if (r.status !== 0) {
@@ -50,13 +55,15 @@ function buildZip(dir, version) {
 
 async function main() {
   const args = process.argv.slice(2);
-  const version = args[0];
-  const agentExe = args[1];
-  const notifierExe = args[2];
+  const positional = args.filter((arg) => !arg.startsWith("--"));
+  const version = positional[0];
+  const agentExe = positional[1];
+  const agentOnly = args.includes("--agent-only");
+  const notifierExe = agentOnly ? null : positional[2];
   const activate = args.includes("--activate");
 
   if (!version || !agentExe) {
-    console.error("Uso: node scripts/register-agent-release.js <versao> <agentExe> [<notifierExe>] [--activate]");
+    console.error("Uso: node scripts/register-agent-release.js <versao> <agentExe> [<notifierExe>] [--agent-only] [--activate]");
     process.exit(1);
   }
   if (!VERSION_RE.test(version)) {
@@ -65,6 +72,10 @@ async function main() {
   }
   if (!fs.existsSync(agentExe)) {
     console.error("Agent nao encontrado: " + agentExe);
+    process.exit(1);
+  }
+  if (agentOnly && positional[2]) {
+    console.error("Nao informe Notifier em uma release --agent-only.");
     process.exit(1);
   }
   if (notifierExe && !fs.existsSync(notifierExe)) {
@@ -78,37 +89,49 @@ async function main() {
   const agentSize = agentBuf.length;
 
   const dir = path.join(RELEASES_ROOT, version);
+  if (fs.existsSync(dir) && fs.readdirSync(dir).length > 0) {
+    throw new Error("Diretorio de release ja existe e nao esta vazio: " + dir);
+  }
   fs.mkdirSync(dir, { recursive: true });
   const destAgent = path.join(dir, AGENT_NAME);
   fs.copyFileSync(agentExe, destAgent);
   console.log("Agent:    SHA " + agentSha256);
   console.log("          size " + agentSize);
 
-  if (notifierExe) {
-    const notBuf = fs.readFileSync(notifierExe);
-    const notSha256 = sha256Of(notBuf);
-    const notSize = notBuf.length;
-    const destNot = path.join(dir, NOTIFIER_NAME);
-    fs.copyFileSync(notifierExe, destNot);
-    console.log("Notifier: SHA " + notSha256);
-    console.log("          size " + notSize);
-
-    const manifest = {
-      version,
-      files: [
-        { name: AGENT_NAME, sha256: agentSha256, size: agentSize },
-        { name: NOTIFIER_NAME, sha256: notSha256, size: notSize }
-      ]
-    };
-    fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
-    fs.writeFileSync(path.join(dir, INTEGRITY_NAME), JSON.stringify({
-      version,
-      notifierSha256: notSha256,
-      notifierSize: notSize
-    }, null, 2));
+  if (notifierExe || agentOnly) {
+    const packageMode = agentOnly ? "agent-only" : "full";
+    const files = [{ name: AGENT_NAME, sha256: agentSha256, size: agentSize }];
+    if (!agentOnly) {
+      const notBuf = fs.readFileSync(notifierExe);
+      const notSha256 = sha256Of(notBuf);
+      const notSize = notBuf.length;
+      const destNot = path.join(dir, NOTIFIER_NAME);
+      fs.copyFileSync(notifierExe, destNot);
+      files.push({ name: NOTIFIER_NAME, sha256: notSha256, size: notSize });
+      console.log("Notifier: SHA " + notSha256);
+      console.log("          size " + notSize);
+      const integrity = Buffer.from(JSON.stringify({ version, notifierSha256: notSha256, notifierSize: notSize }, null, 2));
+      fs.writeFileSync(path.join(dir, INTEGRITY_NAME), integrity);
+      files.push({ name: INTEGRITY_NAME, sha256: sha256Of(integrity), size: integrity.length });
+    }
+    const manifest = packageMode === "agent-only"
+      ? {
+        schemaVersion: 1,
+        version,
+        packageMode,
+        files,
+        notifierAction: "preserve",
+        configAction: "preserve",
+        serviceAction: "restart"
+      }
+      : { schemaVersion: 1, version, packageMode, files };
+    fs.writeFileSync(
+      path.join(dir, packageMode === "agent-only" ? PACKAGE_MANIFEST_NAME : "manifest.json"),
+      JSON.stringify(manifest, null, 2) + "\n"
+    );
     console.log("Manifest gravado.");
 
-    const { zipName, zipSha256, zipSize } = buildZip(dir, version);
+    const { zipName, zipSha256, zipSize } = buildZip(dir, version, packageMode);
     console.log("Pacote:   " + zipName + "  SHA " + zipSha256 + "  size " + zipSize);
     fs.writeFileSync(
       path.join(dir, "release.json"),
@@ -150,3 +173,5 @@ if (require.main === module) main().catch(async (e) => {
   try { await prisma.$disconnect(); } catch (x) {}
   process.exit(1);
 });
+
+module.exports = { buildZip };
