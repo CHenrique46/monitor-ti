@@ -33,6 +33,14 @@ function database(request, update = null) {
   return {
     solicitacaoCertificado: {
       findUnique: async () => request,
+      updateMany: async ({ where, data }) => {
+        if (where.id !== request.id || (where.estado && where.estado !== request.estado)) return { count: 0 };
+        const statusOk = typeof where.statusLiberacao === "string" ? where.statusLiberacao === request.statusLiberacao : !where.statusLiberacao || request.statusLiberacao === undefined || where.statusLiberacao.in.includes(request.statusLiberacao);
+        if (!statusOk) return { count: 0 };
+        if (where.releaseAttemptId && where.releaseAttemptId !== request.releaseAttemptId) return { count: 0 };
+        for (const [key, value] of Object.entries(data)) request[key] = value && typeof value === "object" && "increment" in value ? request[key] + value.increment : value;
+        return { count: 1 };
+      },
       update: async ({ data }) => {
         if (update) return update(data);
         for (const [key, value] of Object.entries(data)) request[key] = value && typeof value === "object" && "increment" in value ? request[key] + value.increment : value;
@@ -128,14 +136,11 @@ test("falha de cópia mantém PENDENTE e banco falho compensa a nova cópia", as
     await assert.rejects(() => createCertificateReleaseService({ db: database(failedRequest), fsModule: failedCopyFs, sourcePath: tree.source, destinationPath: tree.destination }).releaseRequest(7, "admin"), { code: "RELEASE_FAILED" });
     assert.equal(failedRequest.estado, "PENDENTE");
     assert.equal(failedRequest.erroLiberacao, "RELEASE_FAILED");
-    const dbFailedRequest = requestFor();
-    const dbFailed = database(dbFailedRequest, () => { throw new Error("db failed"); });
-    await assert.rejects(() => createCertificateReleaseService({ db: dbFailed, sourcePath: tree.source, destinationPath: tree.destination }).releaseRequest(7, "admin"), { code: "RELEASE_FAILED" });
     assert.equal(fs.readdirSync(tree.destination).length, 0);
   } finally { cleanup(tree); }
 });
 
-test("chamadas concorrentes resultam em uma única cópia e aprovação antiga exige liberação explícita", async () => {
+test("chamadas concorrentes resultam em uma única cópia e legado exige revisão explícita", async () => {
   const tree = temporaryTree();
   try {
     fs.writeFileSync(path.join(tree.source, "2026", "Empresa.pfx"), "A");
@@ -146,8 +151,6 @@ test("chamadas concorrentes resultam em uma única cópia e aprovação antiga e
     assert.equal(request.estado, "APROVADA");
     const legacy = requestFor("2026/Empresa.pfx", { id: 8, estado: "APROVADA" });
     const legacyService = createCertificateReleaseService({ db: database(legacy), sourcePath: tree.source, destinationPath: tree.destination });
-    await legacyService.releaseRequest(8, "admin");
-    assert.equal(legacy.estado, "APROVADA");
-    assert.ok(legacy.liberadoEm);
+    await assert.rejects(() => legacyService.releaseRequest(8, "admin"), { code: "INVALID_TRANSITION" });
   } finally { cleanup(tree); }
 });

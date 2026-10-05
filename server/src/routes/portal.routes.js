@@ -15,6 +15,8 @@ function createPortalRouter({ service, humanSession, requireAdmin }) {
   admin.get("/solicitacoes/resumo", humanSession, requireAdmin(), controller.pendingRequestSummary);
   admin.get("/solicitacoes", humanSession, requireAdmin(), controller.listRequests);
   admin.patch("/solicitacoes/:id", humanSession, requireAdmin(), controller.decideRequest);
+  admin.post("/solicitacoes/:id/retry-authorization", humanSession, requireAdmin(), controller.authorizeExtraordinaryRetry);
+  admin.delete("/solicitacoes/:id/retry-authorization", humanSession, requireAdmin(), controller.cancelExtraordinaryRetry);
   return { portal, admin };
 }
 

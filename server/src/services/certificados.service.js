@@ -4,10 +4,13 @@ const path = require("path");
 const prisma = require("../prisma");
 const { getCertificadosClientesPath } = require("../config");
 
-const MAX_DEPTH = 1;
+const MAX_DEPTH = 3;
 const SUPPORTED_EXTENSIONS = new Set([".pfx", ".p12"]);
+const EXCLUDED_DIRECTORY_NAME = ".lixeira";
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
+const VALIDITY_TIME_ZONE = "America/Sao_Paulo";
+const MAX_MTIME_FUTURE_MS = 24 * 60 * 60 * 1000;
 let scanInProgress = false;
 
 function normalizeSearchText(value) {
@@ -82,6 +85,78 @@ function sanitizePublicBusinessName(filename, document = null) {
 
 function cleanDisplayName(filename) {
   return sanitizePublicBusinessName(filename).name;
+}
+
+function isValidCivilDate(year, month, day) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) || year < 1900 || year > 2200 || month < 1 || month > 12 || day < 1) return false;
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day <= lastDay;
+}
+
+function civilDateToDate(year, month, day) {
+  return isValidCivilDate(year, month, day) ? new Date(Date.UTC(year, month - 1, day, 12, 0, 0)) : null;
+}
+
+function datePartsInTimeZone(value, timeZone = VALIDITY_TIME_ZONE) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+  const result = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+  return isValidCivilDate(result.year, result.month, result.day) ? result : null;
+}
+
+function addCalendarYear(value) {
+  const parts = datePartsInTimeZone(value);
+  if (!parts) return null;
+  const day = Math.min(parts.day, new Date(Date.UTC(parts.year + 1, parts.month, 0)).getUTCDate());
+  return civilDateToDate(parts.year + 1, parts.month, day);
+}
+
+function currentCivilDate(now = new Date()) {
+  const parts = datePartsInTimeZone(now);
+  return parts ? civilDateToDate(parts.year, parts.month, parts.day) : null;
+}
+
+function isPastCivilDate(value, now = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const today = currentCivilDate(now);
+  return Boolean(date && today && date.getTime() < today.getTime());
+}
+
+function parseExplicitValidity(filename, now = new Date()) {
+  const text = String(filename || "");
+  const marker = /(?:^|[^A-Za-z0-9À-ÿ])(?:validade|vencimento)(?:[\s_.:,;!?()[\]{}\/\\-]+)(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?!\d)/giu;
+  const matches = [];
+  let match;
+  while ((match = marker.exec(text))) {
+    const date = civilDateToDate(Number(match[3]), Number(match[2]), Number(match[1]));
+    if (date) matches.push(date);
+  }
+  const unique = [...new Map(matches.map((date) => [date.toISOString().slice(0, 10), date])).values()];
+  if (unique.length > 1) return { date: null, status: "AMBIGUA", origin: "AMBIGUA" };
+  if (unique.length === 1) return { date: unique[0], status: isPastCivilDate(unique[0], now) ? "VENCIDO_CONFIRMADO" : "VALIDO_CONFIRMADO", origin: "CONFIRMADA_NOME" };
+  return null;
+}
+
+function extractValidityMetadata(filename, modifiedAt, now = new Date()) {
+  const explicit = parseExplicitValidity(filename, now);
+  if (explicit) return { validade: explicit.date, validadeOrigem: explicit.origin, validadeStatus: explicit.status };
+  const mtime = modifiedAt instanceof Date ? modifiedAt : new Date(modifiedAt);
+  if (!Number.isFinite(mtime.getTime()) || mtime.getTime() > now.getTime() + MAX_MTIME_FUTURE_MS) return { validade: null, validadeOrigem: "NAO_IDENTIFICADA", validadeStatus: "NAO_IDENTIFICADA" };
+  const estimated = addCalendarYear(mtime);
+  if (!estimated) return { validade: null, validadeOrigem: "NAO_IDENTIFICADA", validadeStatus: "NAO_IDENTIFICADA" };
+  return { validade: estimated, validadeOrigem: "ESTIMADA_MODIFICACAO", validadeStatus: isPastCivilDate(estimated, now) ? "POSSIVELMENTE_VENCIDO" : "VALIDADE_ESTIMADA" };
+}
+
+function validityStatus(record, now = new Date()) {
+  const stored = record && record.validadeStatus;
+  if (stored === "VALIDO_CONFIRMADO" && record.validade && isPastCivilDate(record.validade, now)) return "VENCIDO_CONFIRMADO";
+  if (stored === "VALIDADE_ESTIMADA" && record.validade && isPastCivilDate(record.validade, now)) return "POSSIVELMENTE_VENCIDO";
+  return stored || "NAO_IDENTIFICADA";
+}
+
+function isConfirmedExpired(record, now = new Date()) {
+  return validityStatus(record, now) === "VENCIDO_CONFIRMADO";
 }
 
 function onlyDigits(value) {
@@ -173,6 +248,7 @@ function makeRecord(root, currentDirectory, entry, stats) {
   const document = extractDocument(entry.name);
   const logical = parseLogicalFolder(relativeDirectory);
   const extension = path.extname(entry.name).toLowerCase();
+  const validity = extractValidityMetadata(entry.name, stats.mtime);
   const publicName = sanitizePublicBusinessName(entry.name, document);
   return {
     nomeExibicao: publicName.name,
@@ -184,6 +260,9 @@ function makeRecord(root, currentDirectory, entry, stats) {
     anoReferencia: logical.anoReferencia,
     tamanhoBytes: stats.size,
     modificadoEm: stats.mtime,
+    validade: validity.validade,
+    validadeOrigem: validity.validadeOrigem,
+    validadeStatus: validity.validadeStatus,
     origemChave: buildOriginKey(relative),
     metadataStatus: publicName.reviewRequired ? "REVISAO_NOME" : "PENDENTE"
   };
@@ -192,6 +271,7 @@ function makeRecord(root, currentDirectory, entry, stats) {
 function scanCatalog(root) {
   const records = [];
   let ignored = 0;
+  const ignoredReasons = [];
   const errors = [];
 
   function visit(directory, depth) {
@@ -210,6 +290,10 @@ function scanCatalog(root) {
       }
       const fullPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
+        if (entry.name.toLowerCase() === EXCLUDED_DIRECTORY_NAME) {
+          ignoredReasons.push("excluded_directory");
+          continue;
+        }
         if (depth >= MAX_DEPTH) {
           errors.push("max_depth_reached");
           continue;
@@ -237,7 +321,7 @@ function scanCatalog(root) {
   }
 
   visit(root, 0);
-  return { records, ignored, errors };
+  return { records, ignored, ignoredReasons, errors };
 }
 
 async function syncCatalog({ db = prisma, rootPath } = {}) {
@@ -307,15 +391,19 @@ function publicCertificate(record) {
     pastaLogica: record.pastaLogica,
     anoReferencia: record.anoReferencia,
     validadeInicio: null,
-    validadeFim: null,
-    statusValidade: "METADATA_PENDENTE",
+    validadeFim: record.validade || null,
+    validadeOrigem: record.validadeOrigem || "NAO_IDENTIFICADA",
+    statusValidade: validityStatus(record),
     metadataStatus: record.metadataStatus
   };
 }
 
-async function listCertificates({ db = prisma, query = {} } = {}) {
+async function listCertificates({ db = prisma, query = {}, includeConfirmedExpired = false } = {}) {
   const parsed = parseListQuery(query);
   const where = { ativo: true };
+  const today = currentCivilDate();
+  const validityFilter = { OR: [{ validadeStatus: null }, { validadeStatus: { notIn: ["VALIDO_CONFIRMADO", "VENCIDO_CONFIRMADO"] } }, { validadeStatus: "VALIDO_CONFIRMADO", validade: { gte: today } }] };
+  if (!includeConfirmedExpired) where.AND = [validityFilter];
   if (parsed.year !== null) where.anoReferencia = parsed.year;
   if (parsed.normalized) {
     where.OR = [
@@ -337,8 +425,57 @@ async function getCertificate(id, db = prisma) {
   return record ? publicCertificate(record) : null;
 }
 
+function safeStorageErrorCode(error) {
+  const allowed = new Set(["EACCES", "EPERM", "ENOENT", "ENOTDIR", "EHOSTUNREACH", "ETIMEDOUT", "UNKNOWN"]);
+  return allowed.has(error && error.code) ? error.code : "UNKNOWN";
+}
+
+async function checkStorageAccess({ configuredPath = getCertificadosClientesPath(), fsModule = fs } = {}) {
+  const result = {
+    configurationPresent: false,
+    pathRecognized: false,
+    pathReachable: false,
+    isDirectory: false,
+    readAccess: false,
+    errorCode: null
+  };
+  const value = String(configuredPath || "").trim();
+  result.configurationPresent = value.length > 0;
+  if (!result.configurationPresent) {
+    result.errorCode = "CONFIG_NOT_SET";
+    return result;
+  }
+  if (!path.isAbsolute(value)) {
+    result.errorCode = "CONFIG_PATH_INVALID";
+    return result;
+  }
+  result.pathRecognized = true;
+
+  let stats;
+  try {
+    stats = await fsModule.promises.stat(value);
+    result.pathReachable = true;
+  } catch (error) {
+    result.errorCode = safeStorageErrorCode(error);
+    return result;
+  }
+  result.isDirectory = stats.isDirectory();
+  if (!result.isDirectory) {
+    result.errorCode = "ENOTDIR";
+    return result;
+  }
+  try {
+    await fsModule.promises.access(value, fsModule.constants.R_OK);
+    result.readAccess = true;
+  } catch (error) {
+    result.errorCode = safeStorageErrorCode(error);
+  }
+  return result;
+}
+
 module.exports = {
   MAX_DEPTH,
+  EXCLUDED_DIRECTORY_NAME,
   SUPPORTED_EXTENSIONS,
   normalizeSearchText,
   removeExtension,
@@ -355,8 +492,16 @@ module.exports = {
   buildOriginKey,
   scanCatalog,
   syncCatalog,
-  listCertificates,
-  getCertificate,
-  publicCertificate,
+    listCertificates,
+    getCertificate,
+    checkStorageAccess,
+    publicCertificate,
+    parseExplicitValidity,
+    extractValidityMetadata,
+    addCalendarYear,
+    isValidCivilDate,
+    validityStatus,
+    isConfirmedExpired,
+    VALIDITY_TIME_ZONE,
   _resetScanLockForTests: () => { scanInProgress = false; }
 };

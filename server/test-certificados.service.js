@@ -103,17 +103,37 @@ test("valida CPF/CNPJ e mascara somente documentos válidos", () => {
   assert.equal(service.maskDocument("11222333000181", "CNPJ"), "11.***.***/****-**");
 });
 
-test("scan aceita somente pfx/p12 e não atravessa a profundidade permitida", () => {
+test("scan exclui Lixeira exatamente, preserva diretórios legítimos e não segue symlink", () => {
   const root = tempRoot();
   fs.writeFileSync(path.join(root, "A1 2025", "Empresa_11222333000181.pfx"), "");
+  fs.writeFileSync(path.join(root, "A1 2025", "Empresa-2.p12"), "");
   fs.writeFileSync(path.join(root, "A1 2025", "ignore.log"), "conteudo não usado");
-  fs.mkdirSync(path.join(root, "A1 2025", "subpasta"));
-  fs.writeFileSync(path.join(root, "A1 2025", "subpasta", "fora.pfx"), "");
+  fs.mkdirSync(path.join(root, "A1 2025", ".LIXEIRA"));
+  fs.writeFileSync(path.join(root, "A1 2025", ".LIXEIRA", "nao-catalogar.pfx"), "");
+  fs.mkdirSync(path.join(root, "A1 2025", "subpasta", ".lixeira", "interna"), { recursive: true });
+  fs.writeFileSync(path.join(root, "A1 2025", "subpasta", ".lixeira", "interna", "nao-enumerar.p12"), "");
+  fs.mkdirSync(path.join(root, "A1 2025", "lixeira"));
+  fs.writeFileSync(path.join(root, "A1 2025", "lixeira", "legitimo.pfx"), "");
+  fs.mkdirSync(path.join(root, "A1 2025", ".lixeira antiga"));
+  fs.writeFileSync(path.join(root, "A1 2025", ".lixeira antiga", "legitimo.p12"), "");
+  fs.mkdirSync(path.join(root, "A1 2025", "subpasta"), { recursive: true });
+  fs.mkdirSync(path.join(root, "A1 2025", "subpasta", "nivel2"));
+  fs.writeFileSync(path.join(root, "A1 2025", "subpasta", "nivel2", "permitido.pfx"), "");
+  fs.mkdirSync(path.join(root, "A1 2025", "subpasta", "nivel2", "nivel3"));
+  fs.writeFileSync(path.join(root, "A1 2025", "subpasta", "nivel2", "nivel3", "bloqueado.pfx"), "");
+  try {
+    fs.symlinkSync(path.join(root, "A1 2025", "Empresa_11222333000181.pfx"), path.join(root, "A1 2025", "link.pfx"));
+  } catch { /* symlink pode exigir privilégio neste ambiente */ }
   const result = service.scanCatalog(root);
-  assert.equal(result.records.length, 1);
-  assert.equal(result.records[0].extensao, ".pfx");
-  assert.equal(result.records[0].anoReferencia, 2025);
-  assert.equal(result.records[0].nomeExibicao, "Empresa");
+  assert.equal(result.records.length, 5);
+  assert.deepEqual(new Set(result.records.map((record) => record.extensao)), new Set([".pfx", ".p12"]));
+  assert.equal(result.records.some((record) => record.nomeExibicao === "permitido"), true);
+  assert.equal(result.records.some((record) => record.nomeExibicao === "bloqueado"), false);
+  assert.equal(result.records.some((record) => record.nomeExibicao === "nao-catalogar" || record.nomeExibicao === "nao-enumerar"), false);
+  assert.equal(result.records.some((record) => record.nomeExibicao === "legitimo"), true);
+  assert.equal(result.records.filter((record) => record.nomeExibicao === "legitimo").length, 2);
+  assert.deepEqual(result.ignoredReasons, ["excluded_directory", "excluded_directory"]);
+  assert.equal(result.ignored >= 1, true);
   assert.equal(result.errors.includes("max_depth_reached"), true);
 });
 
@@ -128,8 +148,8 @@ test("varredura completa inativa ausentes e varredura parcial preserva ativos", 
   const complete = await service.syncCatalog({ rootPath: root, db });
   assert.equal(complete.inativados, 1);
   record.ativo = true;
-  fs.mkdirSync(path.join(root, "A1 2025", "subpasta"));
-  fs.writeFileSync(path.join(root, "A1 2025", "subpasta", "fora.pfx"), "");
+  fs.mkdirSync(path.join(root, "A1 2025", "subpasta", "nivel2", "nivel3"), { recursive: true });
+  fs.writeFileSync(path.join(root, "A1 2025", "subpasta", "nivel2", "nivel3", "fora.pfx"), "");
   const partial = await service.syncCatalog({ rootPath: root, db });
   assert.equal(partial.inativados, 0);
   assert.equal(record.ativo, true);

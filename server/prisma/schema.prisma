@@ -8,30 +8,30 @@ datasource db {
 }
 
 model Computador {
-  id            Int      @id @default(autoincrement())
-  deviceId      String   @unique
-  hostname      String
-  apelido       String?
-  equipamentoNumero String? @unique
-  usuario       String?
-  ip            String?
-  sistema        String?
-  arquitetura    String?
-  processador    String?
-  cpusLogicas    Int?
-  sistemaRelease String?
-  fabricante          String?
-  modeloEquipamento   String?
-  placaMaeFabricante  String?
-  placaMaeModelo      String?
-  biosFabricante      String?
-  biosVersao          String?
-  numeroSerie         String?
-  agentVersion        String?
-  status        String   @default("offline")
-  ultimaConexao DateTime?
-  criadoEm      DateTime @default(now())
-  atualizadoEm  DateTime @updatedAt
+  id                 Int       @id @default(autoincrement())
+  deviceId           String    @unique
+  hostname           String
+  apelido            String?
+  equipamentoNumero  String?   @unique
+  usuario            String?
+  ip                 String?
+  sistema            String?
+  arquitetura        String?
+  processador        String?
+  cpusLogicas        Int?
+  sistemaRelease     String?
+  fabricante         String?
+  modeloEquipamento  String?
+  placaMaeFabricante String?
+  placaMaeModelo     String?
+  biosFabricante     String?
+  biosVersao         String?
+  numeroSerie        String?
+  agentVersion       String?
+  status             String    @default("offline")
+  ultimaConexao      DateTime?
+  criadoEm           DateTime  @default(now())
+  atualizadoEm       DateTime  @updatedAt
 
   // Estado atual de monitoramento (unidades: bytes para RAM/disco, segundos para uptime)
   cpuUso        Float?
@@ -42,23 +42,23 @@ model Computador {
   uptime        Float?
   ultimaMetrica DateTime?
 
-  discosFisicos DiscoFisico[]
-  metricas      MetricaComputador[]
-  alertas      Alerta[]
-  entregasAviso EntregaAviso[]
-  acoesRemotas  AcaoRemotaExecucao[]
+  discosFisicos              DiscoFisico[]
+  metricas                   MetricaComputador[]
+  alertas                    Alerta[]
+  entregasAviso              EntregaAviso[]
+  acoesRemotas               AcaoRemotaExecucao[]
   maintenanceScheduleTargets MaintenanceScheduleTarget[]
-  officeInstallations OfficeInstallation[]
-  inventoryBaseline ComputerInventoryBaseline?
-  excelInventorySyncs ExcelInventorySync[]
-  agentUpdates      AgentUpdate[]
-  solicitacoesCertificado SolicitacaoCertificado[]
+  officeInstallations        OfficeInstallation[]
+  inventoryBaseline          ComputerInventoryBaseline?
+  excelInventorySyncs        ExcelInventorySync[]
+  agentUpdates               AgentUpdate[]
+  solicitacoesCertificado    SolicitacaoCertificado[]
 }
 
 model ComputerInventoryBaseline {
-  id                       Int       @id @default(autoincrement())
-  computadorId             Int       @unique
-  equipamentoNumero        String    @unique
+  id                       Int      @id @default(autoincrement())
+  computadorId             Int      @unique
+  equipamentoNumero        String   @unique
   apelidoEsperado          String?
   processadorEsperado      String?
   ramEsperada              Float?
@@ -68,131 +68,131 @@ model ComputerInventoryBaseline {
   officePartialKeyEsperada String?
   fabricanteModeloEsperado String?
   observacoes              String?
-  source                   String    @default("EXCEL_IMPORT")
-  importedAt               DateTime  @default(now())
-  updatedAt                DateTime  @updatedAt
+  source                   String   @default("EXCEL_IMPORT")
+  importedAt               DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 
-  computador               Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
-  excelInventorySyncs      ExcelInventorySync[]
+  computador          Computador           @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  excelInventorySyncs ExcelInventorySync[]
 }
 
 model ExcelInventorySync {
-  id                  Int      @id @default(autoincrement())
-  computerId          Int
-  baselineId          Int
-  equipamentoNumero   String
-  operation           String   @default("UPSERT_INVENTORY")
-  status              String   @default("PENDING")
-  attempts            Int      @default(0)
-  nextAttemptAt       DateTime @default(now())
-  lastError           String?
-  leaseUntil          DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  processedAt         DateTime?
-  snapshot            Json?
+  id                Int       @id @default(autoincrement())
+  computerId        Int
+  baselineId        Int
+  equipamentoNumero String
+  operation         String    @default("UPSERT_INVENTORY")
+  status            String    @default("PENDING")
+  attempts          Int       @default(0)
+  nextAttemptAt     DateTime  @default(now())
+  lastError         String?
+  leaseUntil        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  processedAt       DateTime?
+  snapshot          Json?
 
-  computador          Computador @relation(fields: [computerId], references: [id], onDelete: Cascade)
-  baseline            ComputerInventoryBaseline @relation(fields: [baselineId], references: [id], onDelete: Cascade)
+  computador Computador                @relation(fields: [computerId], references: [id], onDelete: Cascade)
+  baseline   ComputerInventoryBaseline @relation(fields: [baselineId], references: [id], onDelete: Cascade)
 
   @@index([status, nextAttemptAt])
   @@index([computerId])
 }
 
 model DiscoFisico {
-  id           Int       @id @default(autoincrement())
+  id           Int     @id @default(autoincrement())
   computadorId Int
   modelo       String?
   tamanho      Float?
   interface    String?
 
-  computador   Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  computador Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
 
-  criadoEm     DateTime  @default(now())
-  atualizadoEm DateTime  @updatedAt
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
 }
 
 model MetricaComputador {
-  id           Int      @id @default(autoincrement())
+  id           Int @id @default(autoincrement())
   computadorId Int
 
-  cpuUso       Float?
-  ramUsoPct    Float?
-  discoUsoPct  Float?
+  cpuUso      Float?
+  ramUsoPct   Float?
+  discoUsoPct Float?
 
-  ramUsada     Float?
-  ramTotal     Float?
-  discoLivre   Float?
-  discoTotal   Float?
+  ramUsada   Float?
+  ramTotal   Float?
+  discoLivre Float?
+  discoTotal Float?
 
-  coletadoEm   DateTime @default(now())
+  coletadoEm DateTime @default(now())
 
-  computador   Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  computador Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
 
   @@index([computadorId, coletadoEm])
 }
 
 model Alerta {
-  id           Int      @id @default(autoincrement())
+  id           Int @id @default(autoincrement())
   computadorId Int
 
-  tipo         String
-  nivel        String
-  mensagem     String
+  tipo     String
+  nivel    String
+  mensagem String
 
-  valor        Float?
-  limite       Float?
+  valor  Float?
+  limite Float?
 
-  ativo        Boolean   @default(true)
+  ativo Boolean @default(true)
 
-  iniciadoEm   DateTime  @default(now())
-  resolvidoEm  DateTime?
+  iniciadoEm  DateTime  @default(now())
+  resolvidoEm DateTime?
 
-  computador   Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  computador Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
 
   @@index([computadorId, ativo])
   @@index([iniciadoEm])
 }
 
 model AgentRelease {
-  id             Int      @id @default(autoincrement())
-  version        String   @unique
-  fileName       String
-  sha256         String
-  size           Int
-  releaseDate    DateTime @default(now())
-  active         Boolean  @default(false)
-  criadoEm       DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  version     String   @unique
+  fileName    String
+  sha256      String
+  size        Int
+  releaseDate DateTime @default(now())
+  active      Boolean  @default(false)
+  criadoEm    DateTime @default(now())
 
   // Campos opcionais para release multi-arquivo (pacote 1.1.0+).
   // Nulos em releases legadas (1.0.x) -> mantém compatibilidade total.
-  packageName    String?
-  packageSha256  String?
-  packageSize    Int?
-  manifest       Json?
+  packageName   String?
+  packageSha256 String?
+  packageSize   Int?
+  manifest      Json?
+
+  updates AgentUpdate[]
 
   @@index([active])
-
-  updates          AgentUpdate[]
 }
 
 model AgentUpdate {
-  id              Int      @id @default(autoincrement())
-  computadorId    Int
-  deviceId        String
-  hostname        String
-  versaoAnterior  String?
-  versaoDestino   String
-  status          String   @default("PENDING")
-  iniciadoEm      DateTime @default(now())
-  atualizadoEm    DateTime @updatedAt
-  finalizadoEm    DateTime?
-  iniciadoPor     String
-  erro            String?
-  releaseId       Int?
+  id             Int       @id @default(autoincrement())
+  computadorId   Int
+  deviceId       String
+  hostname       String
+  versaoAnterior String?
+  versaoDestino  String
+  status         String    @default("PENDING")
+  iniciadoEm     DateTime  @default(now())
+  atualizadoEm   DateTime  @updatedAt
+  finalizadoEm   DateTime?
+  iniciadoPor    String
+  erro           String?
+  releaseId      Int?
 
-  computador      Computador  @relation(fields: [computadorId], references: [id], onDelete: Cascade)
-  release         AgentRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  computador Computador    @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  release    AgentRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
 
   @@index([deviceId, iniciadoEm])
   @@index([computadorId, status])
@@ -200,13 +200,13 @@ model AgentUpdate {
 }
 
 model Aviso {
-  id        Int      @id @default(autoincrement())
-  titulo    String
-  mensagem  String
-  nivel     String   @default("info")
-  autor     String?
-  ativo     Boolean  @default(true)
-  criadoEm  DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  titulo       String
+  mensagem     String
+  nivel        String   @default("info")
+  autor        String?
+  ativo        Boolean  @default(true)
+  criadoEm     DateTime @default(now())
   atualizadoEm DateTime @updatedAt
 
   agendamentos AgendamentoAviso[]
@@ -215,97 +215,97 @@ model Aviso {
 }
 
 model AgendamentoAviso {
-  id              Int      @id @default(autoincrement())
-  avisoId         Int
-  aviso           Aviso    @relation(fields: [avisoId], references: [id], onDelete: Cascade)
+  id      Int   @id @default(autoincrement())
+  avisoId Int
+  aviso   Aviso @relation(fields: [avisoId], references: [id], onDelete: Cascade)
 
-  tipo            String   // once | daily | weekly
-  diaSemana       Int?     // 0-6 (usado em weekly)
-  agendadoPara    DateTime // ancora inicial (nao usado apos a 1a execucao em recorrencias)
-  expiraEmHoras   Int      @default(24)
+  tipo          String // once | daily | weekly
+  diaSemana     Int? // 0-6 (usado em weekly)
+  agendadoPara  DateTime // ancora inicial (nao usado apos a 1a execucao em recorrencias)
+  expiraEmHoras Int      @default(24)
 
-  alvoTipo        String   // todos | online | selecionados
-  alvoIds         String?  // JSON de ids de computador (quando alvoTipo = selecionados)
+  alvoTipo String // todos | online | selecionados
+  alvoIds  String? // JSON de ids de computador (quando alvoTipo = selecionados)
 
-  ativo           Boolean  @default(true)
+  ativo           Boolean   @default(true)
   proximaExecucao DateTime?
 
-  criadoEm        DateTime @default(now())
-  atualizadoEm    DateTime @updatedAt
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
 
-  ocorrencias     OcorrenciaAviso[]
+  ocorrencias OcorrenciaAviso[]
 
   @@index([ativo, proximaExecucao])
 }
 
 model OcorrenciaAviso {
-  id            Int      @id @default(autoincrement())
+  id            Int               @id @default(autoincrement())
   agendamentoId Int?
   agendamento   AgendamentoAviso? @relation(fields: [agendamentoId], references: [id], onDelete: Cascade)
   avisoId       Int
-  aviso         Aviso    @relation(fields: [avisoId], references: [id], onDelete: Cascade)
+  aviso         Aviso             @relation(fields: [avisoId], references: [id], onDelete: Cascade)
 
-  agendadoPara  DateTime
-  processado    Boolean  @default(false)
+  agendadoPara DateTime
+  processado   Boolean  @default(false)
 
-  alvoTipo      String
-  alvoIds       String?
+  alvoTipo String
+  alvoIds  String?
 
-  criadoEm      DateTime @default(now())
+  criadoEm DateTime @default(now())
 
-  entregas      EntregaAviso[]
+  entregas EntregaAviso[]
 
   @@index([agendadoPara, processado])
 }
 
 model EntregaAviso {
-  id               Int       @id @default(autoincrement())
-  ocorrenciaId     Int?
-  ocorrencia       OcorrenciaAviso? @relation(fields: [ocorrenciaId], references: [id], onDelete: SetNull)
-  avisoId          Int
-  aviso            Aviso     @relation(fields: [avisoId], references: [id], onDelete: Cascade)
-  computadorId     Int
-  computador       Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  id           Int              @id @default(autoincrement())
+  ocorrenciaId Int?
+  ocorrencia   OcorrenciaAviso? @relation(fields: [ocorrenciaId], references: [id], onDelete: SetNull)
+  avisoId      Int
+  aviso        Aviso            @relation(fields: [avisoId], references: [id], onDelete: Cascade)
+  computadorId Int
+  computador   Computador       @relation(fields: [computadorId], references: [id], onDelete: Cascade)
 
-  noticeDeliveryId String    @unique
+  noticeDeliveryId String @unique
   titulo           String
   mensagem         String
   nivel            String
 
-  estado           String    @default("PENDENTE") // PENDENTE|ENVIADO|EXIBIDO|CONFIRMADO|EXPIRADO|FALHOU
-  enviadoEm        DateTime?
-  exibidoEm        DateTime?
-  confirmadoEm     DateTime?
+  estado       String    @default("PENDENTE") // PENDENTE|ENVIADO|EXIBIDO|CONFIRMADO|EXPIRADO|FALHOU
+  enviadoEm    DateTime?
+  exibidoEm    DateTime?
+  confirmadoEm DateTime?
 
-  expiraEm         DateTime
-  criadoEm         DateTime  @default(now())
-  atualizadoEm     DateTime  @updatedAt
+  expiraEm     DateTime
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
 
   @@index([computadorId, estado])
   @@index([expiraEm])
 }
 
 model Certificado {
-  id                         Int      @id @default(autoincrement())
-  nomeExibicao               String
-  nomePesquisaNormalizado    String
-  documentoNormalizado      String?
-  tipoDocumento              String?
-  extensao                  String
-  pastaLogica               String?
-  anoReferencia             Int?
-  tamanhoBytes              Int
-  modificadoEm              DateTime
-  validade                  DateTime?
-  validadeOrigem            String?
-  validadeStatus            String?
-  origemChave               String   @unique
-  metadataStatus            String   @default("PENDENTE")
-  ativo                     Boolean  @default(true)
-  criadoEm                  DateTime @default(now())
-  atualizadoEm              DateTime @updatedAt
-  solicitacoes              SolicitacaoCertificado[]
-  auditoriasLiberacao       CertificadoLiberacaoAuditoria[]
+  id                      Int                             @id @default(autoincrement())
+  nomeExibicao            String
+  nomePesquisaNormalizado String
+  documentoNormalizado    String?
+  tipoDocumento           String?
+  extensao                String
+  pastaLogica             String?
+  anoReferencia           Int?
+  tamanhoBytes            Int
+  modificadoEm            DateTime
+  validade                DateTime?
+  validadeOrigem          String?
+  validadeStatus          String?
+  origemChave             String                          @unique
+  metadataStatus          String                          @default("PENDENTE")
+  ativo                   Boolean                         @default(true)
+  criadoEm                DateTime                        @default(now())
+  atualizadoEm            DateTime                        @updatedAt
+  solicitacoes            SolicitacaoCertificado[]
+  auditoriasLiberacao     CertificadoLiberacaoAuditoria[]
 
   @@index([nomePesquisaNormalizado])
   @@index([documentoNormalizado])
@@ -314,56 +314,57 @@ model Certificado {
 }
 
 model SincronizacaoCatalogoCertificado {
-  id               Int      @id @default(autoincrement())
-  origemCategoria  String   @default("CLIENTE")
-  gatilho          String
-  status           String
-  iniciadaEm       DateTime
-  finalizadaEm     DateTime?
-  encontrados      Int      @default(0)
-  criados          Int      @default(0)
-  atualizados      Int      @default(0)
-  inativados       Int      @default(0)
-  ignorados        Int      @default(0)
-  erros            Int      @default(0)
-  mensagemSegura   String?
-  executadoPor     String?
-  criadoEm         DateTime @default(now())
+  id              Int       @id @default(autoincrement())
+  origemCategoria String    @default("CLIENTE")
+  gatilho         String
+  status          String
+  iniciadaEm      DateTime
+  finalizadaEm    DateTime?
+  encontrados     Int       @default(0)
+  criados         Int       @default(0)
+  atualizados     Int       @default(0)
+  inativados      Int       @default(0)
+  ignorados       Int       @default(0)
+  erros           Int       @default(0)
+  mensagemSegura  String?
+  executadoPor    String?
+  criadoEm        DateTime  @default(now())
 
   @@index([origemCategoria, iniciadaEm])
   @@index([status, iniciadaEm])
 }
 
 model SolicitacaoCertificado {
-  id                       Int      @id @default(autoincrement())
-  protocolo                String   @unique
+  id                       Int       @id @default(autoincrement())
+  protocolo                String    @unique
   certificadoId            Int
   computadorId             Int
   hostnameRegistrado       String?
   usuarioWindowsRegistrado String?
   ipRegistrado             String
   motivo                   String?
-  estado                   String   @default("PENDENTE") // PENDENTE|APROVADA|NEGADA
-  solicitadoEm             DateTime @default(now())
+  estado                   String    @default("PENDENTE") // PENDENTE|APROVADA|NEGADA
+  solicitadoEm             DateTime  @default(now())
   analisadoEm              DateTime?
   analisadoPor             String?
   motivoNegativa           String?
   nomeArquivoLiberado      String?
   liberadoEm               DateTime?
   erroLiberacao            String?
-  tentativasLiberacao      Int      @default(0)
+  tentativasLiberacao      Int       @default(0)
   releasedAt               DateTime?
   expiresAt                DateTime?
-  statusLiberacao          String   @default("NAO_LIBERADO")
-  releaseAttemptId         String?  @unique
+  statusLiberacao          String    @default("NAO_LIBERADO")
+  releaseAttemptId         String?   @unique
   releaseStartedAt         DateTime?
   releaseStage             String?
   releaseFingerprint       String?
-  atualizadoEm             DateTime @updatedAt
+  atualizadoEm             DateTime  @updatedAt
 
-  certificado           Certificado @relation(fields: [certificadoId], references: [id], onDelete: Restrict)
-  computador            Computador @relation(fields: [computadorId], references: [id], onDelete: Restrict)
-  auditorias            CertificadoLiberacaoAuditoria[]
+  certificado         Certificado                            @relation(fields: [certificadoId], references: [id], onDelete: Restrict)
+  computador          Computador                             @relation(fields: [computadorId], references: [id], onDelete: Restrict)
+  auditorias          CertificadoLiberacaoAuditoria[]
+  retryAuthorizations CertificateReleaseRetryAuthorization[]
 
   @@index([certificadoId])
   @@index([computadorId])
@@ -383,13 +384,39 @@ model CertificadoLiberacaoAuditoria {
   ocorridoEm           DateTime @default(now())
   resultado            String
   codigo               String
+  retryAuthorizationId String?
 
-  solicitacao          SolicitacaoCertificado @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
-  certificado           Certificado            @relation(fields: [certificadoId], references: [id], onDelete: Restrict)
+  solicitacao        SolicitacaoCertificado                @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+  certificado        Certificado                           @relation(fields: [certificadoId], references: [id], onDelete: Restrict)
+  retryAuthorization CertificateReleaseRetryAuthorization? @relation(fields: [retryAuthorizationId], references: [id], onDelete: SetNull)
 
   @@index([solicitacaoId, ocorridoEm])
   @@index([certificadoId, ocorridoEm])
   @@index([evento, ocorridoEm])
+  @@index([retryAuthorizationId])
+}
+
+model CertificateReleaseRetryAuthorization {
+  id            String    @id @default(uuid())
+  solicitacaoId Int
+  reason        String    @db.VarChar(240)
+  status        String    @default("PENDING")
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  acquiredAt    DateTime?
+  completedAt   DateTime?
+  failedAt      DateTime?
+  expiredAt     DateTime?
+  cancelledAt   DateTime?
+  attemptId     String?   @unique
+  errorCode     String?
+  atualizadoEm  DateTime  @default(now()) @updatedAt
+
+  solicitacao SolicitacaoCertificado          @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+  auditorias  CertificadoLiberacaoAuditoria[]
+
+  @@index([solicitacaoId, status])
+  @@index([status, expiresAt])
 }
 
 model OfficeInstallation {
@@ -415,7 +442,7 @@ model OfficeInstallation {
   collectedAt            DateTime @default(now())
   isPresent              Boolean  @default(true)
 
-  computador             Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  computador Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
 
   @@unique([computadorId, fingerprint])
   @@index([computadorId, isPresent])
@@ -423,71 +450,71 @@ model OfficeInstallation {
 }
 
 model AcaoRemotaExecucao {
-  id                Int      @id @default(autoincrement())
-  actionExecutionId String   @unique
+  id                Int        @id @default(autoincrement())
+  actionExecutionId String     @unique
   computadorId      Int
   computador        Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
 
-  action            String
-  payload           Json?
-  status            String   @default("PENDING") // PENDING|DISPATCHED|RUNNING|SUCCESS|FAILED|REJECTED
-  mensagem          String?
-  erro              String?
-  resultado         Json?
-  scheduleRunId     Int?
-  scheduleRun       MaintenanceScheduleRun? @relation(fields: [scheduleRunId], references: [id], onDelete: SetNull)
+  action        String
+  payload       Json?
+  status        String                  @default("PENDING") // PENDING|DISPATCHED|RUNNING|SUCCESS|FAILED|REJECTED
+  mensagem      String?
+  erro          String?
+  resultado     Json?
+  scheduleRunId Int?
+  scheduleRun   MaintenanceScheduleRun? @relation(fields: [scheduleRunId], references: [id], onDelete: SetNull)
 
-  solicitadaEm      DateTime @default(now())
-  enviadaEm         DateTime?
-  iniciadaEm        DateTime?
-  concluidaEm       DateTime?
-  atualizadoEm      DateTime @updatedAt
+  solicitadaEm DateTime  @default(now())
+  enviadaEm    DateTime?
+  iniciadaEm   DateTime?
+  concluidaEm  DateTime?
+  atualizadoEm DateTime  @updatedAt
 
+  @@unique([scheduleRunId, computadorId])
   @@index([computadorId, solicitadaEm])
   @@index([computadorId, action, status])
-  @@unique([scheduleRunId, computadorId])
 }
 
 model MaintenanceSchedule {
-  id          Int      @id @default(autoincrement())
-  enabled     Boolean  @default(false)
-  name        String
-  dayOfWeek   Int
-  time        String
-  timezone    String   @default("America/Sao_Paulo")
-  targetMode  String   @default("ALL")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         Int      @id @default(autoincrement())
+  enabled    Boolean  @default(false)
+  name       String
+  dayOfWeek  Int
+  time       String
+  timezone   String   @default("America/Sao_Paulo")
+  targetMode String   @default("ALL")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  targets     MaintenanceScheduleTarget[]
-  runs        MaintenanceScheduleRun[]
+  targets MaintenanceScheduleTarget[]
+  runs    MaintenanceScheduleRun[]
 
   @@index([enabled])
 }
 
 model MaintenanceScheduleTarget {
-  scheduleId  Int
+  scheduleId   Int
   computadorId Int
-  schedule    MaintenanceSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  computador  Computador @relation(fields: [computadorId], references: [id], onDelete: Cascade)
+  schedule     MaintenanceSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  computador   Computador          @relation(fields: [computadorId], references: [id], onDelete: Cascade)
 
   @@id([scheduleId, computadorId])
   @@index([computadorId])
 }
 
 model MaintenanceScheduleRun {
-  id             Int      @id @default(autoincrement())
-  scheduleId     Int
-  scheduledFor   DateTime
-  startedAt      DateTime?
-  finishedAt     DateTime?
-  status         String   @default("PLANNED")
-  targetCount    Int      @default(0)
-  dispatchedCount Int     @default(0)
-  skippedCount   Int      @default(0)
-  failedCount    Int      @default(0)
-  schedule       MaintenanceSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  executions     AcaoRemotaExecucao[]
+  id              Int                  @id @default(autoincrement())
+  scheduleId      Int
+  scheduledFor    DateTime
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  status          String               @default("PLANNED")
+  targetCount     Int                  @default(0)
+  dispatchedCount Int                  @default(0)
+  skippedCount    Int                  @default(0)
+  failedCount     Int                  @default(0)
+  schedule        MaintenanceSchedule  @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  executions      AcaoRemotaExecucao[]
 
   @@unique([scheduleId, scheduledFor])
   @@index([scheduleId, scheduledFor])

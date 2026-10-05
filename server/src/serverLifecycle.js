@@ -75,13 +75,20 @@ function createShutdownController({
       const warnings = [];
       setShuttingDown(true);
       log(`[Monitor TI] shutdown iniciado sinal=${signal}`);
+      const remainingMs = () => Math.max(1, timeoutMs - (Date.now() - startedAt));
 
       for (const scheduler of schedulers) {
-        try { if (scheduler?.stop) scheduler.stop(); }
-        catch (error) { warnings.push(`scheduler: ${safeError(error)}`); }
+        if (!scheduler?.stop) continue;
+        try {
+          const stopped = await withTimeout(
+            Promise.resolve().then(() => scheduler.stop()),
+            remainingMs(),
+            () => warnings.push("scheduler stop timeout")
+          );
+          if (!stopped) warnings.push("scheduler stop timeout");
+        } catch (error) { warnings.push(`scheduler: ${safeError(error)}`); }
       }
 
-      const remainingMs = () => Math.max(1, timeoutMs - (Date.now() - startedAt));
       try {
         const cleanupResult = await withTimeout(cleanup(), remainingMs(), () => warnings.push("cleanup timeout"));
         if (!cleanupResult) warnings.push("cleanup timeout");
