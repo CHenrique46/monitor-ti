@@ -2,6 +2,7 @@
 param(
   [string]$ServerUrl = "http://127.0.0.1:4000",
   [int]$ObservationSeconds = 60,
+  [int]$OnlyId = 0,
   [switch]$Execute
 )
 
@@ -13,6 +14,10 @@ $targets = @(
   [ordered]@{ Id = 466; Hostname = "CONT-04"; Equipment = "04"; DeviceId = "6df57034-2768-48e7-a166-15f2bf89e001" }
   [ordered]@{ Id = 619; Hostname = "LEGAL-29"; Equipment = "29"; DeviceId = "fdec21eb-7ad2-41d4-bf09-179998ce10a2" }
 )
+if ($OnlyId -ne 0) {
+  $targets = @($targets | Where-Object { $_.Id -eq $OnlyId })
+  if ($targets.Count -ne 1) { throw "OnlyId $OnlyId nao pertence ao lote autorizado" }
+}
 
 function Get-Json([string]$Path) {
   return Invoke-RestMethod -WebSession $script:WebSession -Uri ($ServerUrl + $Path) -Method Get
