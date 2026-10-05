@@ -1,7 +1,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawn } = require("child_process");
+const updater = require("./src/updater");
 
 function mkdtemp(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -22,17 +22,28 @@ function mkdtemp(prefix) {
     notifierSha256: "local-test-hash"
   }));
 
-  const child = spawn(
-    "node",
-    ["src/updater.js", "--apply-update-package", pkgDir, installExe, "MonitorTIAgent"],
-    { cwd: __dirname, env: Object.assign({}, process.env, { MTI_UPDATER_TEST: "1" }), stdio: "inherit" }
-  );
-
-  child.on("exit", (code) => {
-    if (code !== 0) {
-      console.error("UPDATER EXIT CODE = " + code);
-      process.exit(1);
-    }
+  try {
+    await updater.run(
+      ["node", "src/updater.js", "--apply-update-package", pkgDir, installExe, "MonitorTIAgent"],
+      {
+        execFileSync: () => "",
+        queryServiceState: () => ({ state: "Running", stateCode: 4, processId: 0 }),
+        isFileUnlocked: () => true,
+        sleep: () => {},
+        queryTaskState: () => null,
+        createOrUpdateTask: () => "test",
+        queryTaskXml: () => null,
+        restoreTaskXml: () => {},
+        removeTask: () => {},
+        runTask: () => {},
+        queryNotifierProcesses: () => [],
+        waitForNotifierExit: () => true,
+        terminateNotifierProcess: () => {},
+        disableTask: () => {},
+        enableTask: () => {},
+        hasInteractiveSession: () => false
+      }
+    );
     const agentNow = fs.readFileSync(installExe, "utf8");
     const notifNow = fs.readFileSync(installNot, "utf8");
     const integrityNow = fs.readFileSync(path.join(appDir, "notifier-integrity.json"), "utf8");
@@ -51,5 +62,8 @@ function mkdtemp(prefix) {
     } else {
       process.exit(1);
     }
-  });
+  } catch (error) {
+    console.error("UPDATER ERROR = " + error.message);
+    process.exit(1);
+  }
 })();

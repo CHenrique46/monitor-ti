@@ -2,6 +2,9 @@ const { createNotifier: defaultCreateNotifier } = require("../notifier");
 const { createNoticeRuntime: defaultCreateNoticeRuntime } = require("./runtime");
 const { queryTaskState: defaultQueryTaskState, runTask: defaultRunTask } = require("./task");
 const { composeCapabilities } = require("../capabilities");
+const { isPilotEnabled, CERTIFICATE_NOTIFICATION_TEST_TYPE } = require("../certificateNotificationTest");
+
+const PILOT_REJECTION_CODES = new Set(["PILOT_DISABLED", "INVALID_PAYLOAD", "INVALID_EVENT_ID", "EVENT_NOT_ALLOWED", "QUEUE_FULL", "BUSY", "NOTIFIER_UNAVAILABLE"]);
 
 const COMPANION_TASK_NAME = "MonitorTI-Notifier";
 const RECOVERY_GRACE_PERIOD_MS = 5000;
@@ -40,13 +43,16 @@ function createNoticeBridge(opts, deps = {}) {
     version,
     getInteractiveUser,
     processInfoLookup,
+    pipeName,
     companionEnabled = isCompanionEnabled(process.env.MTI_NOTICES_COMPANION, version),
     recoveryGracePeriodMs = RECOVERY_GRACE_PERIOD_MS,
     recoveryCooldownMs = RECOVERY_COOLDOWN_MS,
     recoveryBackoffInitialMs = RECOVERY_BACKOFF_INITIAL_MS,
     recoveryBackoffMaxMs = RECOVERY_BACKOFF_MAX_MS,
     recoveryWindowMs = RECOVERY_WINDOW_MS,
-    recoveryMaxAttempts = RECOVERY_MAX_ATTEMPTS
+    recoveryMaxAttempts = RECOVERY_MAX_ATTEMPTS,
+    browserNotificationPolicyReady = false,
+    certificateNotificationTestEnabled = isPilotEnabled()
   } = opts;
 
   const createNotifier = deps.createNotifier || defaultCreateNotifier;
@@ -77,7 +83,11 @@ function createNoticeBridge(opts, deps = {}) {
 
   function capabilities() {
     const notifier = companionEnabled ? runtime : legacyNotifier;
-    return composeCapabilities({ version, notifier });
+    return composeCapabilities({ version, notifier, browserNotificationPolicyReady, certificateNotificationTest: isCertificateNotificationTestReady() });
+  }
+
+  function isCertificateNotificationTestReady() {
+    return certificateNotificationTestEnabled && !!runtime && typeof handleCertificateNotificationTestResult === "function";
   }
 
   function sendServerEvent(evt) {
@@ -222,7 +232,8 @@ function createNoticeBridge(opts, deps = {}) {
       getInteractiveUser,
       onCapabilityChange: handleRuntimeCapabilityChange,
       onServerEvent: sendServerEvent,
-      processInfoLookup
+      processInfoLookup,
+      pipeName
     });
     runtime.start();
   } else {
@@ -237,6 +248,8 @@ function createNoticeBridge(opts, deps = {}) {
       onNotifierReady: () => announceCapabilities(true)
     });
   }
+
+  if (isCertificateNotificationTestReady()) log("PILOT_HANDLER_READY");
 
   function onWsOpen(ws) {
     currentWs = ws;
@@ -276,6 +289,25 @@ function createNoticeBridge(opts, deps = {}) {
 
     if (!legacyNotifier) return { accepted: false, reason: "NOTIFIER_UNAVAILABLE" };
     return { accepted: legacyNotifier.handleNoticeShow(ws, msg) !== false };
+  }
+
+  function handleCertificateNotificationTestResult(ws, msg) {
+    if (!certificateNotificationTestEnabled || !runtime || !msg || msg.type !== CERTIFICATE_NOTIFICATION_TEST_TYPE) {
+      log("PILOT_REJECTED code=PILOT_DISABLED");
+      return { accepted: false, status: "REJECTED", reason: "PILOT_DISABLED" };
+    }
+    try {
+      const result = runtime.enqueueCertificateNotificationTestResult(msg);
+      if (result.accepted) log("PILOT_BRIDGE_ACCEPTED");
+      else log("PILOT_REJECTED code=" + (PILOT_REJECTION_CODES.has(result.reason) ? result.reason : "INVALID_PAYLOAD"));
+      return {
+        ...result,
+        status: result.accepted ? "ACCEPTED" : "REJECTED"
+      };
+    } catch {
+      log("PILOT_BRIDGE_FAILED");
+      return { accepted: false, status: "FAILED", reason: "BRIDGE_FAILURE" };
+    }
   }
 
   function handleServerMessage(ws, msg) {
@@ -339,6 +371,7 @@ function createNoticeBridge(opts, deps = {}) {
     onWsClose,
     handleServerMessage,
     handleServerMessageResult,
+    handleCertificateNotificationTestResult,
     announceCapabilities,
     shutdownForUpdate,
     attemptCompanionTaskRunIfNeeded,
@@ -348,7 +381,8 @@ function createNoticeBridge(opts, deps = {}) {
     isNotifierReady,
     getReadinessStatus,
     applyWallpaper,
-    getRuntimeState
+    getRuntimeState,
+    isCertificateNotificationTestReady
   };
 }
 

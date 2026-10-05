@@ -98,14 +98,16 @@ export default function Inventory() {
   const [sort, setSort] = useState('equipment')
   const [direction, setDirection] = useState(1)
   const [error, setError] = useState(false)
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     let active = true
     apiFetch(`${API_URL}/api/inventario`).then(async (response) => {
       if (!active) return
       if (!response.ok) throw new Error('inventory')
-      setComputers(await response.json())
-    }).catch(() => { if (active) setError(true) })
+       setComputers(await response.json())
+       setLoaded(true)
+    }).catch(() => { if (active) { setError(true); setLoaded(true) } })
     return () => { active = false }
   }, [])
 
@@ -132,7 +134,8 @@ export default function Inventory() {
       <label className="inventory-search"><span className="sr-only">Buscar no inventário</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar equipamento, responsável, hostname ou IP" /></label>
       <label className="toolbar-field"><span>Filtro</span><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">Todos</option><option value="equipment">Sem Nº Equipamento</option><option value="responsible">Sem Responsável</option><option value="disk">Pouco espaço</option></select></label>
     </div>
-    {error && <p className="server-warn">Não foi possível carregar o inventário.</p>}
-    {!error && <div className="inventory-table-wrap"><table className="inventory-table"><thead><tr>{columns.map(([key, label]) => <th key={key} scope="col"><button type="button" onClick={() => changeSort(key)}>{label}{sort === key && <span aria-hidden="true"> {direction === 1 ? '↑' : '↓'}</span>}</button></th>)}</tr></thead><tbody>{visible.map((computer) => <InventoryRow key={computer.id} computer={computer} isAdmin={isAdmin} onSaved={updateComputer} />)}</tbody></table>{computers.length > 0 && visible.length === 0 && <p className="muted inventory-empty">Nenhum computador corresponde aos critérios.</p>}{computers.length === 0 && <p className="muted inventory-empty">Carregando inventário...</p>}</div>}
+     {error && <p className="server-warn" role="alert">Não foi possível carregar o inventário.</p>}
+     {!error && !loaded && <div className="loading-state" role="status"><span className="loading-dot" />Carregando inventário...</div>}
+     {!error && loaded && <div className="inventory-table-wrap"><table className="inventory-table"><caption className="sr-only">Inventário técnico dos computadores</caption><thead><tr>{columns.map(([key, label]) => <th key={key} scope="col" aria-sort={sort === key ? (direction === 1 ? 'ascending' : 'descending') : 'none'}><button type="button" onClick={() => changeSort(key)}>{label}{sort === key && <span aria-hidden="true"> {direction === 1 ? '↑' : '↓'}</span>}</button></th>)}</tr></thead><tbody>{visible.map((computer) => <InventoryRow key={computer.id} computer={computer} isAdmin={isAdmin} onSaved={updateComputer} />)}</tbody></table>{computers.length > 0 && visible.length === 0 && <p className="muted inventory-empty">Nenhum computador corresponde aos critérios.</p>}{computers.length === 0 && <p className="muted inventory-empty">Nenhum computador no inventário.</p>}</div>}
   </main>
 }

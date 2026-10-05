@@ -11,9 +11,8 @@ function tempDir(prefix) {
 
 async function runInTest(argv, deps = {}) {
   const originalExit = process.exit;
-  const originalMode = process.env.MTI_UPDATER_TEST;
   let exitCode = null;
-  process.env.MTI_UPDATER_TEST = "1";
+  let serviceQueries = 0;
   process.exit = (code) => {
     exitCode = code;
     throw new Error("TEST_EXIT_" + code);
@@ -21,6 +20,11 @@ async function runInTest(argv, deps = {}) {
   try {
     await assert.rejects(() => updater.run(argv, {
       execFileSync: () => "",
+      queryServiceState: () => (++serviceQueries === 1
+        ? { state: "Running", stateCode: 4, processId: 0 }
+        : { state: "Stopped", stateCode: 1, processId: 0 }),
+      isFileUnlocked: () => true,
+      sleep: () => {},
       queryTaskState: () => null,
       createOrUpdateTask: () => "mocked",
       queryTaskXml: () => null,
@@ -37,8 +41,6 @@ async function runInTest(argv, deps = {}) {
     }), /TEST_EXIT_/);
   } finally {
     process.exit = originalExit;
-    if (originalMode === undefined) delete process.env.MTI_UPDATER_TEST;
-    else process.env.MTI_UPDATER_TEST = originalMode;
   }
   return exitCode;
 }

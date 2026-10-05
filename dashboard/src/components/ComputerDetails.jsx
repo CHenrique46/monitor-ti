@@ -16,7 +16,7 @@ import { buildAgentUpdateRequest, preserveSelectedAgentRelease, releaseStatusLab
 function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0))
   const cls = pct >= 90 ? 'crit' : pct >= 80 ? 'warn' : ''
-  return <div className="bar"><div className={`bar-fill ${cls}`} style={{ width: `${pct}%` }} /></div>
+  return <div className="bar" role="progressbar" aria-label="Utilização" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct}><div className={`bar-fill ${cls}`} style={{ width: `${pct}%` }} /></div>
 }
 
 function Field({ label, children }) {
@@ -354,8 +354,8 @@ export default function ComputerDetails({ computerId, latestVersion, onClose }) 
       <button type="button" className="drawer-close" onClick={onClose || (() => window.history.back())} aria-label="Fechar detalhes">×</button>
     </header>
     {!serverOk && <p className="server-warn">Não foi possível atualizar os dados.</p>}
-    <nav className="detail-tabs" aria-label="Seções do computador">{tabs.map(([key, label]) => <button key={key} type="button" className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}</nav>
-    <div className="drawer-content">
+     <nav className="detail-tabs" role="tablist" aria-label="Seções do computador">{tabs.map(([key, label]) => <button key={key} id={`computer-tab-${key}`} type="button" role="tab" aria-selected={tab === key} aria-controls={`computer-panel-${key}`} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}</nav>
+     <div className="drawer-content" role="tabpanel" id={`computer-panel-${tab}`} aria-labelledby={`computer-tab-${tab}`}>
        {tab === 'summary' && <>
          <Section title="Identificação"><Field label="Apelido">{c.apelido || 'Não informado'}</Field><Field label="Equipamento">{c.equipamentoNumero || 'Não informado'}</Field>{!editingIdentity ? <button type="button" className="btn-update identity-edit-button" onClick={beginIdentityEdit}>Editar identificação</button> : <div className="identity-form"><label>Apelido<input type="text" value={identityForm.apelido} maxLength={120} onChange={(event) => setIdentityForm((form) => ({ ...form, apelido: event.target.value }))} /></label><label>Nº do equipamento<input type="text" value={identityForm.equipamentoNumero} maxLength={64} onChange={(event) => setIdentityForm((form) => ({ ...form, equipamentoNumero: event.target.value }))} /></label><div className="confirm-actions"><button type="button" className="btn-cancel" onClick={() => setEditingIdentity(false)} disabled={identitySaving}>Cancelar</button><button type="button" className="btn-update" onClick={saveIdentity} disabled={identitySaving}>{identitySaving ? 'Salvando...' : 'Salvar'}</button></div>{identityError && <div className="update-status failed">{identityError}</div>}</div>}</Section>
          {canAddInventory(inventoryComparison) && <button type="button" className="btn-update inventory-add-button" onClick={beginAddInventory}>Adicionar ao inventário</button>}

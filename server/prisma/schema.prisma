@@ -296,16 +296,21 @@ model Certificado {
   anoReferencia             Int?
   tamanhoBytes              Int
   modificadoEm              DateTime
+  validade                  DateTime?
+  validadeOrigem            String?
+  validadeStatus            String?
   origemChave               String   @unique
   metadataStatus            String   @default("PENDENTE")
   ativo                     Boolean  @default(true)
   criadoEm                  DateTime @default(now())
   atualizadoEm              DateTime @updatedAt
   solicitacoes              SolicitacaoCertificado[]
+  auditoriasLiberacao       CertificadoLiberacaoAuditoria[]
 
   @@index([nomePesquisaNormalizado])
   @@index([documentoNormalizado])
   @@index([ativo, anoReferencia])
+  @@index([validadeStatus, ativo])
 }
 
 model SincronizacaoCatalogoCertificado {
@@ -347,16 +352,44 @@ model SolicitacaoCertificado {
   liberadoEm               DateTime?
   erroLiberacao            String?
   tentativasLiberacao      Int      @default(0)
+  releasedAt               DateTime?
+  expiresAt                DateTime?
+  statusLiberacao          String   @default("NAO_LIBERADO")
+  releaseAttemptId         String?  @unique
+  releaseStartedAt         DateTime?
+  releaseStage             String?
+  releaseFingerprint       String?
   atualizadoEm             DateTime @updatedAt
 
   certificado           Certificado @relation(fields: [certificadoId], references: [id], onDelete: Restrict)
   computador            Computador @relation(fields: [computadorId], references: [id], onDelete: Restrict)
+  auditorias            CertificadoLiberacaoAuditoria[]
 
   @@index([certificadoId])
   @@index([computadorId])
   @@index([estado])
   @@index([solicitadoEm])
   @@index([computadorId, solicitadoEm])
+}
+
+model CertificadoLiberacaoAuditoria {
+  id                   Int      @id @default(autoincrement())
+  evento               String
+  solicitacaoId        Int
+  certificadoId        Int
+  administrador        String?
+  hostnameSolicitante  String?
+  usuarioSolicitante   String?
+  ocorridoEm           DateTime @default(now())
+  resultado            String
+  codigo               String
+
+  solicitacao          SolicitacaoCertificado @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+  certificado           Certificado            @relation(fields: [certificadoId], references: [id], onDelete: Restrict)
+
+  @@index([solicitacaoId, ocorridoEm])
+  @@index([certificadoId, ocorridoEm])
+  @@index([evento, ocorridoEm])
 }
 
 model OfficeInstallation {

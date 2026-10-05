@@ -67,6 +67,7 @@ export default function App() {
           <Route path="/certificados" element={<Certificados />} />
           <Route path="/certificados/solicitacoes" element={<SolicitacoesCertificado />} />
           <Route path="/computadores/:id" element={<ComputerDetails />} />
+          <Route path="*" element={<main className="container"><p className="eyebrow">Página não encontrada</p><h1>Não encontramos esta tela</h1><p className="muted">A rota informada não existe no HenriTech Control.</p><a className="details-link" href="/">Voltar ao Dashboard</a></main>} />
         </Routes>
       </PendingRequestsProvider>
     </AuthContext.Provider>

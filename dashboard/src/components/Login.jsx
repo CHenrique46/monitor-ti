@@ -34,7 +34,7 @@ export default function Login({ onAuthenticated, connectionError = false }) {
   return (
     <main className="login-shell">
       <section className="login-card" aria-labelledby="login-title">
-        <div className="login-brand"><span className="brand-mark" aria-hidden="true">HT</span><div><strong>HenriTech Control</strong><small>HT Control</small></div></div>
+        <div className="login-brand"><span className="brand-mark" aria-hidden="true">HT</span><div className="login-brand-copy"><strong>HenriTech Control</strong><small>HT Control</small></div></div>
         <h1 id="login-title">Acesso ao painel</h1>
         <p className="login-subtitle">Entre com suas credenciais de operador.</p>
         {(error || connectionError) && <div className="login-error" role="alert">{error || 'Não foi possível verificar a sessão. Tente novamente.'}</div>}

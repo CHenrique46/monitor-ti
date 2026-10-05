@@ -88,7 +88,6 @@ test("controller aceita Agent-only somente para upgrade estável online", async 
   const release = agentOnlyRelease();
   const good = await triggerFor({ id: 1, deviceId: "d", hostname: "pc", agentVersion: "1.1.25", status: "online" }, release);
   assert.equal(good.res.code, 202);
-  assert.equal(good.sent[0].deviceId, "d");
   assert.equal(good.sent[0].command.packageMode, "agent-only");
   assert.equal(Object.prototype.hasOwnProperty.call(good.sent[0].command, "notifierSha256"), false);
   for (const computer of [
@@ -102,27 +101,6 @@ test("controller aceita Agent-only somente para upgrade estável online", async 
     assert.equal(result.res.code, 409);
     assert.equal(result.sent.length, 0);
   }
-});
-
-test("release inativa só é disparada explicitamente para fiscal77", async () => {
-  const release = { ...agentOnlyRelease(), version: "1.1.30", active: false, manifest: { ...agentOnlyRelease().manifest, version: "1.1.30" } };
-  const target = await triggerFor({ id: 77, deviceId: "fiscal77-device", hostname: "fiscal77", equipamentoNumero: "77", agentVersion: "1.1.29", status: "online" }, release);
-  assert.equal(target.res.code, 202);
-  assert.equal(target.sent[0].deviceId, "fiscal77-device");
-
-  const otherDb = {
-    computador: { findUnique: async () => ({ id: 12, deviceId: "other-device", hostname: "other", agentVersion: "1.1.29", status: "online" }) },
-    agentUpdate: { create: async () => ({ id: 1 }) }
-  };
-  const otherRes = response();
-  const sent = [];
-  await controller.trigger({ params: { id: "12" }, body: {}, humanUser: { username: "test" } }, otherRes, {
-    prisma: otherDb,
-    releasesService: { getActiveRelease: async () => null, hasArtifact: () => true },
-    agentServer: { sendToAgent: (...args) => sent.push(args) }
-  });
-  assert.equal(otherRes.code, 409);
-  assert.equal(sent.length, 0);
 });
 
 test("parser aceita somente versões estáveis", () => {

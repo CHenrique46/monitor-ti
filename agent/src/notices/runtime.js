@@ -33,6 +33,7 @@ const {
   nextNotifierState,
   nextDeliveryState
 } = require("./state");
+const { validateCertificateNotificationTest, ACK_ERROR_CODES, CERTIFICATE_NOTIFICATION_TEST, CERTIFICATE_NOTIFICATION_TEST_TYPE } = require("../certificateNotificationTest");
 
 const DEFAULT_PIPE_PATH = "\\\\.\\pipe\\MonitorTI-Notifier";
 const PIPE_RETRY_MS = 2000;
@@ -443,17 +444,24 @@ function createNoticeRuntime(opts) {
     delivery.updatedAt = Date.now();
     state.deliveries.set(delivery.noticeDeliveryId, delivery);
 
-    const ok = send(conn, {
-      type: "notice_show",
-      protocolVersion: PROTOCOL_VERSION,
-      noticeDeliveryId: delivery.noticeDeliveryId,
-      title: delivery.title,
-      message: delivery.message,
-      level: delivery.level,
-      url: delivery.url || null,
-      timestamp: delivery.timestamp,
-      expiresAt: delivery.expiresAt || null
-    });
+    const ok = delivery.eventType === CERTIFICATE_NOTIFICATION_TEST
+      ? send(conn, {
+        type: CERTIFICATE_NOTIFICATION_TEST_TYPE,
+        protocolVersion: PROTOCOL_VERSION,
+        eventId: delivery.eventId,
+        eventType: delivery.eventType
+      })
+      : send(conn, {
+        type: "notice_show",
+        protocolVersion: PROTOCOL_VERSION,
+        noticeDeliveryId: delivery.noticeDeliveryId,
+        title: delivery.title,
+        message: delivery.message,
+        level: delivery.level,
+        url: delivery.url || null,
+        timestamp: delivery.timestamp,
+        expiresAt: delivery.expiresAt || null
+      });
 
     if (!ok) {
       delivery.state = DELIVERY_STATES.QUEUED;
@@ -545,6 +553,41 @@ function createNoticeRuntime(opts) {
     return enqueueNoticeResult(notice).accepted;
   }
 
+  function enqueueCertificateNotificationTestResult(message) {
+    const validation = validateCertificateNotificationTest({
+      type: CERTIFICATE_NOTIFICATION_TEST_TYPE,
+      protocolVersion: PROTOCOL_VERSION,
+      ...(message || {})
+    });
+    if (!validation.ok) return { accepted: false, reason: validation.code };
+
+    const { eventId, eventType } = validation.value;
+    const existing = state.deliveries.get(eventId);
+    if (existing && [DELIVERY_STATES.ACKNOWLEDGED, DELIVERY_STATES.DISPLAYED].includes(existing.state)) {
+      return { accepted: true };
+    }
+    if (state.queueSet.has(eventId)) return { accepted: true };
+    if (state.queue.length >= 100) return { accepted: false, reason: "QUEUE_FULL" };
+    if (rejectBusyDelivery(eventId, "Aviso já em exibição")) return { accepted: false, reason: "BUSY" };
+
+    const delivery = {
+      noticeDeliveryId: eventId,
+      eventId,
+      eventType,
+      state: DELIVERY_STATES.QUEUED,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      payload: { eventId, eventType }
+    };
+    state.deliveries.set(eventId, delivery);
+    state.queue.push(delivery);
+    state.queueSet.add(eventId);
+    log("certificate_notification_test_queued " + eventId);
+    scheduleSave();
+    routeNext();
+    return { accepted: true };
+  }
+
   function acceptNoticeReceived(conn, msg) {
     const payload = validateReceivedOrAck(msg, "received");
     if (!payload.ok) {
@@ -571,7 +614,9 @@ function createNoticeRuntime(opts) {
     updatePersistedDelivery(delivery);
 
     if (typeof onServerEvent === "function") {
-      onServerEvent({ type: "notice_received", deviceId: getDeviceId(), noticeDeliveryId: delivery.noticeDeliveryId });
+      onServerEvent(delivery.eventType === CERTIFICATE_NOTIFICATION_TEST
+        ? { type: "certificate_notification_test_received", deviceId: getDeviceId(), eventId: delivery.eventId, eventType: delivery.eventType }
+        : { type: "notice_received", deviceId: getDeviceId(), noticeDeliveryId: delivery.noticeDeliveryId });
     }
   }
 
@@ -601,9 +646,58 @@ function createNoticeRuntime(opts) {
     updatePersistedDelivery(delivery);
 
     if (typeof onServerEvent === "function") {
-      onServerEvent({ type: "notice_acknowledged", deviceId: getDeviceId(), noticeDeliveryId: delivery.noticeDeliveryId });
+      onServerEvent(delivery.eventType === CERTIFICATE_NOTIFICATION_TEST
+        ? { type: "certificate_notification_test_acknowledged", deviceId: getDeviceId(), eventId: delivery.eventId, eventType: delivery.eventType }
+        : { type: "notice_acknowledged", deviceId: getDeviceId(), noticeDeliveryId: delivery.noticeDeliveryId });
     }
 
+    routeNext();
+  }
+
+  function acceptCertificateNotificationStatus(conn, msg) {
+    const allowedKeys = new Set(["type", "protocolVersion", "eventId", "eventType", "status", "errorCode"]);
+    if (!msg || Object.keys(msg).some((key) => !allowedKeys.has(key)) ||
+      msg.type !== "certificate_notification_test_status" ||
+      msg.protocolVersion !== PROTOCOL_VERSION ||
+      typeof msg.eventId !== "string" ||
+      msg.eventType !== CERTIFICATE_NOTIFICATION_TEST ||
+      !["DISPLAYED", "DUPLICATE", "FAILED"].includes(msg.status) ||
+      (msg.errorCode != null && !ACK_ERROR_CODES.includes(msg.errorCode))) {
+      sendError(conn, "INVALID_EVENT", "Status de certificado inválido");
+      return;
+    }
+    const delivery = state.deliveries.get(msg.eventId);
+    if (!delivery || delivery.eventType !== CERTIFICATE_NOTIFICATION_TEST) {
+      sendError(conn, "INVALID_EVENT", "Evento de certificado desconhecido");
+      return;
+    }
+    if (msg.status === "FAILED") {
+      delivery.state = DELIVERY_STATES.FAILED;
+      delivery.updatedAt = Date.now();
+      updatePersistedDelivery(delivery);
+      setConnectionState(conn, NOTIFIER_STATES.READY, "certificate failed");
+    } else if (msg.status === "DISPLAYED") {
+      delivery.state = DELIVERY_STATES.DISPLAYED;
+      delivery.displayedAt = delivery.displayedAt || Date.now();
+      delivery.updatedAt = Date.now();
+      updatePersistedDelivery(delivery);
+      conn.activeNoticeDeliveryId = null;
+      setConnectionState(conn, NOTIFIER_STATES.READY, "certificate displayed");
+    } else {
+      delivery.updatedAt = Date.now();
+      setConnectionState(conn, NOTIFIER_STATES.READY, "certificate duplicate");
+    }
+    log("certificate_notification_status " + msg.status);
+    if (typeof onServerEvent === "function") {
+      onServerEvent({
+        type: "certificate_notification_test_ack",
+        deviceId: getDeviceId(),
+        eventId: msg.eventId,
+        eventType: msg.eventType,
+        status: msg.status,
+        ...(msg.errorCode ? { errorCode: msg.errorCode } : {})
+      });
+    }
     routeNext();
   }
 
@@ -758,6 +852,9 @@ function createNoticeRuntime(opts) {
         break;
       case "acknowledged":
         acceptAcknowledged(conn, msg);
+        break;
+      case "certificate_notification_test_status":
+        acceptCertificateNotificationStatus(conn, msg);
         break;
       case "shutdown_ack":
         setConnectionState(conn, NOTIFIER_STATES.CLOSING, "shutdown_ack");
@@ -933,6 +1030,7 @@ function createNoticeRuntime(opts) {
     requestShutdown,
     enqueueFromServer: enqueueNotice,
     enqueueFromServerResult: enqueueNoticeResult,
+    enqueueCertificateNotificationTestResult,
     isNotifierReady,
     getReadinessStatus,
     getConnectionSnapshot,

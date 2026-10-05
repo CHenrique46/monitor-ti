@@ -211,7 +211,6 @@ function createNotifier(opts) {
   function findNotifierExe() {
     const candidates = [
       path.join(getAppDir(), "MonitorTI-Notifier.exe"),
-      path.join(__dirname, "..", "..", "release", "agent-test", "MonitorTI-Notifier.exe"),
     ];
     for (const c of candidates) {
       try {
@@ -384,9 +383,7 @@ function createNotifier(opts) {
     // O Agent apenas dispara o Notifier; o proprio Notifier promove o processo
     // para a sessao interativa do usuario via WTS APIs (CreateProcessAsUser),
     // evitando exibir UI em Session 0.
-    const autoAck = process.env.MTI_TEST_AUTO_ACK === "1";
     const args = ["--pipe", pipeName, "--payload", payloadFile];
-    if (autoAck) args.push("--auto-ack");
     try {
       spawn(exe, args, { detached: false, stdio: "ignore", windowsHide: false });
     } catch (e) {

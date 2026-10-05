@@ -1,4 +1,6 @@
 const NATIVE_CAPABILITIES = Object.freeze(["disk_cleanup_analyze"]);
+const BROWSER_NOTIFICATION_POLICY_CAPABILITY = "browser_notification_policy_v1";
+const CERTIFICATE_NOTIFICATION_TEST_CAPABILITY = "certificate_notification_test_v1";
 
 function compareVersion(a, b) {
   const pa = String(a || "0").split(/[.+-]/).map((n) => parseInt(n, 10) || 0);
@@ -13,11 +15,13 @@ function getNativeCapabilities(version) {
   return compareVersion(version, "1.1.20") >= 0 ? [...NATIVE_CAPABILITIES] : [];
 }
 
-function composeCapabilities({ version, notifier } = {}) {
+function composeCapabilities({ version, notifier, browserNotificationPolicyReady = false, certificateNotificationTest = false } = {}) {
   const dynamic = notifier && typeof notifier.isNotifierReady === "function" && notifier.isNotifierReady()
     ? ["notices"]
     : [];
-  return [...new Set([...getNativeCapabilities(version), ...dynamic])];
+  const browserPolicy = browserNotificationPolicyReady ? [BROWSER_NOTIFICATION_POLICY_CAPABILITY] : [];
+  const pilot = certificateNotificationTest ? [CERTIFICATE_NOTIFICATION_TEST_CAPABILITY] : [];
+  return [...new Set([...getNativeCapabilities(version), ...dynamic, ...browserPolicy, ...pilot])];
 }
 
 function getCurrentCapabilities(notifier) {
@@ -48,4 +52,4 @@ async function sendCurrentCapabilities(ws, deviceId, notifier, logEvent) {
   }
 }
 
-module.exports = { NATIVE_CAPABILITIES, getNativeCapabilities, composeCapabilities, getCurrentCapabilities, sendCurrentCapabilities };
+module.exports = { NATIVE_CAPABILITIES, BROWSER_NOTIFICATION_POLICY_CAPABILITY, CERTIFICATE_NOTIFICATION_TEST_CAPABILITY, getNativeCapabilities, composeCapabilities, getCurrentCapabilities, sendCurrentCapabilities };

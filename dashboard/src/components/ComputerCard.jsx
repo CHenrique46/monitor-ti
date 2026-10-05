@@ -11,7 +11,7 @@ function MetricBar({ value }) {
   const pct = Math.max(0, Math.min(100, value || 0));
   const cls = pct >= 90 ? "crit" : pct >= 80 ? "warn" : "";
   return (
-    <div className="bar">
+    <div className="bar" role="progressbar" aria-label="Utilização" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct}>
       <div className={`bar-fill ${cls}`} style={{ width: pct + "%" }}></div>
     </div>
   );
@@ -46,28 +46,18 @@ export default function ComputerCard({ c, latestVersion, onOpen, onDelete, showA
   const openDetails = () => onOpen?.(c.id);
 
   return (
-    <article
-      className={`card compact-card ${cardClass}`}
-      onClick={openDetails}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          openDetails();
-        }
-      }}
-      role={onOpen ? "button" : undefined}
-      aria-label={onOpen ? `Abrir detalhes de ${c.apelido || c.hostname || "computador"}` : undefined}
-      tabIndex={onOpen ? 0 : undefined}
-    >
-      <div className="hostname">{c.apelido || c.hostname || "(sem nome)"}</div>
-      {(c.apelido || c.equipamentoNumero) && <div className="computer-identity-meta">{c.apelido && c.hostname}{c.apelido && c.equipamentoNumero ? " · " : ""}{c.equipamentoNumero && `Equip. ${c.equipamentoNumero}`}</div>}
-      <div className="card-status-row">
-        <span className={online ? "status-pill online" : "status-pill offline"}>
-          {online ? "Online" : "Offline"}
-        </span>
-        <span className="card-ip">{c.ip || "IP não informado"}</span>
-      </div>
-      {requiresAttention && <div className={`card-attention ${uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? "reboot" : ""}`}><span aria-hidden="true">!</span>{uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? "Reinício recomendado" : uptimeStatus === UPTIME_STATUS.ATTENTION ? `Uptime: ${formatUptime(c.uptime)}` : "Requer atenção"}</div>}
+    <article className={`card compact-card ${cardClass}`}>
+      <button type="button" className="card-open" onClick={openDetails} disabled={!onOpen} aria-label={onOpen ? `Abrir detalhes de ${c.apelido || c.hostname || "computador"}` : undefined}>
+        <div className="hostname">{c.apelido || c.hostname || "(sem nome)"}</div>
+        {(c.apelido || c.equipamentoNumero) && <div className="computer-identity-meta">{c.apelido && c.hostname}{c.apelido && c.equipamentoNumero ? " · " : ""}{c.equipamentoNumero && `Equip. ${c.equipamentoNumero}`}</div>}
+        <div className="card-status-row">
+          <span className={online ? "status-pill online" : "status-pill offline"}>
+            {online ? "Online" : "Offline"}
+          </span>
+          <span className="card-ip">{c.ip || "IP não informado"}</span>
+        </div>
+        {requiresAttention && <div className={`card-attention ${uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? "reboot" : ""}`}><span aria-hidden="true">!</span>{uptimeStatus === UPTIME_STATUS.REBOOT_RECOMMENDED ? "Reinício recomendado" : uptimeStatus === UPTIME_STATUS.ATTENTION ? `Uptime: ${formatUptime(c.uptime)}` : "Requer atenção"}</div>}
+      </button>
 
       <div className="card-metrics">
         <div className="card-metric"><span>CPU</span><strong>{formatPercent(c.cpuUso)}</strong><MetricBar value={c.cpuUso || 0} /></div>

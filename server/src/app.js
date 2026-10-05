@@ -30,15 +30,19 @@ const avisosService = require("./services/avisos.service");
 const maintenanceScheduler = require("./services/maintenanceScheduler.service");
 const { createExcelSyncWorker } = require("./inventory/excelSyncWorker");
 const { createPortalService } = require("./services/portal.service");
+const { browserNotificationHub } = require("./services/browserNotificationHub");
+const { createBrowserNotificationRouters } = require("./routes/browserNotification.routes");
 const certificateCatalogSyncService = require("./services/certificateCatalogSync.service");
 const certificateCatalogSyncScheduler = require("./services/certificateCatalogSyncScheduler.service");
 const { createShutdownController } = require("./serverLifecycle");
+const { createSmbCredentialConnection, startSchedulerWhenReady } = require("./services/smbCredential.service");
 
 const app = express();
 app.locals.shuttingDown = false;
 const authService = createAuthService();
 const excelSyncWorker = createExcelSyncWorker({ db: prisma, log: (message) => logEvent(`[Monitor TI] ${message}`) });
-const portalService = createPortalService({ db: prisma });
+const portalService = createPortalService({ db: prisma, browserNotifications: browserNotificationHub });
+const smbCredentialConnection = createSmbCredentialConnection();
 
 app.use(express.json());
 app.use((req, res, next) => {
@@ -57,8 +61,11 @@ app.use("/api/computadores", humanSession, alertasRoutes);
 app.use("/api/agent", createAgentRouter({ authService }));
 app.use("/api/avisos", humanSession, avisosRoutes);
 const portalRoutes = createPortalRouter({ service: portalService, humanSession, requireAdmin });
+const browserNotificationRoutes = createBrowserNotificationRouters({ hub: browserNotificationHub, authService, portalService });
 app.use("/api/portal", portalRoutes.portal);
+app.use("/api/portal/browser-notifications", browserNotificationRoutes.portal);
 app.use("/api/certificados", portalRoutes.admin);
+app.use("/api/browser-notifications", browserNotificationRoutes.admin);
 app.use("/api/certificados", humanSession, createCertificadosRouter({ syncService: certificateCatalogSyncService }));
 app.use("/api/computadores", humanSession, remoteActionsRoutes);
 app.use("/api/assets", wallpaperAssetRoutes);
@@ -129,14 +136,20 @@ async function startServer() {
       wss,
       schedulers: [certificateCatalogSyncScheduler, maintenanceScheduler, avisosService, historicoService, excelSyncWorker],
       prisma,
+      cleanup: smbCredentialConnection.disconnect,
       setShuttingDown: (value) => { app.locals.shuttingDown = value; },
       log: logEvent
     });
     const unregisterSignals = shutdownController.registerSignals(process);
 
-    server.listen(PORT, "0.0.0.0", () => {
+    server.listen(PORT, "0.0.0.0", async () => {
       logEvent(`[Monitor TI] Server rodando na porta ${PORT}`);
-      certificateCatalogSyncScheduler.start();
+      const ready = await startSchedulerWhenReady({
+        connection: smbCredentialConnection,
+        scheduler: certificateCatalogSyncScheduler,
+        log: (code) => logEvent(`[Monitor TI] ${code}`)
+      });
+      if (!ready) logEvent("[Monitor TI] scheduler_catalogo desabilitado");
     });
 
     historicoService.iniciarRetencao();
