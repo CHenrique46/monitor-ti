@@ -1,9 +1,8 @@
 const { execFile: defaultExecFile } = require("child_process");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const { createWallpaperExecutor } = require("./wallpaper");
-const { createDiskCleanupAnalyzer } = require("./diskCleanupAnalysis");
+const { createDiskCleanupAnalyzer, createSafeDiskCleanupExecutor } = require("./diskCleanupAnalysis");
 
 const ALLOWED_ACTIONS = {
   spooler_reset: true,
@@ -373,22 +372,7 @@ function createSystemMaintenanceExecutor(deps = {}) {
       );
     }
   };
-  const cleanup = deps.cleanupTemp || (async () => {
-    const userTemp = deps.userTempPath || process.env.TEMP || process.env.TMP || os.tmpdir();
-    const windowsTemp = deps.windowsTempPath || path.join(process.env.WINDIR || "C:\\Windows", "Temp");
-    const user = await removeDirectoryContents(userTemp);
-    const windows = await removeDirectoryContents(windowsTemp);
-    const blockedCount = user.blockedCount + windows.blockedCount;
-    const errorsCount = user.errorsCount + windows.errorsCount;
-    return {
-      roots: [user, windows],
-      blocked: [...user.blocked, ...windows.blocked].slice(0, MAINTENANCE_DETAIL_LIMIT),
-      errors: [...user.errors, ...windows.errors].slice(0, MAINTENANCE_DETAIL_LIMIT),
-      blockedCount,
-      errorsCount,
-      truncated: blockedCount > MAINTENANCE_DETAIL_LIMIT || errorsCount > MAINTENANCE_DETAIL_LIMIT || user.truncated || windows.truncated
-    };
-  });
+  const cleanup = deps.cleanupTemp || createSafeDiskCleanupExecutor(deps);
   const runSfc = deps.runSfc || (() => runTool("sfc.exe", ["/scannow"], timeouts.sfcMs));
   const runDism = deps.runDism || (() => runTool("dism.exe", ["/Online", "/Cleanup-Image", "/RestoreHealth"], timeouts.dismMs));
   const flushDns = deps.flushDns || (() => runTool("ipconfig.exe", ["/flushdns"], timeouts.dnsFlushMs));

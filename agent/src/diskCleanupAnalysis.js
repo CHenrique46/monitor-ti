@@ -28,6 +28,8 @@ function createDiskCleanupAnalyzer(deps = {}) {
   const registryDiscovery = deps.registryDiscovery ?? process.platform === "win32";
   const environment = deps.environment || process.env;
   const systemRoot = /^[A-Za-z]:[\\/]$/.test(systemDrive) ? systemDrive : path.parse(systemDrive).root;
+  const onEligibleFile = deps.onEligibleFile;
+  const includeRecycleBin = deps.includeRecycleBin ?? true;
 
   function category(id) {
     return {
@@ -37,6 +39,11 @@ function createDiskCleanupAnalyzer(deps = {}) {
       filesScanned: 0,
       eligibleFiles: 0,
       skippedItems: 0,
+      skippedRecent: 0,
+      skippedLocked: 0,
+      deletedBytes: 0,
+      failedBytes: 0,
+      failedItems: 0,
       status: "OK",
       truncated: false,
       warnings: []
@@ -192,6 +199,15 @@ function createDiskCleanupAnalyzer(deps = {}) {
         if (options.ignoreAge || rootInfo.mtimeMs <= now() - minimumAgeDays * 24 * 60 * 60 * 1000) {
           result.eligibleBytes += size;
           result.eligibleFiles += 1;
+          if (onEligibleFile && options.allowCleanup !== false) {
+            const outcome = await onEligibleFile(root, rootInfo, result, context);
+            result.deletedBytes += Number(outcome && outcome.deletedBytes) || 0;
+            result.failedBytes += Number(outcome && outcome.failedBytes) || 0;
+            result.failedItems += Number(outcome && outcome.failedItems) || 0;
+            result.skippedLocked += Number(outcome && outcome.skippedLocked) || 0;
+          }
+        } else {
+          result.skippedRecent += 1;
         }
       }
       return;
@@ -245,6 +261,15 @@ function createDiskCleanupAnalyzer(deps = {}) {
           if (options.ignoreAge || info.mtimeMs <= now() - minimumAgeDays * 24 * 60 * 60 * 1000) {
             result.eligibleBytes += size;
             result.eligibleFiles += 1;
+            if (onEligibleFile && options.allowCleanup !== false) {
+              const outcome = await onEligibleFile(target, info, result, context);
+              result.deletedBytes += Number(outcome && outcome.deletedBytes) || 0;
+              result.failedBytes += Number(outcome && outcome.failedBytes) || 0;
+              result.failedItems += Number(outcome && outcome.failedItems) || 0;
+              result.skippedLocked += Number(outcome && outcome.skippedLocked) || 0;
+            }
+          } else {
+            result.skippedRecent += 1;
           }
         }
       }
@@ -347,7 +372,7 @@ function createDiskCleanupAnalyzer(deps = {}) {
       for (const entry of entries) {
         if (!canInspect(context, result)) break;
         if (!entry.name.startsWith("$R")) continue;
-        await walkFiles(path.join(containerPath, entry.name), result, context, { includeFile: () => true, ignoreAge: true });
+        await walkFiles(path.join(containerPath, entry.name), result, context, { includeFile: () => true, ignoreAge: true, allowCleanup: false });
       }
     }
     return result;
@@ -377,7 +402,7 @@ function createDiskCleanupAnalyzer(deps = {}) {
     categories.push(userTemp);
     categories.push(await analyzeWindowsTemp(context));
     categories.push(await analyzeOtherTemp(context, existingPaths));
-    categories.push(await analyzeRecycleBin(context));
+    if (includeRecycleBin) categories.push(await analyzeRecycleBin(context));
     if (context.truncated) {
       categories.forEach((item) => {
         item.truncated = true;
@@ -402,10 +427,70 @@ function createDiskCleanupAnalyzer(deps = {}) {
   };
 }
 
+function createSafeDiskCleanupExecutor(deps = {}) {
+  const batchSize = deps.cleanupBatchSize ?? 50;
+  const yieldMs = deps.cleanupYieldMs ?? 10;
+  const fileTimeoutMs = deps.cleanupFileTimeoutMs ?? 5000;
+  const fsPromises = deps.fsPromises || fs.promises;
+  const removeFile = deps.removeFile || ((target) => fsPromises.rm(target, { force: true, recursive: false }));
+  let processed = 0;
+  const sleep = () => new Promise((resolve) => setTimeout(resolve, yieldMs));
+  const analyzer = createDiskCleanupAnalyzer({
+    ...deps,
+    includeRecycleBin: false,
+    onEligibleFile: async (target, info) => {
+      processed += 1;
+      if (processed > 1 && processed % batchSize === 0) await sleep();
+      try {
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            const error = new Error("timeout ao remover arquivo temporario");
+            error.code = "ETIMEDOUT";
+            reject(error);
+          }, fileTimeoutMs);
+          removeFile(target)
+            .then(resolve, reject)
+            .finally(() => clearTimeout(timer));
+        });
+        return { deletedBytes: Number(info.size) || 0 };
+      } catch (error) {
+        const locked = ["EACCES", "EBUSY", "EPERM", "ETIMEDOUT"].includes(error && error.code);
+        return {
+          skippedLocked: locked ? 1 : 0,
+          failedBytes: Number(info.size) || 0,
+          failedItems: 1
+        };
+      }
+    }
+  });
+  return async function executeSafeDiskCleanup() {
+    const result = await analyzer();
+    const deletedBytes = result.categories.reduce((sum, item) => sum + (Number(item.deletedBytes) || 0), 0);
+    const failedBytes = result.categories.reduce((sum, item) => sum + (Number(item.failedBytes) || 0), 0);
+    const skippedLocked = result.categories.reduce((sum, item) => sum + (Number(item.skippedLocked) || 0), 0);
+    return {
+      ...result,
+      analysisOnly: false,
+      actualFreedBytes: deletedBytes,
+      deletedBytes,
+      failedBytes,
+      failedItems: result.categories.reduce((sum, item) => sum + (Number(item.failedItems) || 0), 0),
+      skippedRecent: result.categories.reduce((sum, item) => sum + (Number(item.skippedRecent) || 0), 0),
+      skippedLocked,
+      roots: [],
+      blocked: [],
+      errors: [],
+      blockedCount: skippedLocked,
+      errorsCount: result.categories.reduce((sum, item) => sum + (Number(item.failedItems) || 0) - (Number(item.skippedLocked) || 0), 0)
+    };
+  };
+}
+
 module.exports = {
   MINIMUM_FILE_AGE_DAYS,
   MAX_DEPTH,
   MAX_ITEMS,
   GLOBAL_TIMEOUT_MS,
-  createDiskCleanupAnalyzer
+  createDiskCleanupAnalyzer,
+  createSafeDiskCleanupExecutor
 };

@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { createDiskCleanupAnalyzer } = require("./src/diskCleanupAnalysis");
+const { createDiskCleanupAnalyzer, createSafeDiskCleanupExecutor } = require("./src/diskCleanupAnalysis");
 
 async function fixture() {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "mti-disk-analysis-"));
@@ -35,6 +35,59 @@ test("arquivos de TEMP com pelo menos 7 dias entram na estimativa", async (t) =>
   await fs.promises.utimes(target, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
   const result = await f.analyze()();
   assert.equal(result.categories.find((item) => item.id === "USER_TEMP").eligibleBytes, 12);
+});
+
+test("limpeza segura contabiliza arquivo bloqueado sem removê-lo", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "locked-temp");
+  const target = path.join(temp, "locked.tmp");
+  await fs.promises.mkdir(temp);
+  await fs.promises.writeFile(target, Buffer.alloc(13));
+  await fs.promises.utimes(target, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+  const removeFile = async () => {
+    const error = new Error("arquivo bloqueado");
+    error.code = "EBUSY";
+    throw error;
+  };
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now,
+    removeFile
+  })();
+  assert.equal(result.actualFreedBytes, 0);
+  assert.equal(result.skippedLocked, 1);
+  assert.equal(result.failedItems, 1);
+  assert.equal(fs.existsSync(target), true);
+});
+
+test("limpeza segura transforma timeout de arquivo em falha controlada", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "timeout-temp");
+  const target = path.join(temp, "timeout.tmp");
+  await fs.promises.mkdir(temp);
+  await fs.promises.writeFile(target, Buffer.alloc(15));
+  await fs.promises.utimes(target, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+  const removeFile = () => new Promise(() => {});
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now,
+    fileTimeoutMs: 1,
+    removeFile
+  })();
+  assert.equal(result.actualFreedBytes, 0);
+  assert.equal(result.skippedLocked, 1);
+  assert.equal(result.failedItems, 1);
+  assert.equal(fs.existsSync(target), true);
 });
 
 test("arquivos recentes são observados mas não elegíveis", async (t) => {
@@ -197,4 +250,32 @@ test("reparse point configurado em OTHER_TEMP não é seguido", async (t) => {
   const category = result.categories.find((item) => item.id === "OTHER_TEMP");
   assert.equal(category.additionalTempDirectoriesDetected, 0);
   assert.ok(category.warnings.includes("reparse_point_skipped"));
+});
+
+test("limpeza segura remove apenas arquivos antigos e nao inclui Lixeira", async (t) => {
+  const f = await fixture();
+  t.after(() => fs.promises.rm(f.root, { recursive: true, force: true }));
+  const temp = path.join(f.root, "safe-temp");
+  await fs.promises.mkdir(temp);
+  const old = path.join(temp, "old.tmp");
+  const recent = path.join(temp, "recent.tmp");
+  await fs.promises.writeFile(old, Buffer.alloc(7));
+  await fs.promises.writeFile(recent, Buffer.alloc(11));
+  await fs.promises.utimes(old, new Date(f.now - 8 * 86400000), new Date(f.now - 8 * 86400000));
+  const result = await createSafeDiskCleanupExecutor({
+    systemDrive: f.root,
+    usersDir: f.users,
+    windowsDir: path.join(f.root, "Windows"),
+    environment: { TMP: temp },
+    registryDiscovery: false,
+    now: () => f.now,
+    cleanupBatchSize: 1,
+    cleanupYieldMs: 0
+  })();
+  assert.equal(result.actualFreedBytes, 7);
+  assert.equal(result.deletedBytes, 7);
+  assert.equal(result.categories.some((item) => item.id === "RECYCLE_BIN"), false);
+  assert.equal(fs.existsSync(old), false);
+  assert.equal(fs.existsSync(recent), true);
+  assert.equal(result.skippedRecent, 1);
 });
