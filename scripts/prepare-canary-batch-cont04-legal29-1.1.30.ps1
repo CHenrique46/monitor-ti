@@ -11,6 +11,7 @@ $targetVersion = "1.1.30"
 $currentVersion = "1.1.29"
 $activeStatuses = @("update_pending", "update_downloading", "update_validating", "update_installing", "update_restarting")
 $targets = @(
+  [ordered]@{ Id = 162; Hostname = "fiscal77"; Equipment = "77"; DeviceId = "c0288c34-0ed8-4674-a750-1dfcdad725ec" }
   [ordered]@{ Id = 466; Hostname = "CONT-04"; Equipment = "04"; DeviceId = "6df57034-2768-48e7-a166-15f2bf89e001" }
   [ordered]@{ Id = 619; Hostname = "LEGAL-29"; Equipment = "29"; DeviceId = "fdec21eb-7ad2-41d4-bf09-179998ce10a2" }
 )
