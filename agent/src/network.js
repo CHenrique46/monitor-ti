@@ -48,7 +48,7 @@ function selectLanIPv4(networkInterfaces) {
 }
 
 function preserveLanIPv4(previousAddress, networkInterfaces) {
-  return selectLanIPv4(networkInterfaces) || previousAddress || null;
+  return selectLanIPv4(networkInterfaces) || (isPrivateIPv4(previousAddress) ? previousAddress : null);
 }
 
 module.exports = { isPrivateIPv4, selectLanIPv4, preserveLanIPv4 };

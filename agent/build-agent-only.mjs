@@ -8,10 +8,10 @@ import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
-if (pkg.version !== "1.1.29") throw new Error("build-agent-only exige package version 1.1.29");
+if (pkg.version !== "1.1.30") throw new Error("build-agent-only exige package version 1.1.30");
 
 const buildId = String(process.env.BUILD_ID || "build-a").replace(/[^a-z0-9-]/gi, "-");
-const candidateBase = path.join(root, "..", "candidate", "v1.1.29");
+const candidateBase = path.join(root, "..", "candidate", "v1.1.30");
 const candidateRoot = path.join(candidateBase, buildId);
 const dist = path.join(candidateRoot, "dist");
 const outputExe = path.join(candidateRoot, "MonitorTI-Agent.exe");

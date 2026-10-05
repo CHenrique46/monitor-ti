@@ -9,7 +9,8 @@ function canonicalIpv6(value) {
   const missing = 8 - left.length - right.length;
   if (groups.length === 1 && missing !== 0) return null;
   if (groups.length === 2 && missing < 1) return null;
-  const expanded = [...left, ...Array(Math.max(0, missing)).fill("0"), ...right].map((part) => parseInt(part, 16).toString(16));
+  const expanded = [...left, ...Array(Math.max(0, missing)).fill("0"), ...right]
+    .map((part) => parseInt(part, 16).toString(16));
   let bestStart = -1;
   let bestLength = 0;
   for (let index = 0; index < expanded.length;) {

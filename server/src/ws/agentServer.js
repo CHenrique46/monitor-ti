@@ -735,7 +735,10 @@ function setupWebSocket(server, dependencies = {}) {
           console.error("[Monitor TI] erro no register:", err.message);
         }
       } else if (msg && msg.type === "metrics" && msg.data && msg.data.deviceId) {
-        await handleMetrics(msg.data, db, ws, { historicoService: dependencies.historicoService, alertasService: dependencies.alertasService });
+        await handleMetrics(msg.data, db, ws, {
+          historicoService: dependencies.historicoService,
+          alertasService: dependencies.alertasService
+        });
       }
       }).catch((err) => {
         let context = {};

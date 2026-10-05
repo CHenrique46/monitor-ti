@@ -65,8 +65,9 @@ test("reconhece somente RFC1918 como privado", () => {
   assert.equal(isPrivateIPv4("0.0.0.0"), false);
 });
 
-test("reconexão preserva IP válido quando a enumeração das interfaces falha", () => {
+test("preserva ultimo IPv4 privado quando nenhuma interface estiver disponivel", () => {
   assert.equal(preserveLanIPv4("192.168.40.77", {}), "192.168.40.77");
+  assert.equal(preserveLanIPv4("54.232.189.113", {}), null);
   assert.equal(preserveLanIPv4("192.168.40.77", { Ethernet: [ipv4("192.168.40.78")] }), "192.168.40.78");
   assert.equal(preserveLanIPv4(null, {}), null);
 });
