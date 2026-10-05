@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "build": "node build-agent.mjs",
+    "build": "node build-agent-only.mjs",
     "build:installer": "node build-installer.mjs"
   },
   "dependencies": {
