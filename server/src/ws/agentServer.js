@@ -1,5 +1,6 @@
 const { WebSocketServer } = require("ws");
 const { randomUUID } = require("crypto");
+const { normalizeIp } = require("../networkIp");
 const prisma = require("../prisma");
 const historicoService = require("../services/historico.service");
 const alertasService = require("../services/alertas.service");
@@ -10,7 +11,7 @@ const { persistOfficeInventory } = require("../inventory/persistence");
 const { queueComputerInventorySync } = require("../inventory/excelAutoSync");
 const logger = require("../logger");
 const agentUpdates = require("../services/agentUpdates.service");
-const { normalizeIp } = require("../networkIp");
+const { agentIpConfirmation } = require("../services/agentIpConfirmation.service");
 const PILOT_DEVICE_ID = "00000000-0000-4000-8000-000000000001";
 const PILOT_EVENT_TYPE = "CERTIFICATE_NOTIFICATION_TEST";
 const PILOT_MESSAGE_TYPE = "certificate_notification_test";
@@ -320,7 +321,7 @@ function markOffline(deviceId, exceptWs, db = prisma) {
     });
 }
 
-function handleMetrics(d, db = prisma, services = {}) {
+function handleMetrics(d, db = prisma, ws = null, services = {}) {
   return new Promise((resolve) => {
     (async () => {
       const existente = await db.computador.findUnique({
@@ -370,6 +371,7 @@ function handleMetrics(d, db = prisma, services = {}) {
           ultimaMetrica: new Date()
         }
       });
+      if (reportedIp && ws?.deviceId === d.deviceId) agentIpConfirmation.confirm(d.deviceId, ws.connectionId, reportedIp);
       queueComputerInventorySync({ db, computadorId: existente.id, includeStorage: false, mergeWithLatest: false, log: (message) => logger.logEvent(`[Monitor TI] ${message}`) }).catch(() => {});
 
       const state = {
@@ -655,7 +657,11 @@ function setupWebSocket(server, dependencies = {}) {
               ultimaConexao: new Date()
             }
           });
+          const socketIp = normalizeIp(ws._socket && ws._socket.remoteAddress);
+          logger.logEvent(`[Monitor TI] agent_ip_observed deviceId=${d.deviceId} socketIp=${socketIp || "-"} reportedIp=${reportedIp || "-"} persistedIp=${computador.ip || "-"}`);
           ws.deviceId = d.deviceId;
+          if (reportedIp) agentIpConfirmation.confirm(d.deviceId, ws.connectionId, reportedIp);
+          else agentIpConfirmation.clear(d.deviceId, ws.connectionId);
           ws.registered = true;
           ws.capabilities = new Set(ws.pendingCapabilities);
           setCurrentConnection(ws);
@@ -729,7 +735,7 @@ function setupWebSocket(server, dependencies = {}) {
           console.error("[Monitor TI] erro no register:", err.message);
         }
       } else if (msg && msg.type === "metrics" && msg.data && msg.data.deviceId) {
-        await handleMetrics(msg.data, db, {
+        await handleMetrics(msg.data, db, ws, {
           historicoService: dependencies.historicoService,
           alertasService: dependencies.alertasService
         });
@@ -763,6 +769,7 @@ function setupWebSocket(server, dependencies = {}) {
         connectionsByDeviceId.delete(ws.deviceId);
         clearCapabilities(ws.deviceId);
       }
+      agentIpConfirmation.clear(ws.deviceId, ws.connectionId);
       logPilot(`CONNECTION_CLOSED connectionId=${ws.connectionId} registered=${ws.registered ? "true" : "false"}`);
       markOffline(ws.deviceId, ws, db);
     });

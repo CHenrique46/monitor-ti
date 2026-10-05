@@ -1,9 +1,10 @@
 const crypto = require("crypto");
-const net = require("net");
 const prisma = require("../prisma");
 const certificatesService = require("./certificados.service");
 const { createCertificateReleaseService } = require("./certificateRelease.service");
 const { getPortalCookieSecure } = require("../config");
+const { normalizeIp } = require("../networkIp");
+const { agentIpConfirmation } = require("./agentIpConfirmation.service");
 
 const PORTAL_COOKIE = "ht_portal_session";
 const SESSION_TTL_MS = 15 * 60 * 1000;
@@ -11,13 +12,6 @@ const SESSION_MAX_AGE_SECONDS = Math.floor(SESSION_TTL_MS / 1000);
 const PORTAL_STATES = ["PENDENTE", "APROVADA", "NEGADA"];
 const PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
-
-function normalizeIp(value) {
-  let ip = String(value || "").trim().toLowerCase();
-  if (ip.startsWith("::ffff:")) ip = ip.slice(7);
-  if (net.isIP(ip) === 0) return null;
-  return ip === "::1" ? "127.0.0.1" : ip;
-}
 
 function isLoopback(ip) {
   return ip === "127.0.0.1" || ip === "::1" || ip === "0:0:0:0:0:0:0:1";
@@ -31,7 +25,7 @@ function publishBrowserNotification(browserNotifications, method, ...args) {
   try { browserNotifications?.[method]?.(...args); } catch { /* notificações não podem desfazer a operação principal */ }
 }
 
-function createPortalService({ db = prisma, now = () => Date.now(), randomBytes = (size) => crypto.randomBytes(size), cookieSecure = getPortalCookieSecure(), releaseService = null, browserNotifications = null } = {}) {
+function createPortalService({ db = prisma, now = () => Date.now(), randomBytes = (size) => crypto.randomBytes(size), cookieSecure = getPortalCookieSecure(), releaseService = null, browserNotifications = null, ipConfirmation = agentIpConfirmation } = {}) {
   const sessions = new Map();
   const certificateRelease = releaseService || createCertificateReleaseService({ db });
 
@@ -46,11 +40,12 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
     if (isLoopback(normalized)) throw makeError("PORTAL_LOOPBACK_BLOCKED", "O portal não pode associar uma estação por loopback.");
     const computers = await db.computador.findMany({
       where: { status: "online" },
-      select: { id: true, ip: true, hostname: true, usuario: true }
+      select: { id: true, deviceId: true, ip: true, hostname: true, usuario: true }
     });
-    const matches = computers.filter((computer) => normalizeIp(computer.ip) === normalized);
+    const knownMatches = computers.filter((computer) => normalizeIp(computer.ip) === normalized);
+    if (knownMatches.length > 1) throw makeError("PORTAL_COMPUTER_AMBIGUOUS", "Mais de uma estação online corresponde a este acesso.");
+    const matches = knownMatches.filter((computer) => ipConfirmation.isConfirmed(computer.deviceId, normalized));
     if (matches.length === 0) throw makeError("PORTAL_COMPUTER_NOT_FOUND", "Nenhuma estação online foi identificada para este acesso.");
-    if (matches.length > 1) throw makeError("PORTAL_COMPUTER_AMBIGUOUS", "Mais de uma estação online corresponde a este acesso.");
     return { ...matches[0], ip: normalized };
   }
 
@@ -59,7 +54,7 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
     cleanup();
     const id = randomBytes(32).toString("hex");
     const expiresAt = now() + SESSION_TTL_MS;
-    sessions.set(id, { computerId: computer.id, ip: computer.ip, createdAt: now(), expiresAt });
+    sessions.set(id, { computerId: computer.id, deviceId: computer.deviceId, ip: computer.ip, createdAt: now(), expiresAt });
     return { id, computer, expiresAt };
   }
 
@@ -68,7 +63,9 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
     const session = sessions.get(String(id || ""));
     if (!session || session.expiresAt <= now()) return null;
     if (normalizeIp(ip) !== session.ip) return null;
-    const computer = await resolveComputer(session.ip);
+    if (!ipConfirmation.isConfirmed(session.deviceId, session.ip)) return null;
+    let computer;
+    try { computer = await resolveComputer(session.ip); } catch { return null; }
     if (computer.id !== session.computerId) return null;
     return { ...session, computer };
   }
@@ -76,7 +73,7 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
   function isSessionActive(id, ip) {
     cleanup();
     const session = sessions.get(String(id || ""));
-    return Boolean(session && session.expiresAt > now() && normalizeIp(ip) === session.ip);
+    return Boolean(session && session.expiresAt > now() && normalizeIp(ip) === session.ip && ipConfirmation.isConfirmed(session.deviceId, session.ip));
   }
 
   function cookie(sessionId) {
