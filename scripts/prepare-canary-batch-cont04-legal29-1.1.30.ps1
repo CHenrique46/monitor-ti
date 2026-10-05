@@ -25,16 +25,32 @@ function Get-Json([string]$Path) {
 
 function Read-Target($Expected) {
   $target = Get-Json ("/api/computadores/{0}" -f $Expected.Id)
-  if ([int]$target.id -ne $Expected.Id -or [string]$target.hostname -ne $Expected.Hostname -or
-      [string]$target.equipamentoNumero -ne $Expected.Equipment -or [string]$target.deviceId -ne $Expected.DeviceId) {
-    throw "identidade divergente para id $($Expected.Id)"
-  }
+  Assert-TargetIdentity $Expected $target
   if ([string]$target.agentVersion -ne $currentVersion) { throw "versao atual divergente para $($Expected.Hostname)" }
   if ([string]$target.status -ne "online") { throw "$($Expected.Hostname) esta offline" }
   if (-not $target.ultimaMetrica) { throw "ultimaMetrica ausente para $($Expected.Hostname)" }
   $age = ((Get-Date).ToUniversalTime() - ([datetime]$target.ultimaMetrica).ToUniversalTime()).TotalSeconds
   if ($age -lt 0 -or $age -gt 120) { throw "ultimaMetrica nao e recente para $($Expected.Hostname): $([int]$age)s" }
   return $target
+}
+
+function Assert-TargetIdentity($Expected, $Target) {
+  if ([int]$Target.id -ne $Expected.Id -or [string]$Target.hostname -ne $Expected.Hostname -or
+      [string]$Target.equipamentoNumero -ne $Expected.Equipment -or [string]$Target.deviceId -ne $Expected.DeviceId) {
+    throw "identidade divergente para id $($Expected.Id)"
+  }
+}
+
+function Read-TargetSnapshot($Expected) {
+  $target = Get-Json ("/api/computadores/{0}" -f $Expected.Id)
+  Assert-TargetIdentity $Expected $target
+  return $target
+}
+
+function Get-UpdatePersistentStatus($Update) {
+  if ($null -eq $Update) { return $null }
+  if ($Update.PSObject.Properties.Name -contains "persistentStatus") { return [string]$Update.persistentStatus }
+  return [string]$Update.status
 }
 
 function Read-Update($Expected) {
@@ -64,18 +80,29 @@ function Observe($Expected) {
   $samples = @()
   $deadline = (Get-Date).ToUniversalTime().AddSeconds($ObservationSeconds)
   do {
-    Start-Sleep -Seconds 5
-    $target = Read-Target $Expected
+    $target = $null
+    $targetError = $null
+    try { $target = Read-TargetSnapshot $Expected } catch { $targetError = $_.Exception.Message }
     $update = Read-Update $Expected
+    $persistentStatus = Get-UpdatePersistentStatus $update
     $samples += [ordered]@{
       At = (Get-Date).ToUniversalTime().ToString("o")
-      AgentVersion = $target.agentVersion
-      Status = $target.status
-      UltimaConexao = $target.ultimaConexao
-      UltimaMetrica = $target.ultimaMetrica
-      Ip = $target.ip
+      AgentVersion = if ($target) { $target.agentVersion } else { $null }
+      Status = if ($target) { $target.status } else { "unreachable" }
+      UltimaConexao = if ($target) { $target.ultimaConexao } else { $null }
+      UltimaMetrica = if ($target) { $target.ultimaMetrica } else { $null }
+      Ip = if ($target) { $target.ip } else { $null }
+      TargetError = $targetError
+      PersistentStatus = $persistentStatus
       Update = $update
     }
+    $reconnected = $target -and [string]$target.status -eq "online" -and [string]$target.agentVersion -eq $targetVersion
+    if ($persistentStatus -in @("FAILED", "ROLLBACK")) { throw "canario $($Expected.Hostname) terminou $persistentStatus" }
+    if ($persistentStatus -eq "SUCCESS" -and $reconnected) { return $samples }
+    if ((Get-Date).ToUniversalTime() -ge $deadline) {
+      throw "timeout aguardando $($Expected.Hostname): update=$persistentStatus, station=$([string]$samples[-1].Status)"
+    }
+    Start-Sleep -Seconds 5
   } while ((Get-Date).ToUniversalTime() -lt $deadline)
   return $samples
 }
