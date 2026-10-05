@@ -320,7 +320,7 @@ function markOffline(deviceId, exceptWs, db = prisma) {
     });
 }
 
-function handleMetrics(d, db = prisma) {
+function handleMetrics(d, db = prisma, services = {}) {
   return new Promise((resolve) => {
     (async () => {
       const existente = await db.computador.findUnique({
@@ -380,8 +380,8 @@ function handleMetrics(d, db = prisma) {
         discoTotal,
         discoLivre
       };
-      historicoService.maybeSaveSample(state).catch(() => {});
-      alertasService.avaliar(state).catch(() => {});
+      (services.historicoService || historicoService).maybeSaveSample(state).catch(() => {});
+      (services.alertasService || alertasService).avaliar(state).catch(() => {});
 
       resolve(true);
     })().catch((err) => {
@@ -729,7 +729,10 @@ function setupWebSocket(server, dependencies = {}) {
           console.error("[Monitor TI] erro no register:", err.message);
         }
       } else if (msg && msg.type === "metrics" && msg.data && msg.data.deviceId) {
-        await handleMetrics(msg.data, db);
+        await handleMetrics(msg.data, db, {
+          historicoService: dependencies.historicoService,
+          alertasService: dependencies.alertasService
+        });
       }
       }).catch((err) => {
         let context = {};

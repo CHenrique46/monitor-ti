@@ -31,6 +31,7 @@ function database() {
       updateMany: async () => ({ count: 1 })
     },
     discoFisico: { deleteMany: async () => {}, createMany: async () => {} },
+    agentUpdate: { findFirst: async () => null },
     $transaction: async (operation) => operation({ discoFisico: { deleteMany: async () => {}, createMany: async () => {} } })
   };
 }
