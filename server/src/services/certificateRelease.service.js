@@ -26,6 +26,15 @@ const RELEASE_EVENTS = new Set([
 
 function makeError(code, message) { return Object.assign(new Error(message), { code }); }
 function isReparsePoint(stats) { return Boolean(stats && (stats.isSymbolicLink?.() || stats.isReparsePoint?.())); }
+function sanitizedSystemCode(value, fallback) {
+  const code = String(value || fallback || "UNKNOWN").replace(/[^A-Z0-9_]/gi, "_").toUpperCase();
+  return code.slice(0, 32) || String(fallback || "UNKNOWN");
+}
+function sourceDiagnosticError(code, systemCode) {
+  const error = makeError(code, "A origem do certificado exige revisão.");
+  error.systemCode = sanitizedSystemCode(systemCode, code);
+  return error;
+}
 function boundedEnv(name, fallback, minimum, maximum) {
   const value = Number(process.env[name]);
   return Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, value)) : fallback;
@@ -49,6 +58,22 @@ function assertDirectory(directory, code, io = fs) {
   if (!stats.isDirectory() || isReparsePoint(stats)) throw makeError(code, "Diretório de liberação inválido.");
 }
 
+function assertSourceDirectory(directory, io = fs) {
+  let stats;
+  try { stats = io.lstatSync(directory); } catch (error) {
+    throw sourceDiagnosticError("RELEASE_SOURCE_LSTAT_FAILED", `LSTAT_${error?.code || "FAILED"}`);
+  }
+  if (!stats.isDirectory?.()) throw sourceDiagnosticError("RELEASE_SOURCE_NOT_DIRECTORY", "NOT_DIRECTORY");
+  if (isReparsePoint(stats)) throw sourceDiagnosticError("RELEASE_SOURCE_REPARSE", "REPARSE_POINT");
+}
+
+function realSourceDirectory(directory, io = fs) {
+  assertSourceDirectory(directory, io);
+  try { return io.realpathSync.native(directory); } catch (error) {
+    throw sourceDiagnosticError("RELEASE_SOURCE_REALPATH_FAILED", `REALPATH_${error?.code || "FAILED"}`);
+  }
+}
+
 function realDirectory(directory, code, io = fs) {
   assertDirectory(directory, code, io);
   try { return io.realpathSync.native(directory); } catch { throw makeError(code, "Diretório de liberação indisponível."); }
@@ -60,8 +85,8 @@ function isWithin(root, candidate) {
 }
 
 function resolveOrigin(root, originKey, io = fs) {
-  if (!path.isAbsolute(String(root || ""))) throw makeError("RELEASE_SOURCE_INVALID", "A origem do certificado exige revisão.");
-  const realRoot = realDirectory(root, "RELEASE_SOURCE_INVALID", io);
+  if (!path.isAbsolute(String(root || ""))) throw sourceDiagnosticError("RELEASE_SOURCE_INVALID", "PATH_NOT_ABSOLUTE");
+  const realRoot = realSourceDirectory(root, io);
   const matches = [];
   function visit(directory, depth) {
     let entries;
@@ -192,8 +217,9 @@ function auditData(request, event, result, code, actor = null, occurredAt = new 
 }
 
 function failureCode(stage, error) {
-  const code = String(error?.code || "FAILED").replace(/[^A-Z0-9_]/gi, "_").slice(0, 48);
-  return `${String(stage || "UNKNOWN").replace(/[^A-Z0-9_]/gi, "_").slice(0, 16)}_${code}`;
+  const code = sanitizedSystemCode(error?.systemCode || error?.code, "FAILED").slice(0, 31);
+  const stageCode = String(stage || "UNKNOWN").replace(/[^A-Z0-9_]/gi, "_").toUpperCase().slice(0, 32);
+  return `${stageCode}_${code}`.slice(0, 64);
 }
 
 function createCertificateReleaseService({ db, fsModule = fs, sourcePath = null, destinationPath = null, now = () => new Date(), log = () => {}, removalHelper = null } = {}) {
@@ -526,4 +552,4 @@ async function shortTransaction(db, operation) {
   return db.$transaction(operation);
 }
 
-module.exports = { RELEASE_TTL_MS, CLEANUP_INTERVAL_MS, RECOVERY_MAX_AGE_MS, REMOVAL_RECOVERY_STALE_MS, REMOVAL_RECOVERY_BACKOFF_MS, REMOVAL_RECOVERY_MAX_RETRIES, REMOVAL_RECOVERY_BATCH_LIMIT, REMOVAL_RECOVERY_MAX_OPERATION_MS, REMOVAL_RECOVERY_LEASE_TTL_MS, REMOVAL_RECOVERY_STAGES, RELEASE_EVENTS, createCertificateReleaseService, resolveOrigin, releaseFilename, publicRelease, safePart, destinationInfo, releaseStatus, isReparsePoint, removalRecoveryBackoffMs, removalRecoveryCode };
+module.exports = { RELEASE_TTL_MS, CLEANUP_INTERVAL_MS, RECOVERY_MAX_AGE_MS, REMOVAL_RECOVERY_STALE_MS, REMOVAL_RECOVERY_BACKOFF_MS, REMOVAL_RECOVERY_MAX_RETRIES, REMOVAL_RECOVERY_BATCH_LIMIT, REMOVAL_RECOVERY_MAX_OPERATION_MS, REMOVAL_RECOVERY_LEASE_TTL_MS, REMOVAL_RECOVERY_STAGES, RELEASE_EVENTS, createCertificateReleaseService, resolveOrigin, releaseFilename, safePart, destinationInfo, releaseStatus, isReparsePoint, removalRecoveryBackoffMs, removalRecoveryCode, failureCode };

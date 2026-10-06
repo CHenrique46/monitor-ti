@@ -4,7 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { buildOriginKey } = require("./src/services/certificados.service");
-const { createCertificateReleaseService, resolveOrigin, releaseFilename, safePart } = require("./src/services/certificateRelease.service");
+const { createCertificateReleaseService, resolveOrigin, releaseFilename, safePart, failureCode } = require("./src/services/certificateRelease.service");
 
 function temporaryTree() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "monitor-ti-release-"));
@@ -62,6 +62,42 @@ test("resolve exatamente uma origem e preserva o algoritmo da origemChave", () =
     assert.equal(fs.readFileSync(file, "utf8"), "PFX-TEST");
     assert.throws(() => resolveOrigin(tree.source, buildOriginKey("2026/Ausente.pfx")), { code: "RELEASE_SOURCE_NOT_FOUND" });
   } finally { cleanup(tree); }
+});
+
+test("diagnostica lstat da raiz sem expor caminho", () => {
+  const root = path.join(os.tmpdir(), "source-lstat");
+  const io = { lstatSync: () => { throw Object.assign(new Error("hidden"), { code: "ENOENT" }); } };
+  assert.throws(() => resolveOrigin(root, "ignored", io), (error) => {
+    assert.equal(error.code, "RELEASE_SOURCE_LSTAT_FAILED");
+    assert.equal(error.systemCode, "LSTAT_ENOENT");
+    assert.equal(error.message, "A origem do certificado exige revisão.");
+    return true;
+  });
+});
+
+test("diagnostica raiz que nao e diretorio", () => {
+  const root = path.join(os.tmpdir(), "source-file");
+  const io = { lstatSync: () => ({ isDirectory: () => false, isSymbolicLink: () => false }) };
+  assert.throws(() => resolveOrigin(root, "ignored", io), { code: "RELEASE_SOURCE_NOT_DIRECTORY", systemCode: "NOT_DIRECTORY" });
+});
+
+test("diagnostica reparse point na raiz", () => {
+  const root = path.join(os.tmpdir(), "source-reparse");
+  const io = { lstatSync: () => ({ isDirectory: () => true, isSymbolicLink: () => true }) };
+  assert.throws(() => resolveOrigin(root, "ignored", io), { code: "RELEASE_SOURCE_REPARSE", systemCode: "REPARSE_POINT" });
+});
+
+test("diagnostica realpath da raiz", () => {
+  const root = path.join(os.tmpdir(), "source-realpath");
+  const io = {
+    lstatSync: () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+    realpathSync: { native: () => { throw Object.assign(new Error("hidden"), { code: "EACCES" }); } }
+  };
+  assert.throws(() => resolveOrigin(root, "ignored", io), { code: "RELEASE_SOURCE_REALPATH_FAILED", systemCode: "REALPATH_EACCES" });
+});
+
+test("preserva SOURCE_RESOLUTION completo no codigo de auditoria", () => {
+  assert.equal(failureCode("SOURCE_RESOLUTION", { systemCode: "LSTAT_ENOENT" }), "SOURCE_RESOLUTION_LSTAT_ENOENT");
 });
 
 test("bloqueia origem ambígua por colisão case-insensitive", (t) => {
