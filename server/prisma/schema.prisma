@@ -29,6 +29,7 @@ model Computador {
   numeroSerie        String?
   agentVersion       String?
   status             String    @default("offline")
+  arquivadoEm        DateTime?
   ultimaConexao      DateTime?
   criadoEm           DateTime  @default(now())
   atualizadoEm       DateTime  @updatedAt
@@ -53,6 +54,8 @@ model Computador {
   excelInventorySyncs        ExcelInventorySync[]
   agentUpdates               AgentUpdate[]
   solicitacoesCertificado    SolicitacaoCertificado[]
+
+  @@index([arquivadoEm])
 }
 
 model ComputerInventoryBaseline {
