@@ -9,8 +9,9 @@ async function setWallpaper(req, res) {
   try {
     const baseUrl = getAgentServerPublicUrl();
     const computadorId = Number(req.params.id);
-    const computador = await db.computador.findUnique({ where: { id: computadorId }, select: { id: true, deviceId: true, hostname: true, status: true } });
+    const computador = await db.computador.findUnique({ where: { id: computadorId }, select: { id: true, deviceId: true, hostname: true, status: true, arquivadoEm: true } });
     if (!computador) return res.status(404).json({ erro: "Computador nao encontrado." });
+    if (computador.arquivadoEm) return res.status(409).json({ erro: "Computador arquivado." });
     wallpaperAssetService.validate();
     const execution = await remoteActionsService.createExecution({ computadorId: computador.id, action: "set_wallpaper" });
     if (computador.status !== "online") {
@@ -36,11 +37,12 @@ async function spoolerReset(req, res) {
     const computadorId = Number(req.params.id);
     const computador = await db.computador.findUnique({
       where: { id: computadorId },
-      select: { id: true, deviceId: true, hostname: true, status: true }
+      select: { id: true, deviceId: true, hostname: true, status: true, arquivadoEm: true }
     });
     if (!computador) {
       return res.status(404).json({ erro: "Computador nao encontrado." });
     }
+    if (computador.arquivadoEm) return res.status(409).json({ erro: "Computador arquivado." });
 
     const execution = await remoteActionsService.createExecution({
       computadorId: computador.id,
@@ -107,11 +109,12 @@ async function serviceRestart(req, res) {
 
     const computador = await db.computador.findUnique({
       where: { id: computadorId },
-      select: { id: true, deviceId: true, hostname: true, status: true }
+      select: { id: true, deviceId: true, hostname: true, status: true, arquivadoEm: true }
     });
     if (!computador) {
       return res.status(404).json({ erro: "Computador nao encontrado." });
     }
+    if (computador.arquivadoEm) return res.status(409).json({ erro: "Computador arquivado." });
 
     const execution = await remoteActionsService.createExecution({
       computadorId: computador.id,
@@ -170,11 +173,12 @@ async function systemMaintenance(req, res) {
     const computadorId = Number(req.params.id);
     const computador = await db.computador.findUnique({
       where: { id: computadorId },
-      select: { id: true, deviceId: true, hostname: true, status: true }
+      select: { id: true, deviceId: true, hostname: true, status: true, arquivadoEm: true }
     });
     if (!computador) {
       return res.status(404).json({ erro: "Computador nao encontrado." });
     }
+    if (computador.arquivadoEm) return res.status(409).json({ erro: "Computador arquivado." });
 
     const execution = await remoteActionsService.createExecution({
       computadorId: computador.id,
@@ -232,9 +236,10 @@ async function systemMaintenance(req, res) {
      const computadorId = Number(req.params.id);
      const computador = await db.computador.findUnique({
        where: { id: computadorId },
-       select: { id: true, deviceId: true, hostname: true, status: true }
+        select: { id: true, deviceId: true, hostname: true, status: true, arquivadoEm: true }
       });
-      if (!computador) return res.status(404).json({ erro: "Computador nao encontrado." });
+       if (!computador) return res.status(404).json({ erro: "Computador nao encontrado." });
+       if (computador.arquivadoEm) return res.status(409).json({ erro: "Computador arquivado." });
       if (computador.status !== "online") return res.status(409).json({ erro: "Computador offline." });
       if (!ws.hasCapability(computador.deviceId, "disk_cleanup_analyze")) {
         return res.status(409).json({ error: "AGENT_CAPABILITY_UNSUPPORTED", capability: "disk_cleanup_analyze" });

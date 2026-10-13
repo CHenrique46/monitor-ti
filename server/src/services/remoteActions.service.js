@@ -216,6 +216,14 @@ async function recoverOrphanedExecutions(db = prisma) {
 function createRemoteActionsService(db = prisma) {
   async function createExecution({ computadorId, action, payload = null, scheduleRunId = null }) {
     const normalizedAction = assertAllowedAction(action);
+    if (db.computador && typeof db.computador.findUnique === "function") {
+      const computer = await db.computador.findUnique({ where: { id: Number(computadorId) }, select: { arquivadoEm: true } });
+      if (computer && computer.arquivadoEm) {
+        const error = new Error("Computadores arquivados não podem receber ações.");
+        error.code = "COMPUTER_ARCHIVED";
+        throw error;
+      }
+    }
     if (normalizedAction === "service_restart") {
       const serviceKey = String(payload && payload.serviceKey || "").trim().toLowerCase();
       if (!SERVICE_ALLOWLIST[serviceKey]) {

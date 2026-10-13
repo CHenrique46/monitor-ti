@@ -1,0 +1,12 @@
+HenriTech Control - controle da flag do piloto v6.3
+
+Este pacote contem somente o controlador da flag e a coleta de status.
+Nao contem binarios e nao reutiliza o backup de uma execucao anterior.
+
+Executar primeiro, sem mutacoes:
+  .\set-certificate-toast-pilot-flag-v6.ps1 -PreflightOnly
+
+Nao executar -Enable ou -Disable sem autorizacao explicita.
+
+O controlador usa File.Replace com backup absoluto dentro do backup
+transacional exclusivo e preserva o backup completo para auditoria.

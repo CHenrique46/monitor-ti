@@ -327,7 +327,7 @@ function handleMetrics(d, db = prisma, services = {}) {
         where: { deviceId: d.deviceId }
       });
       // Nao cria computador via metrics; apenas atualiza registro existente
-      if (!existente) return resolve(false);
+      if (!existente || existente.arquivadoEm) return resolve(false);
 
       const cpu = Number(d.cpu);
       const ramTotal = Number(d.ramTotal);
@@ -492,9 +492,9 @@ function setupWebSocket(server, dependencies = {}) {
         }
         const computador = await db.computador.findUnique({
           where: { deviceId: msg.deviceId },
-          select: { id: true }
+          select: { id: true, arquivadoEm: true }
         });
-        if (!computador) {
+        if (!computador || computador.arquivadoEm) {
           logger.logEvent("[Monitor TI] inventory rejected reason=computer_not_found");
           return;
         }
@@ -605,12 +605,14 @@ function setupWebSocket(server, dependencies = {}) {
         const reportedIp = normalizeIp(d.ip);
         try {
           if (d.updateStatusOnly === true) {
-            const existing = await db.computador.findUnique({ where: { deviceId: d.deviceId }, select: { id: true } });
-            if (!existing) return;
+            const existing = await db.computador.findUnique({ where: { deviceId: d.deviceId }, select: { id: true, arquivadoEm: true } });
+            if (!existing || existing.arquivadoEm) return;
             ws.deviceId = d.deviceId;
             ws.send(JSON.stringify({ type: "register_ack", deviceId: d.deviceId, updateStatusOnly: true }));
             return;
           }
+          const existing = await db.computador.findUnique({ where: { deviceId: d.deviceId }, select: { id: true, arquivadoEm: true } });
+          if (existing && existing.arquivadoEm) return;
           const computador = await db.computador.upsert({
             where: { deviceId: d.deviceId },
             create: {

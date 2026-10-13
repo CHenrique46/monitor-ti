@@ -35,7 +35,7 @@ function normalizeAdminField(value, maxLength, field) {
   return normalized || null;
 }
 
-function mapComputador(c, includeOffice = false) {
+function mapComputador(c, includeOffice = false, includeArchive = false) {
   const officeInstallations = includeOffice ? (c.officeInstallations || []).map((installation) => ({
     id: installation.id,
     source: installation.source,
@@ -79,6 +79,7 @@ function mapComputador(c, includeOffice = false) {
     numeroSerie: c.numeroSerie,
     agentVersion: c.agentVersion,
     status: c.status,
+    ...(includeArchive ? { arquivadoEm: c.arquivadoEm || null } : {}),
     ultimaConexao: c.ultimaConexao,
     cpuUso: c.cpuUso,
     ramTotal: c.ramTotal,
@@ -105,16 +106,18 @@ function mapComputador(c, includeOffice = false) {
   };
 }
 
-async function list(db = prisma) {
+async function list(db = prisma, { includeArchived = false, archivedOnly = false } = {}) {
   const items = await db.computador.findMany({
+    where: archivedOnly ? { arquivadoEm: { not: null } } : (includeArchived ? {} : { arquivadoEm: null }),
     orderBy: { hostname: "asc" }
   });
 
-  return items.map((item) => mapComputador(item));
+  return items.map((item) => mapComputador(item, false, includeArchived));
 }
 
-async function listInventory(db = prisma) {
+async function listInventory(db = prisma, { includeArchived = false, archivedOnly = false } = {}) {
   const items = await db.computador.findMany({
+    where: archivedOnly ? { arquivadoEm: { not: null } } : (includeArchived ? {} : { arquivadoEm: null }),
     orderBy: { hostname: "asc" },
     select: {
       id: true,
@@ -176,7 +179,7 @@ async function listInventory(db = prisma) {
   });
 }
 
-async function getById(id, db = prisma) {
+async function getById(id, db = prisma, { includeArchived = false } = {}) {
   const c = await db.computador.findUnique({
     where: { id: Number(id) },
     include: {
@@ -207,7 +210,29 @@ async function getById(id, db = prisma) {
       }
     }
   });
-  return c ? mapComputador(c, true) : null;
+  if (!c || (!includeArchived && c.arquivadoEm)) return null;
+  return mapComputador(c, true, includeArchived);
+}
+
+async function archiveComputer(value, db = prisma) {
+  const id = parseComputerId(value);
+  const computer = await db.computador.findUnique({ where: { id }, select: { id: true } });
+  if (!computer) throw new ComputerDeletionError("NOT_FOUND", "Computador não encontrado.");
+  return db.computador.update({ where: { id }, data: { arquivadoEm: new Date() }, select: { id: true, arquivadoEm: true } });
+}
+
+async function restoreComputer(value, db = prisma) {
+  const id = parseComputerId(value);
+  const computer = await db.computador.findUnique({ where: { id }, select: { id: true } });
+  if (!computer) throw new ComputerDeletionError("NOT_FOUND", "Computador não encontrado.");
+  return db.computador.update({ where: { id }, data: { arquivadoEm: null }, select: { id: true, arquivadoEm: true } });
+}
+
+async function assertComputerNotArchived(id, db = prisma) {
+  if (typeof db.computador.findUnique !== "function") return;
+  const computer = await db.computador.findUnique({ where: { id: Number(id) }, select: { id: true, arquivadoEm: true } });
+  if (!computer) throw new ComputerDeletionError("NOT_FOUND", "Computador não encontrado.");
+  if (computer.arquivadoEm) throw new ComputerDeletionError("ARCHIVED", "Computadores arquivados não podem ser alterados.");
 }
 
 async function getInventoryComparison(value, db = prisma) {
@@ -303,6 +328,7 @@ async function addInventoryBaseline(value, input, db = prisma, enqueue = enqueue
   const id = parseComputerId(value);
   const request = normalizeInventoryRequest(input);
   try {
+    await assertComputerNotArchived(id, db);
     return await db.$transaction(async (tx) => {
       const computer = await tx.computador.findUnique({
         where: { id },
@@ -361,11 +387,12 @@ async function getCapabilitiesById(id) {
       id: true,
       deviceId: true,
       agentVersion: true,
-      status: true
+      status: true,
+      arquivadoEm: true
     }
   });
 
-  if (!c) return null;
+  if (!c || c.arquivadoEm) return null;
 
   const agentServer = require("../ws/agentServer");
   const capabilities = agentServer.getCapabilities(c.deviceId);
@@ -406,6 +433,7 @@ async function updateInventoryMetadata(value, input, db = prisma) {
   };
   Object.keys(data).forEach((field) => data[field] === undefined && delete data[field]);
   try {
+    await assertComputerNotArchived(id, db);
     if (data.equipamentoNumero && db.computador.findFirst) {
       const other = await db.computador.findFirst({
         where: { equipamentoNumero: data.equipamentoNumero, NOT: { id } },
@@ -430,9 +458,10 @@ async function deleteOfflineComputer(value, db = prisma) {
   return db.$transaction(async (tx) => {
     const computer = await tx.computador.findUnique({
       where: { id },
-      select: { id: true, status: true }
+      select: { id: true, status: true, arquivadoEm: true }
     });
     if (!computer) throw new ComputerDeletionError("NOT_FOUND", "Computador não encontrado.");
+    if (computer.arquivadoEm) throw new ComputerDeletionError("ARCHIVED", "Computadores arquivados não podem ser excluídos.");
     if (computer.status !== "offline") {
       throw new ComputerDeletionError("ONLINE", "Computadores online não podem ser excluídos.");
     }
@@ -477,10 +506,13 @@ module.exports = {
   list,
   listInventory,
   getById,
-  createComputadoresService: ({ db = prisma, enqueue = enqueueExcelSync } = {}) => ({ list: () => list(db), listInventory: () => listInventory(db), getById: (id) => getById(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db), getInventoryComparison: (id) => getInventoryComparison(id, db), addInventoryBaseline: (id, input) => addInventoryBaseline(id, input, db, enqueue) }),
+  createComputadoresService: ({ db = prisma, enqueue = enqueueExcelSync } = {}) => ({ list: () => list(db), listInventory: () => listInventory(db), listArchived: () => list(db, { includeArchived: true, archivedOnly: true }), getById: (id) => getById(id, db), getByIdAdmin: (id) => getById(id, db, { includeArchived: true }), archiveComputer: (id) => archiveComputer(id, db), restoreComputer: (id) => restoreComputer(id, db), updateInventoryMetadata: (id, input) => updateInventoryMetadata(id, input, db), getInventoryComparison: (id) => getInventoryComparison(id, db), addInventoryBaseline: (id, input) => addInventoryBaseline(id, input, db, enqueue) }),
   updateInventoryMetadata,
   getCapabilitiesById,
   deleteOfflineComputer,
+  archiveComputer,
+  restoreComputer,
+  assertComputerNotArchived,
   ComputerDeletionError,
   InventoryBaselineError,
   buildTrustedInventoryBaseline

@@ -26,6 +26,22 @@ const RELEASE_EVENTS = new Set([
 
 function makeError(code, message) { return Object.assign(new Error(message), { code }); }
 function isReparsePoint(stats) { return Boolean(stats && (stats.isSymbolicLink?.() || stats.isReparsePoint?.())); }
+function diagnoseSourceRoot(root, io = fs) {
+  if (!path.isAbsolute(String(root || ""))) return { etapa: "SOURCE_ROOT_PATH", codigo: "PATH_NOT_ABSOLUTE" };
+  try {
+    const stats = io.lstatSync(root);
+    if (!stats.isDirectory()) return { etapa: "SOURCE_ROOT_DIRECTORY", codigo: "NOT_DIRECTORY" };
+    if (isReparsePoint(stats)) return { etapa: "SOURCE_ROOT_REPARSE", codigo: "REPARSE_POINT" };
+  } catch (error) {
+    return { etapa: "SOURCE_ROOT_LSTAT", codigo: `LSTAT_${String(error?.code || "FAILED").replace(/[^A-Z0-9_]/gi, "_").toUpperCase().slice(0, 32)}` };
+  }
+  try {
+    io.realpathSync.native(root);
+    return { etapa: "SOURCE_ROOT", codigo: "READY" };
+  } catch (error) {
+    return { etapa: "SOURCE_ROOT_REALPATH", codigo: `REALPATH_${String(error?.code || "FAILED").replace(/[^A-Z0-9_]/gi, "_").toUpperCase().slice(0, 32)}` };
+  }
+}
 function boundedEnv(name, fallback, minimum, maximum) {
   const value = Number(process.env[name]);
   return Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, value)) : fallback;
@@ -518,7 +534,7 @@ function createCertificateReleaseService({ db, fsModule = fs, sourcePath = null,
     } finally { removalRecoveryInProgress = false; }
   }
 
-  return { releaseRequest, cleanupExpired, recoverAbandonedAttempts, recoverStaleRemovals, expireRetryAuthorizations: retryAuthorization.expire, authorizeExtraordinaryRetry: retryAuthorization.create, cancelExtraordinaryRetry: retryAuthorization.cancel, stopRecovery: isolatedRemovalHelper.stop, publicRelease: (request) => publicRelease(request, io, destinationPath || null, now().getTime()), releaseStatus, _locks: requestLocks, _resolveOrigin: (root, key) => resolveOrigin(root, key, io), _releaseFilename: releaseFilename, _publishAtomically: (source, info, attemptId, fingerprint, size) => publishAtomically(source, info, attemptId, fingerprint, size, io), _ownedDelete: (filename, destination, fingerprint) => ownedDelete(filename, destination, fingerprint, io) };
+  return { releaseRequest, diagnoseSourceRoot: () => diagnoseSourceRoot(sourcePath || getCertificadosClientesPath(), io), cleanupExpired, recoverAbandonedAttempts, recoverStaleRemovals, expireRetryAuthorizations: retryAuthorization.expire, authorizeExtraordinaryRetry: retryAuthorization.create, cancelExtraordinaryRetry: retryAuthorization.cancel, stopRecovery: isolatedRemovalHelper.stop, publicRelease: (request) => publicRelease(request, io, destinationPath || null, now().getTime()), releaseStatus, _locks: requestLocks, _resolveOrigin: (root, key) => resolveOrigin(root, key, io), _releaseFilename: releaseFilename, _publishAtomically: (source, info, attemptId, fingerprint, size) => publishAtomically(source, info, attemptId, fingerprint, size, io), _ownedDelete: (filename, destination, fingerprint) => ownedDelete(filename, destination, fingerprint, io) };
 }
 
 async function shortTransaction(db, operation) {
@@ -526,4 +542,4 @@ async function shortTransaction(db, operation) {
   return db.$transaction(operation);
 }
 
-module.exports = { RELEASE_TTL_MS, CLEANUP_INTERVAL_MS, RECOVERY_MAX_AGE_MS, REMOVAL_RECOVERY_STALE_MS, REMOVAL_RECOVERY_BACKOFF_MS, REMOVAL_RECOVERY_MAX_RETRIES, REMOVAL_RECOVERY_BATCH_LIMIT, REMOVAL_RECOVERY_MAX_OPERATION_MS, REMOVAL_RECOVERY_LEASE_TTL_MS, REMOVAL_RECOVERY_STAGES, RELEASE_EVENTS, createCertificateReleaseService, resolveOrigin, releaseFilename, publicRelease, safePart, destinationInfo, releaseStatus, isReparsePoint, removalRecoveryBackoffMs, removalRecoveryCode };
+module.exports = { RELEASE_TTL_MS, CLEANUP_INTERVAL_MS, RECOVERY_MAX_AGE_MS, REMOVAL_RECOVERY_STALE_MS, REMOVAL_RECOVERY_BACKOFF_MS, REMOVAL_RECOVERY_MAX_RETRIES, REMOVAL_RECOVERY_BATCH_LIMIT, REMOVAL_RECOVERY_MAX_OPERATION_MS, REMOVAL_RECOVERY_LEASE_TTL_MS, REMOVAL_RECOVERY_STAGES, RELEASE_EVENTS, createCertificateReleaseService, resolveOrigin, diagnoseSourceRoot, releaseFilename, publicRelease, safePart, destinationInfo, releaseStatus, isReparsePoint, removalRecoveryBackoffMs, removalRecoveryCode };

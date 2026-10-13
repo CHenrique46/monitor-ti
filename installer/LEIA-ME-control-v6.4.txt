@@ -1,0 +1,12 @@
+HenriTech Control - controle da flag do piloto v6.4
+
+Esta revisao preserva os bytes originais do MonitorTIAgent.xml. Nao usa
+OuterXml, Save ou XmlWriter para alterar o arquivo.
+
+Executar primeiro, sem mutacoes:
+  .\set-certificate-toast-pilot-flag-v6.ps1 -PreflightOnly
+
+Nao executar -Enable ou -Disable sem autorizacao explicita.
+
+O controlador valida encoding, BOM, bytes nao relacionados, hash esperado,
+backup transacional e substituicao atomica com backup absoluto.

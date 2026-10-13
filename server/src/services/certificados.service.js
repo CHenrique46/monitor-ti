@@ -473,6 +473,24 @@ async function checkStorageAccess({ configuredPath = getCertificadosClientesPath
   return result;
 }
 
+async function diagnoseSourceRoot({ configuredPath = getCertificadosClientesPath(), fsModule = fs } = {}) {
+  const value = String(configuredPath || "").trim();
+  if (!path.isAbsolute(value)) return { etapa: "SOURCE_ROOT_PATH", codigo: "PATH_NOT_ABSOLUTE" };
+  try {
+    const stats = await fsModule.promises.lstat(value);
+    if (!stats.isDirectory()) return { etapa: "SOURCE_ROOT_DIRECTORY", codigo: "NOT_DIRECTORY" };
+    if (stats.isSymbolicLink?.() || stats.isReparsePoint?.()) return { etapa: "SOURCE_ROOT_REPARSE", codigo: "REPARSE_POINT" };
+  } catch (error) {
+    return { etapa: "SOURCE_ROOT_LSTAT", codigo: `LSTAT_${String(error?.code || "FAILED").replace(/[^A-Z0-9_]/gi, "_").toUpperCase().slice(0, 32)}` };
+  }
+  try {
+    await fsModule.promises.realpath(value);
+    return { etapa: "SOURCE_ROOT", codigo: "READY" };
+  } catch (error) {
+    return { etapa: "SOURCE_ROOT_REALPATH", codigo: `REALPATH_${String(error?.code || "FAILED").replace(/[^A-Z0-9_]/gi, "_").toUpperCase().slice(0, 32)}` };
+  }
+}
+
 module.exports = {
   MAX_DEPTH,
   EXCLUDED_DIRECTORY_NAME,
@@ -493,8 +511,9 @@ module.exports = {
   scanCatalog,
   syncCatalog,
     listCertificates,
-    getCertificate,
-    checkStorageAccess,
+     getCertificate,
+     checkStorageAccess,
+     diagnoseSourceRoot,
     publicCertificate,
     parseExplicitValidity,
     extractValidityMetadata,

@@ -45,7 +45,7 @@ function createPortalService({ db = prisma, now = () => Date.now(), randomBytes 
     if (!normalized) throw makeError("PORTAL_IP_INVALID", "O endereço IP desta estação é inválido.");
     if (isLoopback(normalized)) throw makeError("PORTAL_LOOPBACK_BLOCKED", "O portal não pode associar uma estação por loopback.");
     const computers = await db.computador.findMany({
-      where: { status: "online" },
+      where: { status: "online", arquivadoEm: null },
       select: { id: true, ip: true, hostname: true, usuario: true }
     });
     const matches = computers.filter((computer) => normalizeIp(computer.ip) === normalized);

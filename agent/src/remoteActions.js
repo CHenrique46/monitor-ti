@@ -1,9 +1,7 @@
 const { execFile: defaultExecFile } = require("child_process");
 const fs = require("fs");
-const os = require("os");
-const path = require("path");
 const { createWallpaperExecutor } = require("./wallpaper");
-const { createDiskCleanupAnalyzer } = require("./diskCleanupAnalysis");
+const { createDiskCleanupAnalyzer, createSafeDiskCleanupExecutor } = require("./diskCleanupAnalysis");
 
 const ALLOWED_ACTIONS = {
   spooler_reset: true,
@@ -177,64 +175,6 @@ function createServiceRestartExecutor(serviceKey, deps = {}) {
   };
 }
 
-async function removeDirectoryContents(root) {
-  const result = {
-    root,
-    filesRemoved: 0,
-    directoriesRemoved: 0,
-    blocked: [],
-    errors: [],
-    blockedCount: 0,
-    errorsCount: 0,
-    truncated: false
-  };
-
-  function addDetail(kind, entry) {
-    const countKey = `${kind}Count`;
-    result[countKey] += 1;
-    if (result[kind].length < MAINTENANCE_DETAIL_LIMIT) {
-      result[kind].push(entry);
-    } else {
-      result.truncated = true;
-    }
-  }
-
-  async function visit(dir) {
-    let entries;
-    try {
-      entries = await fs.promises.readdir(dir, { withFileTypes: true });
-    } catch (err) {
-      if (err.code === "ENOENT") return;
-      addDetail("errors", { path: dir, message: err.message });
-      return;
-    }
-
-    for (const entry of entries) {
-      const target = path.join(dir, entry.name);
-      if (entry.isDirectory() && !entry.isSymbolicLink()) {
-        await visit(target);
-        try {
-          await fs.promises.rmdir(target);
-          result.directoriesRemoved += 1;
-        } catch (err) {
-          if (err.code !== "ENOENT") addDetail("blocked", { path: target, message: err.message });
-        }
-        continue;
-      }
-
-      try {
-        await fs.promises.rm(target, { force: true, recursive: false });
-        result.filesRemoved += 1;
-      } catch (err) {
-        addDetail("blocked", { path: target, message: err.message });
-      }
-    }
-  }
-
-  await visit(root);
-  return result;
-}
-
 function limitSystemMaintenanceResult(result) {
   const fallback = {
     overallStatus: "FAILED",
@@ -373,22 +313,7 @@ function createSystemMaintenanceExecutor(deps = {}) {
       );
     }
   };
-  const cleanup = deps.cleanupTemp || (async () => {
-    const userTemp = deps.userTempPath || process.env.TEMP || process.env.TMP || os.tmpdir();
-    const windowsTemp = deps.windowsTempPath || path.join(process.env.WINDIR || "C:\\Windows", "Temp");
-    const user = await removeDirectoryContents(userTemp);
-    const windows = await removeDirectoryContents(windowsTemp);
-    const blockedCount = user.blockedCount + windows.blockedCount;
-    const errorsCount = user.errorsCount + windows.errorsCount;
-    return {
-      roots: [user, windows],
-      blocked: [...user.blocked, ...windows.blocked].slice(0, MAINTENANCE_DETAIL_LIMIT),
-      errors: [...user.errors, ...windows.errors].slice(0, MAINTENANCE_DETAIL_LIMIT),
-      blockedCount,
-      errorsCount,
-      truncated: blockedCount > MAINTENANCE_DETAIL_LIMIT || errorsCount > MAINTENANCE_DETAIL_LIMIT || user.truncated || windows.truncated
-    };
-  });
+  const cleanup = deps.cleanupTemp || createSafeDiskCleanupExecutor(deps);
   const runSfc = deps.runSfc || (() => runTool("sfc.exe", ["/scannow"], timeouts.sfcMs));
   const runDism = deps.runDism || (() => runTool("dism.exe", ["/Online", "/Cleanup-Image", "/RestoreHealth"], timeouts.dismMs));
   const flushDns = deps.flushDns || (() => runTool("ipconfig.exe", ["/flushdns"], timeouts.dnsFlushMs));

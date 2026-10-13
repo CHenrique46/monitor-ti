@@ -208,8 +208,9 @@ function createMaintenanceScheduler({ db = prisma, remoteActions = remoteActions
   async function validateComputerIds(ids) {
     const uniqueIds = Array.from(new Set((ids || []).map(Number)));
     if (!uniqueIds.length) return [];
-    const found = await db.computador.findMany({ where: { id: { in: uniqueIds } }, select: { id: true } });
+    const found = await db.computador.findMany({ where: { id: { in: uniqueIds } }, select: { id: true, arquivadoEm: true } });
     if (found.length !== uniqueIds.length) throw new Error("Um ou mais computadores não existem.");
+    if (found.some((computer) => computer.arquivadoEm)) throw new Error("Agendamentos não podem incluir computadores arquivados.");
     return uniqueIds;
   }
 
@@ -265,7 +266,7 @@ function createMaintenanceScheduler({ db = prisma, remoteActions = remoteActions
   async function buildPlan(schedule, now = new Date()) {
     const ids = schedule.targetMode === "SELECTED" ? schedule.targets.map((target) => target.computadorId) : null;
     const computers = await db.computador.findMany({
-      where: ids ? { id: { in: ids } } : {},
+      where: ids ? { id: { in: ids }, arquivadoEm: null } : { arquivadoEm: null },
       select: { id: true, hostname: true, deviceId: true, status: true, agentVersion: true }
     });
     const inProgress = computers.length

@@ -182,7 +182,7 @@ async function main() {
 
   client.close();
   await wait(300);
-  check("INT-007 kill companion -> capability false", ws.sent.some((m) => m.type === "capabilities" && Array.isArray(m.data && m.data.capabilities) && m.data.capabilities.length === 0));
+  check("INT-007 kill companion -> notices capability false", ws.sent.some((m) => m.type === "capabilities" && Array.isArray(m.data && m.data.capabilities) && !m.data.capabilities.includes("notices")));
 
   const client2 = await connectClient(pipePath);
   client2.send({ type: "register", protocolVersion: 1, notifierVersion: "1.1.7", sessionId: 1, pid: 8888, username: "Henrique", activeNoticeDeliveryId: null });

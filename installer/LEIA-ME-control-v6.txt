@@ -1,0 +1,19 @@
+HenriTech Control - controle da flag do piloto v6.2
+
+Este pacote nao contem binarios e nao altera o Server.
+Nao habilite nem desabilite a flag sem autorizacao explicita.
+
+Preflight seguro:
+  .\set-certificate-toast-pilot-flag-v6.ps1 -PreflightOnly
+
+Habilitacao controlada (somente quando autorizada):
+  .\set-certificate-toast-pilot-flag-v6.ps1 -Enable
+
+Desabilitacao controlada:
+  .\set-certificate-toast-pilot-flag-v6.ps1 -Disable
+
+O controlador valida hostname, deviceId, XML, servico, Agent, Notifier,
+SessionId, Named Pipe e capability atual. A flag e alterada somente por
+substituicao atomica e possui backup exclusivo com rollback automatico.
+
+Nenhum comando deste pacote envia evento ou substitui binarios.

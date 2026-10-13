@@ -24,6 +24,7 @@ async function trigger(req, res, deps = {}) {
     const id = Number(req.params.id);
     const c = await db.computador.findUnique({ where: { id } });
     if (!c) return res.status(404).json({ erro: "Computador nao encontrado." });
+    if (c.arquivadoEm) return res.status(409).json({ erro: "Computador arquivado." });
 
     if (!c.agentVersion) {
       return res.status(400).json({

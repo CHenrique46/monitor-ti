@@ -1,7 +1,7 @@
 const service = require("../services/certificados.service");
 const defaultSyncService = require("../services/certificateCatalogSync.service");
 
-function createCertificadosController({ syncService = defaultSyncService } = {}) {
+function createCertificadosController({ syncService = defaultSyncService, releaseService } = {}) {
 async function sincronizar(req, res) {
   try {
     return res.status(200).json(await syncService.runManual(req.humanUser && req.humanUser.username));
@@ -34,6 +34,31 @@ async function obter(req, res) {
   }
 }
 
+  async function storageStatus(req, res) {
+    try {
+      return res.status(200).json(await service.checkStorageAccess());
+    } catch {
+      return res.status(200).json({
+        configurationPresent: false,
+        pathRecognized: false,
+        pathReachable: false,
+        isDirectory: false,
+        readAccess: false,
+        errorCode: "DIAGNOSTIC_FAILED"
+      });
+    }
+  }
+
+  async function sourceDiagnostic(req, res) {
+    res.set("Cache-Control", "no-store");
+    try {
+      const diagnose = releaseService?.diagnoseSourceRoot || service.diagnoseSourceRoot;
+      return res.status(200).json(await diagnose());
+    } catch {
+      return res.status(200).json({ etapa: "SOURCE_ROOT", codigo: "DIAGNOSTIC_FAILED" });
+    }
+  }
+
 async function sincronizacoes(req, res) {
   try { return res.status(200).json(await syncService.listHistory(req.query.limit)); }
   catch (error) { return res.status(error.code === "INVALID_LIMIT" ? 400 : 500).json({ erro: error.message || "Não foi possível consultar o histórico de sincronização." }); }
@@ -44,7 +69,7 @@ async function sincronizacaoAtual(req, res) {
   catch { return res.status(500).json({ erro: "Não foi possível consultar a sincronização atual." }); }
 }
 
-return { sincronizar, listar, obter, sincronizacoes, sincronizacaoAtual };
+ return { sincronizar, listar, obter, storageStatus, sourceDiagnostic, sincronizacoes, sincronizacaoAtual };
 }
 
 module.exports = { ...createCertificadosController(), createCertificadosController };

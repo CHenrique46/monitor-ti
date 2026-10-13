@@ -5,6 +5,10 @@ const agentUpdateController = require("../controllers/agentUpdate.controller");
 const { requireAdmin } = require("../auth/middleware");
 
 router.get("/", computadoresController.list);
+router.get("/admin/archived", requireAdmin(), computadoresController.listArchived);
+router.get("/admin/:id", requireAdmin(), computadoresController.getByIdAdmin);
+router.post("/admin/:id/archive", requireAdmin(), computadoresController.archive);
+router.post("/admin/:id/restore", requireAdmin(), computadoresController.restore);
 router.delete("/:id", requireAdmin(), computadoresController.deleteComputer);
 router.get("/:id", computadoresController.getById);
 router.get("/:id/capabilities", computadoresController.getCapabilities);

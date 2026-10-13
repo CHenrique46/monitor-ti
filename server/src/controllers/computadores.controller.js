@@ -9,7 +9,7 @@ function createComputadoresController({ service = computadoresService.createComp
     } catch (err) {
       if (err && err.code === "INVALID_ID") return res.status(400).json({ erro: err.message });
       if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
-      if (err && ["ONLINE", "MAINTENANCE"].includes(err.code)) return res.status(409).json({ erro: err.message });
+      if (err && ["ONLINE", "MAINTENANCE", "ARCHIVED"].includes(err.code)) return res.status(409).json({ erro: err.message });
       return res.status(500).json({ erro: "Não foi possível excluir o computador." });
     }
   }
@@ -33,6 +33,7 @@ function createComputadoresController({ service = computadoresService.createComp
       if (err && err.code === "INVALID_METADATA") return res.status(400).json({ erro: err.message });
       if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
       if (err && err.code === "DUPLICATE_EQUIPMENT") return res.status(409).json({ erro: err.message });
+      if (err && err.code === "ARCHIVED") return res.status(409).json({ erro: err.message });
       return res.status(500).json({ erro: "Não foi possível atualizar a identificação." });
     }
   }
@@ -57,12 +58,45 @@ function createComputadoresController({ service = computadoresService.createComp
       if (err && ["INVALID_REQUEST", "INVALID_EQUIPMENT"].includes(err.code)) return res.status(400).json({ erro: err.message });
       if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
       if (err && ["BASELINE_EXISTS", "DUPLICATE_EQUIPMENT", "CONFLICT", "SNAPSHOT_INSUFFICIENT"].includes(err.code)) return res.status(409).json({ erro: err.message });
+      if (err && err.code === "ARCHIVED") return res.status(409).json({ erro: err.message });
       return res.status(500).json({ erro: "Não foi possível adicionar o computador ao inventário." });
+    }
+  }
+
+  async function listArchived(req, res) {
+    try { return res.status(200).json(await service.listArchived()); }
+    catch (err) { return res.status(500).json({ erro: err.message }); }
+  }
+
+  async function getByIdAdmin(req, res) {
+    try {
+      const item = await service.getByIdAdmin(req.params.id);
+      return item ? res.status(200).json(item) : res.status(404).json({ erro: "Computador não encontrado" });
+    } catch (err) { return res.status(500).json({ erro: err.message }); }
+  }
+
+  async function archive(req, res) {
+    try { return res.status(200).json(await service.archiveComputer(req.params.id)); }
+    catch (err) {
+      if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
+      return res.status(400).json({ erro: err.message });
+    }
+  }
+
+  async function restore(req, res) {
+    try { return res.status(200).json(await service.restoreComputer(req.params.id)); }
+    catch (err) {
+      if (err && err.code === "NOT_FOUND") return res.status(404).json({ erro: err.message });
+      return res.status(400).json({ erro: err.message });
     }
   }
 
   return {
     deleteComputer,
+    listArchived,
+    getByIdAdmin,
+    archive,
+    restore,
     listInventory: (req, res) => listInventoryWithService(req, res, service),
     updateInventoryMetadata,
     getInventoryComparison,
@@ -121,4 +155,4 @@ async function getCapabilities(req, res) {
   }
 }
 
-module.exports = { list, getById, getCapabilities, listInventory: (req, res) => listInventoryWithService(req, res, computadoresService), updateInventoryMetadata: createComputadoresController().updateInventoryMetadata, getInventoryComparison: createComputadoresController().getInventoryComparison, addInventoryBaseline: createComputadoresController().addInventoryBaseline, deleteComputer: createComputadoresController().deleteComputer, createComputadoresController };
+module.exports = { list, getById, getCapabilities, listInventory: (req, res) => listInventoryWithService(req, res, computadoresService), updateInventoryMetadata: createComputadoresController().updateInventoryMetadata, getInventoryComparison: createComputadoresController().getInventoryComparison, addInventoryBaseline: createComputadoresController().addInventoryBaseline, deleteComputer: createComputadoresController().deleteComputer, listArchived: createComputadoresController().listArchived, getByIdAdmin: createComputadoresController().getByIdAdmin, archive: createComputadoresController().archive, restore: createComputadoresController().restore, createComputadoresController };
