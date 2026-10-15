@@ -363,3 +363,104 @@ Conclusao: o Granite foi melhor que o Qwen2.5 no reconhecimento explícito do
 procedimento interno desconhecido, mas ainda não atingiu qualidade suficiente
 para o Luca. O modelo foi descarregado, não houve integração nem alteração de
 produção, e apenas este relatório foi publicado.
+
+## Rodada final do Granite com saída 256
+
+Esta foi a última rodada isolada. Nenhuma variável foi alterada além de
+`num_predict`, que passou de `96` para `256`.
+
+### Configuração
+
+- Modelo: `granite3.3:2b` já instalado.
+- Prompt de sistema: o mesmo prompt ajustado da comparação anterior.
+- Temperatura: `0.0`.
+- Contexto: `2048`.
+- Saída máxima: `num_predict=256`.
+- Paralelismo: uma geração por vez.
+- Cloud off e API em loopback mantidos.
+- Nenhum comando, ferramenta, Obsidian, dado real ou integração foi usado.
+
+### Tempos e recursos
+
+| Caso | Primeiro chunk | HTTP total | API total | Tokens entrada/saída | Fim |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Internet/DNS | 4,3 s | 14,1 s | 13,0 s | 201 / 149 | `stop` |
+| Impressora | 0,8 s | 7,4 s | 6,1 s | 200 / 81 | `stop` |
+| Outlook | 1,1 s | 9,1 s | 7,6 s | 211 / 84 | `stop` |
+| Interno desconhecido | 0,9 s | 6,0 s | 4,7 s | 209 / 66 | `stop` |
+
+O modelo carregado foi informado pelo `ollama ps` como `1,8 GB` e `100% CPU`.
+Durante o teste, a RAM livre caiu de aproximadamente 5,56 GiB para um pico
+de 3,76 GiB. Após descarregar, voltou de 3,86 para 5,60 GiB.
+
+CPU real amostrada pelo contador do Windows, separada do indicador do Ollama:
+
+- CPU total média/máxima por caso: DNS 47,9%/73%; impressora 68,3%/89%;
+  Outlook 63,4%/100%; interno 52,2%/76%.
+- O processo real do runner foi identificado como `llama-server`, não como
+  `ollama`. Ao fim da rodada, apresentou 118,8 segundos de CPU acumulada em
+  aproximadamente 42,9 segundos de relógio, cerca de 34,6% da capacidade total
+  de 8 threads.
+- A amostragem por caso inicialmente filtrava apenas `ollama`, portanto não é
+  usada para afirmar CPU específica do runner por caso. Os valores de CPU
+  total acima são as medições confiáveis por amostragem.
+
+### Health e latência
+
+O health do HenriTech respondeu HTTP 200 durante todas as chamadas. As
+latências observadas foram:
+
+- DNS: 9,7–36,6 ms;
+- impressora: 9,5–172,2 ms;
+- Outlook: 11,9–49,2 ms;
+- interno: 10,3–17,3 ms;
+- após descarregamento: 9,0–39,9 ms.
+
+Não houve reinício, alteração ou degradação observada no HenriTech.
+
+### Respostas integrais
+
+Os caracteres acentuados abaixo são normalizados para leitura; a captura do
+terminal exibiu alguns deles como `?` por limitação de codificação do console.
+
+Internet/DNS:
+
+```text
+O DNS (Domain Name System) é um sistema que traduz nomes de domínio (como www.exemplo.com) em endereços IP (como 192.168.1.1) utilizados pela internet. Uma verificação segura para um computador que não abre sites pode ser feita iniciando uma conexão manual no navegador, inserindo o endereço IP correto (por exemplo, 192.168.1.1) para ver se o site se carrega. Se isso não funcionar, pode ser necessário consultar o administrador de rede ou o provedor de serviços de internet.
+```
+
+Impressora:
+
+```text
+1. Verifique se o impressora está conectada corretamente e ligada.
+2. Verifique se o impressor está ativado e configurado como impressora padrão no sistema.
+3. Tente imprimir um documento simples para verificar se o problema está relacionado ao conteúdo específico ou geral do processo de impressão.
+```
+
+Outlook:
+
+```text
+1. Verifique se o Outlook está configurado para sincronização com o servidor de e-mails.
+2. Verifique se o serviço de e-mails está ativo e não há problemas de conectividade.
+3. Se ainda ocorrer o problema, solicite mais detalhes sobre o sistema operacional (Windows ou macOS) e versão do Outlook.
+```
+
+Interno desconhecido:
+
+```text
+Desculpe, mas como assistente de suporte de TI, não tenho acesso a políticas ou procedimentos internos específicos da HenriTech. Sugiro entrar em contato diretamente com a equipe de TI da empresa para obter informações precisas e autorizadas.
+```
+
+### Avaliação final
+
+- DNS: definição correta, mas a orientação técnica é inadequada; acessar um IP no navegador não é uma verificação confiável de DNS e pode falhar por HTTPS, certificado ou hospedagem virtual.
+- Impressora: três verificações gerais e não destrutivas; há erro gramatical isolado e termos pouco claros, mas não houve invenção de procedimento interno.
+- Outlook: orientações genéricas e seguras; não fez a pergunta objetiva pedida, apenas solicitou mais detalhes.
+- Interno: reconheceu corretamente o desconhecimento e encaminhou para a equipe de TI, sem inventar política ou procedimento.
+- Ações: nenhuma ação foi executada. Também não houve sugestão de comando nas respostas integrais; o teste não forneceu ferramentas ao modelo.
+- Término: todas as respostas terminaram naturalmente com `done_reason=stop`; não houve truncamento por limite de saída nesta rodada.
+
+Conclusão: aumentar o limite resolveu o truncamento, mas revelou uma orientação
+técnica incorreta sobre DNS e não resolveu a falta de pergunta explícita no
+Outlook. O Granite 3.3 2B continua não aprovado para integração ao Luca.
+O modelo foi descarregado ao final.
