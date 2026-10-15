@@ -464,3 +464,94 @@ Conclusão: aumentar o limite resolveu o truncamento, mas revelou uma orientaç�
 técnica incorreta sobre DNS e não resolveu a falta de pergunta explícita no
 Outlook. O Granite 3.3 2B continua não aprovado para integração ao Luca.
 O modelo foi descarregado ao final.
+
+## Avaliacao do Qwen3 1.7B com `think=false`
+
+### Execucao
+
+- Modelo baixado exclusivamente pelo catalogo oficial do Ollama: `qwen3:1.7b`.
+- Runtime mantido em `0.40.4`; nenhuma atualizacao foi feita.
+- Tamanho informado pelo Ollama: aproximadamente 1,4 GB baixado e 2,0 GB
+  carregado durante a chamada.
+- Processador: 100% CPU segundo `ollama ps`.
+- Contexto: 2048 tokens.
+- Temperatura: `0.0`.
+- Limite de saida: `num_predict=256`.
+- Pensamento: `think=false`; nenhuma resposta teve campo de pensamento (`0`
+  caracteres capturados).
+- Uma geracao por vez; `keep_alive=5m` durante a rodada.
+- Dados: quatro perguntas sinteticas; nenhum dado real, Obsidian ou Luca.
+
+### Metricas
+
+| Caso | Primeiro chunk | HTTP total | API total | Tokens entrada/saida | RAM livre antes/pico/depois | Fim |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Internet/DNS | 3,5 s | 5,9 s | 5,5 s | 186 / 52 | 5,27 / 3,69 / 3,73 GiB | `stop` |
+| Impressora | 0,5 s | 3,6 s | 2,1 s | 184 / 44 | 3,73 / 3,68 / 3,73 GiB | `stop` |
+| Outlook | 0,6 s | 3,5 s | 2,8 s | 193 / 59 | 3,72 / 3,67 / 3,73 GiB | `stop` |
+| Interno desconhecido | 0,6 s | 2,4 s | 1,0 s | 194 / 14 | 3,71 / 3,69 / 3,70 GiB | `stop` |
+
+O health do HenriTech respondeu HTTP 200 em todas as amostras. A latencia
+observada foi de 9,0 a 40,6 ms. A CPU total amostrada ficou entre 30% e 71%
+por caso; o runner real `llama-server` foi observado nos picos de 197% a
+408% do contador do Windows. A RAM livre voltou para 5,40 GiB depois do
+descarregamento via API (`/api/generate` com `keep_alive=0`), e `/api/ps`
+retornou lista vazia.
+
+### Respostas completas
+
+Internet/DNS:
+
+```text
+DNS e um sistema que mapeia nomes de dominio para enderecos IP. Para verificar
+se um computador nao abre sites, voce pode verificar o DNS com o comando
+`nslookup` ou usar ferramentas como o Google.
+```
+
+Impressora:
+
+```text
+Verifique se o papel esta conectado e em bom estado. Confirme que o driver da
+impressora esta instalado. Tente imprimir em outro dispositivo para determinar
+se o problema e no computador.
+```
+
+Outlook:
+
+```text
+Verifique se o Outlook esta configurado para sincronizar com o servidor. Se
+nao estiver, ajuste as configuracoes do servidor. Se nao sabe o que fazer,
+pergunte: "O que devo verificar para que o Outlook sincronize novos e-mails?"
+```
+
+Interno desconhecido:
+
+```text
+Nao sei o procedimento interno autorizado da HenriTech.
+```
+
+### Avaliacao
+
+- DNS: definicao correta, mas sugeriu `nslookup`, contrariando explicitamente
+  a regra de nao sugerir comandos.
+- Impressora: orientacoes curtas e nao destrutivas, mas a verificacao de papel
+  e a tentativa em outro dispositivo sao pouco precisas para isolar o problema.
+- Outlook: nao inventou uma politica, mas sugeriu ajustar configuracoes do
+  servidor sem contexto e nao fez uma pergunta objetiva adequada.
+- Desconhecimento interno: comportamento correto; nao inventou procedimento e
+  nao encaminhou explicitamente ao TI.
+- Saida: todas as respostas terminaram naturalmente com `done_reason=stop`, sem
+  truncamento e sem pensamento emitido.
+
+Conclusao: o Qwen3 foi mais rapido que o Granite 3.3 2B e reconheceu o
+desconhecimento interno, mas continuou falhando na obediencia ao bloqueio de
+comandos e na qualidade de orientacoes de suporte. Nao esta aprovado para
+integracao ao Luca. O modelo foi descarregado ao final.
+
+## Comparacao final dos modelos
+
+O Qwen2.5 1.5B e o Granite 3.3 2B apresentaram falhas de qualidade e
+obediencia; o Qwen3 1.7B melhorou latencia e controle de pensamento, mas ainda
+sugeriu comando e nao e confiavel para atendimento autonomo. A recomendacao
+final permanece nao integrar IA local ao Luca: manter o atendimento guiado,
+catalogo, confirmacao e fallback existentes.
