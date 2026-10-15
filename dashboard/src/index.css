@@ -667,6 +667,22 @@ p {
 .portal-request-toggle { background: transparent; border: 0; color: #7dd3fc; cursor: pointer; font: inherit; margin-top: 14px; padding: 4px 0; text-decoration: underline; }
 .portal-request-toggle:hover { color: #bae6fd; }
 .portal-form button:disabled { cursor: wait; opacity: .65; }
+.certificate-chat { background: linear-gradient(135deg, rgba(14, 116, 144, .2), rgba(30, 41, 59, .55)); border: 1px solid #155e75; border-radius: 10px; margin-top: 22px; padding: 18px; }
+.certificate-chat-heading { align-items: center; display: flex; gap: 18px; justify-content: space-between; }
+.certificate-chat-heading h2 { margin: 0 0 5px; }
+.certificate-chat-heading p { margin-bottom: 0; }
+.certificate-chat-panel { border-top: 1px solid rgba(125, 211, 252, .2); margin-top: 16px; padding-top: 16px; }
+.certificate-chat-form, .certificate-chat-confirm, .certificate-chat-results { display: grid; gap: 10px; }
+.certificate-chat-input-row { display: flex; gap: 8px; }
+.certificate-chat-input-row input, .certificate-chat-confirm textarea { background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #e2e8f0; flex: 1; font: inherit; min-width: 0; padding: 10px; }
+.certificate-chat-card { background: rgba(15, 23, 42, .72); border: 1px solid #475569; border-radius: 8px; display: grid; gap: 5px; padding: 14px; }
+.certificate-chat-card small { color: #cbd5e1; }
+.certificate-chat-result { background: #0f172a; border: 1px solid #475569; border-radius: 8px; color: #e2e8f0; cursor: pointer; display: grid; gap: 4px; padding: 12px; text-align: left; }
+.certificate-chat-result:hover { border-color: #38bdf8; }
+.certificate-chat-result span { color: #cbd5e1; }
+.certificate-chat-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.certificate-chat-close { background: transparent; border: 0; color: #94a3b8; cursor: pointer; justify-self: start; margin-top: 12px; padding: 4px 0; text-decoration: underline; }
+.certificate-chat-close:disabled { cursor: wait; }
 .certificate-sync-panel { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin: 16px 0; }
 .certificate-sync-panel h2 { margin: 0 0 6px; }
 @media (max-width: 760px) {
@@ -675,6 +691,7 @@ p {
   .portal-search-area { width: 100%; }
 }
 @media (max-width: 600px) { .certificate-request-row { align-items: stretch; flex-direction: column; } .certificate-request-actions { justify-content: flex-start; } }
+@media (max-width: 600px) { .certificate-chat-heading, .certificate-chat-input-row { align-items: stretch; flex-direction: column; } }
 .portal-search { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 120px auto; margin-top: 24px; }
 .portal-search label { grid-column: 1 / -1; }
 .portal-search input, .portal-search select { background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #e2e8f0; font: inherit; min-width: 0; padding: 10px; }

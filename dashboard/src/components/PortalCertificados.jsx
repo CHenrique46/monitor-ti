@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { API_URL } from '../config'
 import { formatCertificateValidity } from '../formatCertificateValidity'
 import BrowserNotificationControls from './BrowserNotificationControls'
+import CertificateChat from './CertificateChat'
 
 const PAGE_SIZE = 10
 const INITIAL_REQUESTS_VISIBLE = 5
@@ -87,6 +88,12 @@ export default function PortalCertificados() {
     } catch (loadError) { setRequestsError(loadError.message) } finally { setRequestsLoading(false) }
   }
 
+  async function refreshRequestsAfterChat() {
+    setRequestsPage(1)
+    setShowOlderRequests(false)
+    await loadRequests(1)
+  }
+
   useEffect(() => {
     let active = true
     async function load() {
@@ -145,9 +152,10 @@ export default function PortalCertificados() {
       {session && <p className="muted">Estação: <strong>{session.hostname}</strong>{session.usuarioWindows ? ` · ${session.usuarioWindows}` : ''}<br />{session.identificacao}</p>}
       {session && <BrowserNotificationControls basePath="/api/portal/browser-notifications" label="Notificações desta estação" />}
       {error && <p className="notice error">{error}</p>}
-      {message && <p className="notice success">{message}</p>}
-      {!error && <>
-         <div className="portal-workspace">
+       {message && <p className="notice success">{message}</p>}
+       {!error && <>
+          <CertificateChat onRequestConfirmed={refreshRequestsAfterChat} />
+          <div className="portal-workspace">
            <section className="portal-search-area" aria-labelledby="portal-search-title">
              <p className="eyebrow">Catálogo</p>
              <h2 id="portal-search-title">Pesquisar certificados</h2>
