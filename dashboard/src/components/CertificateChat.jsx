@@ -22,36 +22,6 @@ function normalizeMessage(value) {
   return String(value || '').trim().replace(/\s+/g, ' ')
 }
 
-function isGreeting(value) {
-  const normalized = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[!?.,;:]+/g, ' ').replace(/\s+/g, ' ').trim()
-  return /^(?:oi|ola|bom dia|boa tarde|boa noite)(?: luca)?(?: tudo bem)?$/.test(normalized)
-}
-
-function isComputerProblem(value) {
-  return /\b(?:computador|pc|notebook|windows|impressora|outlook|internet|dns|senha|erro técnico|problema técnico)\b/i.test(value)
-}
-
-function hasIdentifiableCatalogQuery(value) {
-  const normalized = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-  if (!normalized) return false
-  if (/\d{6,}/.test(normalized.replace(/\D/g, ''))) return true
-  const generic = new Set(['certificado', 'certificados', 'empresa', 'documento', 'cnpj', 'cpf', 'de', 'da', 'do', 'para', 'por', 'favor', 'quero', 'preciso'])
-  return normalized.split(' ').some((part) => !generic.has(part) && /[a-z]{3,}/.test(part))
-}
-
-function extractCatalogQuery(value) {
-  return normalizeMessage(value)
-    .replace(/^(?:oi|olá|ola|bom dia|boa tarde|boa noite)\b[,!\.\s]*/i, '')
-    .replace(/\b(?:por favor|poderia|pode|quero|preciso|necessito|me consiga|me arrume)\b/gi, ' ')
-    .replace(/\b(?:corrigir|corrijo|na verdade|trocar|troquei|é|e)\b/gi, ' ')
-    .replace(/\b(?:do|da|de|dos|das|um|uma|o|a|os|as)\b/gi, ' ')
-    .replace(/\bcertificados?\b/gi, ' ')
-    .replace(/\b(?:para mim|pra mim)\b/gi, ' ')
-    .replace(/[?!,.;:]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 function Avatar({ small = false }) {
   const [failed, setFailed] = useState(false)
   return failed
@@ -148,16 +118,8 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
     }
   }
 
-  function fallbackConversation(value, currentPhase) {
-    if (isGreeting(value)) return { reply: 'Olá! Eu sou o Luca, assistente do Escritório Vavá. Qual empresa ou certificado você procura?', intent: 'greeting' }
-    if (/\b(?:obrigad[oa]|valeu|agradeço|agradeco)\b/i.test(value)) return { reply: 'Por nada! Se precisar de um certificado, é só me dizer a empresa.', intent: 'thanks' }
-    if (isComputerProblem(value)) return { reply: 'Posso ajudar com solicitações de certificados. Para problemas no computador, procure o Henrique do TI.', intent: 'pc_support' }
-    if (currentPhase === 'confirming') return { reply: 'Posso continuar com o certificado exibido ou você pode usar “Corrigir”. A mudança de assunto não altera a solicitação.', intent: 'change_subject' }
-    return { reply: 'Entendi. Qual empresa ou certificado você procura?', intent: 'clarify', query: extractCatalogQuery(value) }
-  }
-
   async function converse(value) {
-    if (!assistantProvider.converse) return fallbackConversation(value, phase)
+    if (!assistantProvider.converse) return { reply: 'A conversa inteligente está disponível somente na prévia. Você pode usar a pesquisa tradicional.', intent: 'conversation', query: '', source: 'guided' }
     conversationController.current?.abort()
     const controller = new AbortController()
     conversationController.current = controller
@@ -165,7 +127,7 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
       return await assistantProvider.converse({ sessionId: sessionIdRef.current, message: value, phase }, controller.signal)
     } catch (error) {
       if (error.name === 'AbortError') throw error
-      return fallbackConversation(value, phase)
+      return { reply: 'Não consegui responder agora. Você pode continuar pela pesquisa tradicional ou informar a empresa e o documento.', intent: 'conversation', query: '', source: 'fallback' }
     } finally {
       if (conversationController.current === controller) conversationController.current = null
     }
@@ -254,7 +216,7 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
       const guidance = await converse(value)
       if (guidance.reply) addMessage('luca', guidance.reply)
       const query = normalizeMessage(guidance.query)
-      if (guidance.intent === 'certificate_search' && query && hasIdentifiableCatalogQuery(query) && phase !== 'confirming') await searchCatalog(query)
+      if (guidance.intent === 'certificate_search' && query && phase !== 'confirming') await searchCatalog(query)
       else setPhase(phase === 'confirming' ? 'confirming' : 'waiting')
     } catch (error) {
       if (error.name !== 'AbortError') {

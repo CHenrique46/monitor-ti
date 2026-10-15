@@ -39,8 +39,21 @@ o Ollama diretamente pelo navegador.
 
 O mock usa `granite3.3:2b`, com historico curto isolado por `sessionId`, uma
 geracao por vez, fila limitada e timeout. Falha ou indisponibilidade retorna
-as mensagens guiadas existentes. O modelo nao recebe catalogo, validade,
+uma mensagem de indisponibilidade e deixa a pesquisa tradicional disponivel,
+sem interpretar a mensagem como busca. O modelo recebe o historico recente e o
+estado da fase atual, mas nao recebe catalogo, validade,
 estado de pedido, credenciais ou dados reais.
+
+O Granite conduz saudacoes, apresentacao, perguntas simples, esclarecimentos e
+pedidos de certificado. O frontend intercepta somente controles operacionais
+explicitos: confirmacao, correcao/cancelamento e envio pelos botoes existentes.
+Nao ha extrator de texto generico para transformar mensagens desconhecidas em
+consultas.
+
+O parser aceita JSON estruturado e tambem texto simples ou JSON parcial, sempre
+descartando query quando nao ha uma intencao de busca valida. Para reduzir
+alucinacao operacional, uma query so e aceita quando seus termos identificaveis
+aparecem na mensagem atual do usuario.
 
 ## Testes planejados
 
@@ -77,6 +90,15 @@ permissao no preflight CORS da previa; sem isso a consulta de um certificado
 falhava no navegador. A previa agora normaliza saudacoes, exige uma intencao de
 busca e empresa/documento identificavel, retorna vazio para consulta
 desconhecida e comprova a chamada do Granite por `graniteCalls`.
+
+### Revisao de capacidade
+
+As frases ineditas testadas mostraram que o Granite conduz bem conversas
+curtas, pedidos incompletos e pedidos impossiveis sem criar solicitacoes. Ele
+continua inconsistente ao responder perguntas sobre procedimentos internos:
+mesmo com instrucao geral para admitir desconhecimento, pode inventar uma
+orientacao. Essa limitacao fica registrada e nao foi escondida com novas regras
+ou respostas fixas; o modelo continua restrito a esta previa isolada.
 
 ## Previa local sintetica
 

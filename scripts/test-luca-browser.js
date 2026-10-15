@@ -74,7 +74,7 @@ async function main() {
     await evaluate(browser, `(() => {
       const input = document.querySelector('.luca-composer textarea');
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(input, 'Preciso do certificado da Empresa Sintetica Alfa');
+      setter.call(input, 'A empresa chama Sintetica Alfa e preciso do certificado');
       input.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector('.luca-composer').requestSubmit();
       return true;

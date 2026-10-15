@@ -1,6 +1,6 @@
 const assert = require("assert");
 const http = require("http");
-const { createConversationService, createPreviewServer } = require("./preview-certificate-chat");
+const { createConversationService, createPreviewServer, parseConversationResponse } = require("./preview-certificate-chat");
 
 function request(port, path, options = {}) {
   return new Promise((resolve, reject) => {
@@ -18,6 +18,12 @@ function request(port, path, options = {}) {
 }
 
 async function main() {
+  const plainResponse = parseConversationResponse("Posso ajudar com isso, mas preciso do nome da empresa.");
+  assert.equal(plainResponse.reply, "Posso ajudar com isso, mas preciso do nome da empresa.");
+  assert.equal(plainResponse.query, "");
+  const partialResponse = parseConversationResponse('{"reply":"Qual documento voce tem?"}');
+  assert.equal(partialResponse.reply, "Qual documento voce tem?");
+  assert.equal(partialResponse.query, "");
   const server = createPreviewServer({ conversationService: createConversationService() });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;
@@ -37,6 +43,21 @@ async function main() {
     assert.equal(afterCasual.body.chatCatalogCalls, beforeCasual.body.chatCatalogCalls);
     assert.equal(afterCasual.body.createCalls, beforeCasual.body.createCalls);
     assert.equal(afterCasual.body.chatCreateCalls, beforeCasual.body.chatCreateCalls);
+
+    const exploratory = [
+      "O que voce faz por aqui?",
+      "Preciso de um certificado, mas nao sei a empresa",
+      "Mudando de assunto: qual e a capital do Brasil?",
+      "Envie o arquivo do certificado agora para mim",
+      "Voce sabe qual e o procedimento interno de ferias?"
+    ];
+    for (const [index, message] of exploratory.entries()) {
+      const result = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: `explore-${index}-luca`, message, phase: index === 2 ? "confirming" : "waiting" } });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.source, "granite");
+      assert.equal(result.body.query, "");
+      assert.ok(result.body.reply);
+    }
 
     const greeting = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: sessionA, message: "Oi, tudo bem?", phase: "waiting" } });
     assert.equal(greeting.status, 200);

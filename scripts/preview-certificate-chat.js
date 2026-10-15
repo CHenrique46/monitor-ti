@@ -17,14 +17,14 @@ const certificates = [
 
 const SYSTEM_PROMPT = [
   "Voce e Luca, assistente do Escritório Vavá, em uma prévia sintética de pedidos de certificados.",
-  "Sua unica funcao e conversar brevemente e conduzir a pessoa ate a busca de um certificado.",
-  "Cumprimente, responda agradecimentos, apresente-se, pergunte empresa ou certificado e peca esclarecimento quando faltar informacao.",
+  "Converse naturalmente e conduza a pessoa, quando fizer sentido, ate a busca de um certificado.",
+  "Cumprimente, responda agradecimentos, apresente-se, responda perguntas simples e peca esclarecimento quando faltar informacao.",
   "Se mencionarem problema de computador, diga para procurar Henrique do TI. Nao diagnostique, nao sugira comandos e nao explique suporte tecnico.",
+  "Para procedimentos, politicas ou informacoes exclusivas do Escritorio Vava, admita que nao sabe e encaminhe ao responsavel; nunca complete com exemplos inventados.",
   "Nunca invente catalogo, validade, situacao, politica ou procedimento. Nunca escolha, confirme, aprove, libere ou altere uma solicitacao.",
   "A escolha e a confirmacao sao feitas por cartoes e botoes fora da IA. Se houver uma selecao aguardando confirmacao, uma mudanca de assunto nao confirma nem cancela essa selecao.",
   "Responda em portugues brasileiro, em no maximo 3 frases curtas, sem markdown.",
-  "Retorne SOMENTE JSON valido neste formato: {\"intent\":\"greeting|thanks|certificate_search|clarify|pc_support|change_subject|other\",\"reply\":\"...\",\"query\":\"...\"}.",
-  "Use intent certificate_search somente quando a pessoa indicar empresa ou certificado. Em query coloque apenas o texto para pesquisar; caso contrario use query vazia."
+  "Retorne SOMENTE JSON com reply, intent e query. Use intent certificate_search quando houver empresa ou documento identificavel na mensagem atual, mesmo sem tipo, data ou outra especificacao; copie o nome ou documento para query. Se faltar a empresa e o documento, use clarification e query vazia."
 ].join(" ");
 
 function send(res, status, body) {
@@ -58,43 +58,39 @@ function parseConversationResponse(value) {
   try { parsed = JSON.parse(raw); } catch {
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
-    if (start < 0 || end <= start) throw new Error("invalid_model_json");
-    parsed = JSON.parse(raw.slice(start, end + 1));
+    if (start >= 0 && end > start) {
+      try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { parsed = null; }
+    }
+    if (!parsed) {
+      const replyMatch = raw.match(/"reply"\s*:\s*"((?:\\.|[^"\\])*)/i);
+      if (!replyMatch) return { intent: "conversation", reply: raw, query: "" };
+      let reply = replyMatch[1];
+      try { reply = JSON.parse(`"${reply}"`); } catch { reply = reply.replace(/\\"/g, '"').replace(/\\n/g, " "); }
+      return { intent: "conversation", reply, query: "" };
+    }
   }
-  const intents = new Set(["greeting", "thanks", "certificate_search", "clarify", "pc_support", "change_subject", "other"]);
-  const fallbackReplies = {
-    greeting: "Olá! Eu sou o Luca, assistente do Escritório Vavá. Qual empresa ou certificado você procura?",
-    thanks: "Por nada! Se precisar de um certificado, e so me dizer a empresa.",
-    certificate_search: "Vou procurar esse certificado para voce.",
-    clarify: "Qual empresa ou certificado voce procura?",
-    pc_support: "Para problemas no computador, procure o Henrique do TI.",
-    change_subject: "A mudanca de assunto nao confirma nem cancela a solicitacao.",
-    other: "Posso ajudar com solicitacoes de certificados."
-  };
-  const intent = typeof parsed.intent === "string" ? parsed.intent.split("|")[0].trim() : "";
-  if (!intents.has(intent)) throw new Error("invalid_model_response");
+  const intentAliases = { greeting: "conversation", thanks: "conversation", clarify: "clarification", change_subject: "conversation", other: "conversation" };
+  const rawIntent = typeof parsed.intent === "string" ? parsed.intent.split("|")[0].trim() : "conversation";
+  const intent = intentAliases[rawIntent] || (rawIntent === "certificate_search" ? rawIntent : ["conversation", "clarification"].includes(rawIntent) ? rawIntent : "conversation");
+  const reply = typeof parsed.reply === "string" ? parsed.reply.trim() : typeof parsed.message === "string" ? parsed.message.trim() : "";
   return {
     intent,
-    reply: typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : fallbackReplies[intent],
+    reply,
     query: intent === "certificate_search" && typeof parsed.query === "string" ? parsed.query.trim().slice(0, 160) : ""
   };
 }
 
-function isComputerConcern(value) {
-  return /\b(?:computador|pc|notebook|windows|impressora|outlook|internet|dns|senha|erro tecnico|problema tecnico)\b/i.test(value);
+function normalizeSearchText(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function isCasualConversation(value) {
-  const normalized = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[!?.,;:]+/g, " ").replace(/\s+/g, " ").trim();
-  return /^(?:oi|ola|bom dia|boa tarde|boa noite)(?: luca)?(?: tudo bem)?$/.test(normalized) || /^(?:obrigado|obrigada|valeu|agradeco)$/.test(normalized) || /^(?:quem e voce|como voce se chama)$/.test(normalized);
-}
-
-function hasIdentifiableCatalogQuery(value) {
-  const normalized = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function hasIdentifiableCatalogQuery(value, sourceMessage) {
+  const normalized = normalizeSearchText(value);
+  const source = normalizeSearchText(sourceMessage);
   if (!normalized) return false;
-  if (/\d{6,}/.test(normalized.replace(/\D/g, ""))) return true;
+  if (/\d{6,}/.test(normalized.replace(/\D/g, ""))) return source.replace(/\D/g, "").includes(normalized.replace(/\D/g, ""));
   const meaningful = normalized.split(" ").filter((part) => !["certificado", "certificados", "empresa", "documento", "cnpj", "cpf", "de", "da", "do", "para", "por", "favor", "quero", "preciso"].includes(part));
-  return meaningful.some((part) => /[a-z]{3,}/.test(part));
+  return meaningful.some((part) => /[a-z]{3,}/.test(part) && source.split(" ").includes(part));
 }
 
 function createGenerationQueue(maxQueue = MAX_QUEUE) {
@@ -129,7 +125,15 @@ function createConversationService({ fetchImpl = fetch, ollamaUrl = OLLAMA_URL, 
         body: JSON.stringify({
           model,
           stream: false,
-          format: "json",
+          format: {
+            type: "object",
+            properties: {
+              reply: { type: "string" },
+              intent: { type: "string", enum: ["conversation", "certificate_search", "clarification"] },
+              query: { type: "string" }
+            },
+            required: ["reply", "intent", "query"]
+          },
           messages: [{ role: "system", content: `${SYSTEM_PROMPT} Estado controlado atual: ${phase}.` }, ...history],
           options: { num_ctx: 2048, temperature: 0, num_predict: 128 },
           keep_alive: "5m"
@@ -147,17 +151,9 @@ function createConversationService({ fetchImpl = fetch, ollamaUrl = OLLAMA_URL, 
       previewStats.conversationCalls += 1;
       const previous = conversations.get(sessionId) || [];
       const history = previous.slice(-MAX_HISTORY);
-      if (isComputerConcern(message)) {
-        const result = { intent: "pc_support", reply: "Para problemas no computador, procure o Henrique do TI.", query: "" };
-        conversations.set(sessionId, [...history, { role: "user", content: message }, { role: "assistant", content: result.reply }].slice(-MAX_HISTORY));
-        return Promise.resolve(result);
-      }
       return queue.run(async () => {
-        let result = await generate([...history, { role: "user", content: message }], phase);
-        if (isCasualConversation(message)) {
-          result = { ...result, intent: "greeting", query: "" };
-        }
-        if (result.intent !== "certificate_search" || !hasIdentifiableCatalogQuery(result.query)) result.query = "";
+        const result = await generate([...history, { role: "user", content: message }], phase);
+        if (result.intent !== "certificate_search" || !hasIdentifiableCatalogQuery(result.query, message)) result.query = "";
         const next = [...history, { role: "user", content: message }, { role: "assistant", content: result.reply }].slice(-MAX_HISTORY);
         conversations.set(sessionId, next);
         return result;
