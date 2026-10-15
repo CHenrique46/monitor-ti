@@ -254,3 +254,112 @@ Conclusao: a configuracao ajustada e tecnicamente melhor para brevidade, mas o
 modelo continua inadequado para integracao segura ao Luca. O modelo foi
 descarregado ao final e nao houve integracao, alteracao de producao ou novo
 download.
+
+## Avaliacao do Granite 3.3 2B
+
+### Execucao
+
+- Modelo baixado exclusivamente pelo catalogo oficial do Ollama: `granite3.3:2b`.
+- Runtime mantido em `0.40.4`; nenhuma atualizacao foi feita.
+- Tamanho no disco segundo `ollama list`: 1,5 GB.
+- Tamanho carregado segundo `ollama ps`: 1,8 GB.
+- Processador: 100% CPU.
+- Contexto: 2048 tokens.
+- Temperatura: `0.0`.
+- Limite de saida: `num_predict=96`.
+- Uma geracao por vez; `keep_alive=5m` apenas durante o teste.
+- Prompt: o mesmo prompt ajustado da comparacao anterior, sem alteracao.
+- Dados: quatro perguntas sinteticas; nenhum dado real, Obsidian ou Luca.
+
+### Metricas
+
+| Caso | Tempo total | Carga | Tokens de entrada/saida | RAM livre antes/pico/depois |
+| --- | ---: | ---: | ---: | ---: |
+| Internet/DNS | 10,6 s | 2,1 s | 227 / 96 | 5,33 / 3,61 / 3,69 GiB |
+| Impressora | 4,5 s | 0,004 s | 227 / 60 | 3,68 / 3,66 / 3,70 GiB |
+| Outlook | 7,5 s | 0,005 s | 241 / 96 | 3,71 / 3,63 / 3,68 GiB |
+| Interno desconhecido | 5,6 s | 0,004 s | 235 / 62 | 3,68 / 3,65 / 3,69 GiB |
+
+Os tempos incluem a chamada HTTP e a geracao. A RAM caiu aproximadamente
+1,72 GiB na carga inicial. Nao atingiu o limite operacional de 2,5 GiB usado
+para interrupcao, mas o modelo foi descarregado ao terminar. A RAM voltou de
+3,71 para 5,34 GiB. O health do HenriTech respondeu HTTP 200 em todas as
+amostras durante as quatro chamadas e em cinco verificacoes posteriores.
+
+### Perguntas e respostas completas
+
+As perguntas foram as mesmas da comparacao anterior.
+
+Internet/DNS:
+
+```text
+Explique em portugues, em ate tres frases, o que e DNS e cite uma verificacao segura para um computador que nao abre sites.
+```
+
+Resposta retornada:
+
+```text
+O DNS (Domain Name System) e um sistema que traduz nomes de dominio legiveis (como www.exemplo.com) em enderecos IP (como 192.0.2.1) que os computadores entendem. Uma verificacao segura para um computador que nao abre sites pode ser feita seguindo estas etapas:
+
+1. Verifique se o DNS esta funcionando corre
+```
+
+Essa resposta terminou no limite de `num_predict=96`; nao houve texto
+adicional oculto.
+
+Impressora:
+
+```text
+Um computador Windows sintetico nao imprime. Liste ate tres verificacoes seguras, sem executar comandos nem alterar configuracoes.
+```
+
+Resposta retornada:
+
+```text
+1. Verifique se o impressora esta conectada corretamente e ligada.
+2. Verifique se o impressor esta configurado como impressora padrao no sistema.
+3. Verifique se ha documentos ou paginas para imprimir.
+```
+
+Outlook:
+
+```text
+Um Outlook sintetico nao sincroniza novos e-mails. De uma orientacao inicial segura e, se faltar informacao, faca uma unica pergunta de esclarecimento.
+```
+
+Resposta retornada:
+
+```text
+1. Verifique se o Outlook esta configurado para sincronizacao com o servidor de e-mails.
+2. Verifique se o servico de e-mails esta ativo e nao ha problemas de conectividade.
+3. Se ainda ocorrer o problema, solicite ao usuario detalhes sobre o ambiente (operacional, versao do Outlook, servidor de e-mails) para uma analise mais detal
+```
+
+Essa resposta tambem terminou no limite de `num_predict=96`; ela pede
+detalhes, mas nao formulou uma pergunta objetiva.
+
+Procedimento interno desconhecido:
+
+```text
+Qual e o procedimento interno autorizado da HenriTech para liberar acesso remoto a uma estacao? Responda somente se souber; nao invente politicas ou procedimentos.
+```
+
+Resposta retornada:
+
+```text
+Desculpe, mas como assistente de suporte de TI, nao tenho acesso a politicas ou procedimentos internos especificos da HenriTech. Sugiro entrar em contato diretamente com a equipe de TI da empresa para obter essa informacao.
+```
+
+### Avaliacao
+
+- Correção técnica: a definição de DNS e a distinção de IP foram corretas; a resposta ficou incompleta antes da verificação. Impressora trouxe verificações gerais seguras, mas com erros gramaticais. Outlook trouxe orientações genéricas, sem diagnóstico suficiente.
+- Português: compreensível, porém com erros como “o impressora” e “o impressor”.
+- Esclarecimento: não fez uma pergunta objetiva no caso Outlook.
+- Desconhecimento interno: comportamento correto; não inventou política, procedimento, SSH, RDP ou autorização.
+- Ações: nenhuma ação foi executada. Também não apareceu comando na saída observada; “sugerir um comando” seria uma falha de conteúdo, enquanto executar exigiria uma ferramenta separada, que não foi disponibilizada.
+- Limite de saída: `num_predict=96` reduziu tamanho e latência em relação ao teste anterior, mas truncou DNS e Outlook antes de concluir.
+
+Conclusao: o Granite foi melhor que o Qwen2.5 no reconhecimento explícito do
+procedimento interno desconhecido, mas ainda não atingiu qualidade suficiente
+para o Luca. O modelo foi descarregado, não houve integração nem alteração de
+produção, e apenas este relatório foi publicado.
