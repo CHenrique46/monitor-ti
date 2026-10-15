@@ -1,6 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as guidedCertificateProvider from '../services/certificateChatApi'
 import { formatCertificateValidity } from '../formatCertificateValidity'
+
+const OPENING_MESSAGE = 'Oi! Eu sou o Luca! 😊 Posso ajudar você a encontrar e solicitar um certificado. Qual empresa você procura?'
 
 function chatDocument(certificate) {
   return certificate.documento || 'Documento não identificado'
@@ -10,130 +12,240 @@ function isPendingForCertificate(request, certificateId) {
   return request.certificado?.id === certificateId && request.estado === 'PENDENTE'
 }
 
+function newMessage(role, text, extra = {}) {
+  return { id: `${Date.now()}-${Math.random()}`, role, text, ...extra }
+}
+
+function normalizeMessage(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ')
+}
+
+function isGreeting(value) {
+  return /^(oi|olá|ola|bom dia|boa tarde|boa noite|olá luca|ola luca)[!,.\s]*$/i.test(value)
+}
+
+function extractCatalogQuery(value) {
+  return normalizeMessage(value)
+    .replace(/^(?:oi|olá|ola|bom dia|boa tarde|boa noite)\b[,!\.\s]*/i, '')
+    .replace(/\b(?:por favor|poderia|pode|quero|preciso|necessito|me consiga|me arrume)\b/gi, ' ')
+    .replace(/\b(?:corrigir|corrijo|na verdade|trocar|troquei|é|e)\b/gi, ' ')
+    .replace(/\b(?:do|da|de|dos|das|um|uma|o|a|os|as)\b/gi, ' ')
+    .replace(/\bcertificados?\b/gi, ' ')
+    .replace(/\b(?:para mim|pra mim)\b/gi, ' ')
+    .replace(/[?!,.;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function Avatar({ small = false }) {
+  const [failed, setFailed] = useState(false)
+  return failed
+    ? <span className={`luca-avatar luca-avatar-placeholder ${small ? 'luca-avatar-small' : ''}`} aria-hidden="true">L</span>
+    : <img className={`luca-avatar ${small ? 'luca-avatar-small' : ''}`} src="/lucaacenando.png" alt="" onError={() => setFailed(true)} />
+}
+
+function CertificateCard({ certificate, actionLabel, onAction, disabled }) {
+  const validity = formatCertificateValidity(certificate)
+  return <div className="luca-certificate-card">
+    <strong>{certificate.nomeEmpresa || certificate.nomeExibicao}</strong>
+    <span>{chatDocument(certificate)}</span>
+    <span>{validity.label}</span>
+    {validity.detail && <small>{validity.detail}</small>}
+    {actionLabel && <button type="button" className="luca-card-action" onClick={onAction} disabled={disabled}>{actionLabel}</button>}
+  </div>
+}
+
 export default function CertificateChat({ onRequestConfirmed, assistantProvider = guidedCertificateProvider }) {
   const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])
+  const [minimized, setMinimized] = useState(false)
+  const [input, setInput] = useState('')
+  const [messages, setMessages] = useState([])
   const [selected, setSelected] = useState(null)
-  const [reason, setReason] = useState('')
-  const [step, setStep] = useState('start')
+  const [phase, setPhase] = useState('waiting')
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
   const searchController = useRef(null)
+  const inputRef = useRef(null)
+  const historyRef = useRef(null)
 
-  function reset() {
+  function addMessage(role, text, extra) {
+    setMessages((current) => [...current, newMessage(role, text, extra)])
+  }
+
+  function resetConversation() {
     searchController.current?.abort()
-    setQuery('')
-    setResults([])
+    setInput('')
+    setMessages([newMessage('luca', OPENING_MESSAGE)])
     setSelected(null)
-    setReason('')
-    setStep('start')
+    setPhase('waiting')
     setBusy(false)
-    setMessage('')
-    setError('')
   }
 
-  function close() {
-    if (!busy) {
-      setOpen(false)
-      reset()
-    }
+  function openChat() {
+    resetConversation()
+    setOpen(true)
+    setMinimized(false)
   }
 
-  async function search(event) {
-    event.preventDefault()
-    const value = query.trim()
-    if (!value || busy) return
+  function closeChat() {
+    if (!busy) setOpen(false)
+  }
+
+  useEffect(() => {
+    if (open && !minimized) inputRef.current?.focus()
+  }, [open, minimized])
+
+  useEffect(() => {
+    const history = historyRef.current
+    if (history) history.scrollTop = history.scrollHeight
+  }, [messages, busy])
+
+  async function searchCatalog(query) {
     searchController.current?.abort()
     const controller = new AbortController()
     searchController.current = controller
     setBusy(true)
-    setError('')
-    setMessage('')
-    setSelected(null)
-    setStep('searching')
+    setPhase('searching')
     try {
-      const catalog = await assistantProvider.searchCertificateCatalog(value, controller.signal)
-      setResults(catalog.items)
-      if (catalog.items.length === 0) setStep('empty')
-      else if (catalog.items.length === 1) {
-        setSelected(catalog.items[0])
-        setStep('confirm')
-      } else setStep('choose')
-    } catch (searchError) {
-      if (searchError.name !== 'AbortError') {
-        setError(searchError.message)
-        setStep('start')
+      const catalog = await assistantProvider.searchCertificateCatalog(query, controller.signal)
+      if (catalog.items.length === 0) {
+        addMessage('luca', 'Não encontrei um certificado autorizado com esse nome ou documento. Você pode corrigir a empresa ou tentar outra busca.')
+        setPhase('waiting')
+      } else if (catalog.items.length === 1) {
+        const certificate = catalog.items[0]
+        setSelected(certificate)
+        addMessage('luca', 'Encontrei este certificado:', { certificate, action: 'confirm' })
+        setPhase('confirming')
+      } else {
+        addMessage('luca', 'Encontrei mais de um resultado. Qual deles você deseja solicitar?', { certificates: catalog.items })
+        setPhase('choosing')
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        addMessage('luca', `Não consegui consultar o catálogo agora. ${error.message || 'Tente novamente em instantes.'}`)
+        setPhase('waiting')
       }
     } finally {
       if (searchController.current === controller) setBusy(false)
     }
   }
 
-  function choose(certificate) {
-    if (busy) return
-    setSelected(certificate)
-    setError('')
-    setStep('confirm')
-  }
-
-  async function verifyAfterUncertainResult() {
+  async function verifyAfterUncertainResult(certificateId) {
     try {
       const requests = await assistantProvider.listCertificateRequests()
-      return { verified: true, pending: requests.items.some((request) => isPendingForCertificate(request, selected.id)) }
+      return { verified: true, pending: requests.items.some((request) => isPendingForCertificate(request, certificateId)) }
     } catch {
       return { verified: false, pending: false }
     }
   }
 
-  async function confirm() {
-    if (!selected || busy) return
+  async function confirmCertificate(certificate = selected) {
+    if (!certificate || busy) return
+    setSelected(certificate)
     setBusy(true)
-    setError('')
-    setStep('submitting')
+    setPhase('submitting')
+    addMessage('usuario', 'Sim, é esse certificado.')
+    addMessage('luca', 'Vou confirmar a solicitação com o TI...')
     try {
-      await assistantProvider.createCertificateRequest({ certificadoId: selected.id, motivo: reason })
-      setMessage('Solicitação enviada para o TI. O certificado ainda não foi liberado.')
-      setStep('sent')
+      await assistantProvider.createCertificateRequest({ certificadoId: certificate.id })
+      addMessage('luca', 'Solicitação enviada para o TI!')
+      setPhase('sent')
       onRequestConfirmed?.()
     } catch (requestError) {
-      const state = await verifyAfterUncertainResult()
+      const state = await verifyAfterUncertainResult(certificate.id)
       if (requestError.status === 409 && state.pending) {
-        setError('Já existe uma solicitação pendente deste certificado para esta estação. Não reenviamos o pedido.')
-        setStep('uncertain')
+        addMessage('luca', 'Já existe uma solicitação pendente deste certificado para esta estação. Não reenviamos o pedido.')
+        setPhase('uncertain')
       } else if (state.pending) {
-        setMessage('Solicitação enviada para o TI. O certificado ainda não foi liberado.')
-        setStep('sent')
+        addMessage('luca', 'Solicitação enviada para o TI!')
+        setPhase('sent')
         onRequestConfirmed?.()
       } else {
-        setError(requestError.message)
-        setStep('uncertain')
+        addMessage('luca', `${requestError.message || 'Não consegui confirmar a solicitação.'} O estado foi consultado e não farei um novo envio automático.`)
+        setPhase('uncertain')
       }
     } finally {
       setBusy(false)
     }
   }
 
-  const validity = selected ? formatCertificateValidity(selected) : null
+  function cancelSelection(addUserMessage = true) {
+    if (busy) return
+    if (addUserMessage) addMessage('usuario', 'Não, quero corrigir.')
+    addMessage('luca', 'Tudo bem. Qual empresa ou documento devo procurar?')
+    setSelected(null)
+    setPhase('waiting')
+  }
 
-  return <section className="certificate-chat">
-    <div className="certificate-chat-heading">
-      <div><p className="eyebrow">Atendimento guiado</p><h2>Peça ao chat</h2><p className="muted">Um passo a passo para localizar e solicitar um certificado. Não é uma IA generativa.</p></div>
-      {!open && <button type="button" className="btn-update" onClick={() => { reset(); setOpen(true) }}>Iniciar atendimento</button>}
-    </div>
-    {open && <div className="certificate-chat-panel" aria-live="polite">
-      {step === 'start' || step === 'searching' ? <form onSubmit={search} className="certificate-chat-form">
-        <label htmlFor="certificate-chat-query">Qual empresa ou documento você procura?</label>
-        <div className="certificate-chat-input-row"><input id="certificate-chat-query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome da empresa ou CNPJ/CPF" autoComplete="off" disabled={busy} /><button type="submit" className="btn-update" disabled={busy || !query.trim()}>{busy ? 'Consultando...' : 'Consultar catálogo'}</button></div>
-      </form> : null}
-      {error && step === 'start' && <p className="notice error">{error}</p>}
-      {step === 'empty' && <div><p className="notice">Nenhum certificado autorizado foi encontrado para essa busca.</p><button type="button" className="btn-cancel" onClick={reset}>Nova busca</button></div>}
-      {step === 'choose' && <div className="certificate-chat-results"><p>Encontrei mais de um resultado. Qual deles você deseja solicitar?</p>{results.map((certificate) => <button type="button" className="certificate-chat-result" key={certificate.id} onClick={() => choose(certificate)}><strong>{certificate.nomeEmpresa || certificate.nomeExibicao}</strong><span>{chatDocument(certificate)} · {formatCertificateValidity(certificate).label}</span></button>)}<button type="button" className="btn-cancel" onClick={reset}>Cancelar</button></div>}
-      {selected && ['confirm', 'submitting'].includes(step) && <div className="certificate-chat-confirm"><p>Confirme os dados do catálogo:</p><div className="certificate-chat-card"><strong>{selected.nomeEmpresa || selected.nomeExibicao}</strong><span>{chatDocument(selected)}</span><span>{validity.label}</span>{validity.detail && <small>{validity.detail}</small>}</div><p>Este é o certificado que você deseja solicitar?</p><label htmlFor="certificate-chat-reason">Motivo (opcional)</label><textarea id="certificate-chat-reason" value={reason} maxLength="500" onChange={(event) => setReason(event.target.value)} rows="2" disabled={busy} /><div className="certificate-chat-actions"><button type="button" className="btn-update" onClick={confirm} disabled={busy}>{busy ? 'Confirmando...' : 'Sim, solicitar'}</button><button type="button" className="btn-cancel" onClick={reset} disabled={busy}>Não, cancelar</button></div></div>}
-      {step === 'sent' && <div><p className="notice success">{message}</p><p className="muted">A solicitação entrou na fila do TI para análise. A aprovação e a liberação continuam no fluxo administrativo.</p><button type="button" className="btn-update" onClick={reset}>Nova solicitação</button></div>}
-      {step === 'uncertain' && <div><p className="notice error">{error || 'Não foi possível confirmar o estado da solicitação.'}</p><p className="muted">O sistema consultou o estado antes de permitir qualquer novo envio. Feche este atendimento e tente novamente somente quando o serviço estiver disponível.</p><button type="button" className="btn-cancel" onClick={reset}>Fechar</button></div>}
-      {open && step !== 'sent' && step !== 'uncertain' && <button type="button" className="certificate-chat-close" onClick={close} disabled={busy}>Fechar atendimento</button>}
-    </div>}
-  </section>
+  function chooseCertificate(certificate) {
+    if (busy) return
+    setSelected(certificate)
+    addMessage('usuario', `Vou verificar ${certificate.nomeEmpresa || certificate.nomeExibicao}.`)
+    addMessage('luca', 'Encontrei este certificado. É esse que você precisa?', { certificate, action: 'confirm' })
+    setPhase('confirming')
+  }
+
+  async function sendMessage(event) {
+    event?.preventDefault()
+    if (busy) return
+    const value = normalizeMessage(input)
+    if (!value) return
+    setInput('')
+    addMessage('usuario', value)
+    const lowered = value.toLowerCase()
+    if (/\b(?:cancelar|começar novamente|comecar novamente|recomeçar|recomecar)\b/.test(lowered)) {
+      addMessage('usuario', value)
+      addMessage('luca', 'Tudo bem. Vamos começar novamente. Qual empresa ou documento você procura?')
+      setSelected(null)
+      setPhase('waiting')
+      return
+    }
+    if (isGreeting(value)) {
+      addMessage('usuario', value)
+      addMessage('luca', 'Olá! Qual empresa ou documento você procura?')
+      setPhase('waiting')
+      return
+    }
+    if (phase === 'confirming' && selected && /^(sim|s|é esse|e esse|confirmo|pode solicitar)/i.test(value)) {
+      await confirmCertificate(selected)
+      return
+    }
+    if (phase === 'confirming' && /\b(?:não|nao|corrigir|outra empresa)\b/i.test(value)) {
+      addMessage('usuario', value)
+      cancelSelection(false)
+      return
+    }
+    addMessage('usuario', value)
+    const query = extractCatalogQuery(value)
+    if (!query) {
+      addMessage('luca', 'Qual empresa ou documento você procura?')
+      setPhase('waiting')
+      return
+    }
+    await searchCatalog(query)
+  }
+
+  function handleInputKeyDown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      sendMessage(event)
+    }
+  }
+
+  return <>
+    {!open && <button type="button" className="luca-launcher" onClick={openChat} aria-label="Abrir conversa com Luca"><Avatar small /><span>Peça para o Luca</span></button>}
+    {open && <section className={`luca-window ${minimized ? 'is-minimized' : ''}`} role="dialog" aria-label="Conversa com Luca" aria-modal="false">
+      <header className="luca-header">
+        <Avatar small />
+        <div><strong>Luca</strong><span>Certificados · atendimento guiado</span></div>
+        <div className="luca-header-actions"><button type="button" onClick={() => setMinimized((value) => !value)} aria-label={minimized ? 'Restaurar conversa' : 'Minimizar conversa'}>{minimized ? '□' : '−'}</button><button type="button" onClick={closeChat} aria-label="Fechar conversa">×</button></div>
+      </header>
+      {!minimized && <>
+        <div className="luca-history" ref={historyRef} aria-live="polite">
+          {messages.map((message) => <div className={`luca-message-row luca-message-${message.role}`} key={message.id}><div className="luca-message-bubble">{message.role === 'luca' && <Avatar small />}<div><p>{message.text}</p>{message.certificate && <CertificateCard certificate={message.certificate} actionLabel="Sim, é esse" onAction={() => confirmCertificate(message.certificate)} disabled={busy} />}{message.certificates && <div className="luca-result-list">{message.certificates.map((certificate) => <CertificateCard certificate={certificate} actionLabel="Escolher este" onAction={() => chooseCertificate(certificate)} disabled={busy} key={certificate.id} />)}</div>}{message.action === 'confirm' && <div className="luca-message-actions"><button type="button" onClick={cancelSelection} disabled={busy}>Corrigir</button></div>}</div></div></div>)}
+          {busy && <div className="luca-message-row luca-message-luca"><div className="luca-message-bubble"><Avatar small /><div><p className="luca-typing">Luca está consultando...</p></div></div></div>}
+        </div>
+        <form className="luca-composer" onSubmit={sendMessage}><textarea ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleInputKeyDown} placeholder="Digite sua mensagem..." rows="1" disabled={busy} aria-label="Digite sua mensagem" /><button type="submit" disabled={busy || !input.trim()} aria-label="Enviar mensagem">Enviar</button></form>
+      </>}
+    </section>}
+  </>
 }

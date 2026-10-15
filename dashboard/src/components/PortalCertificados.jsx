@@ -154,7 +154,6 @@ export default function PortalCertificados() {
       {error && <p className="notice error">{error}</p>}
        {message && <p className="notice success">{message}</p>}
        {!error && <>
-          <CertificateChat onRequestConfirmed={refreshRequestsAfterChat} />
           <div className="portal-workspace">
            <section className="portal-search-area" aria-labelledby="portal-search-title">
              <p className="eyebrow">Catálogo</p>
@@ -189,8 +188,9 @@ export default function PortalCertificados() {
              {!requestsLoading && !requestsError && requests?.items.length > visibleRequests.length && <button type="button" className="portal-request-toggle" onClick={() => setShowOlderRequests((visible) => !visible)}>{showOlderRequests ? 'Recolher solicitações anteriores' : 'Ver solicitações anteriores'}</button>}
              {!requestsLoading && !requestsError && requests?.totalPages > 1 && <div className="certificate-pagination"><button type="button" onClick={() => setRequestsPage((current) => Math.max(1, current - 1))} disabled={requestsPage <= 1}>Anterior</button><span>Página {requestsPage} de {requests.totalPages}</span><button type="button" onClick={() => setRequestsPage((current) => Math.min(requests.totalPages, current + 1))} disabled={requestsPage >= requests.totalPages}>Próxima</button></div>}
            </section>
-         </div>
-       </>}
-    </section>
+          </div>
+        </>}
+       {!error && <CertificateChat onRequestConfirmed={refreshRequestsAfterChat} />}
+     </section>
   </main>
 }

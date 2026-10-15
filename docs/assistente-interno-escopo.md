@@ -2,7 +2,7 @@
 
 ## Entrega atual
 
-O portal de certificados agora oferece **Peça ao chat**, um atendimento
+O portal de certificados agora oferece **Peça para o Luca**, um atendimento
 guiado, sem IA generativa. A conversa:
 
 1. consulta o catálogo autorizado por empresa ou documento;
@@ -42,8 +42,8 @@ $env:VITE_API_URL = "http://127.0.0.1:4017"
 npm.cmd run dev -- --host 127.0.0.1 --port 5174
 ```
 
-Abrir `http://127.0.0.1:5174/portal/certificados` e clicar em **Iniciar
-atendimento**, no cartão **Peça ao chat**. O termo `multi` exercita múltiplos
+Abrir `http://127.0.0.1:5174/portal/certificados` e clicar no botão flutuante
+**Peça para o Luca**, no canto inferior direito. O termo `multi` exercita múltiplos
 resultados; `nenhum` exercita resultado vazio. O mock mantém o pedido sintético
 em memória e retorna conflito ao repetir a mesma solicitação.
 
