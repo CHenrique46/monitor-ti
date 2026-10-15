@@ -29,6 +29,24 @@ fronteira e nunca receber credenciais no navegador.
 
 Nenhuma dessas capacidades lê ou indexa conteúdo nesta entrega.
 
+## Prévia local sintética
+
+Para abrir a tela com dados sintéticos, iniciar o mock e o dashboard em
+terminais separados. O mock escuta somente localhost e não usa PostgreSQL,
+SMB ou o serviço de produção:
+
+```powershell
+node scripts/preview-certificate-chat.js
+cd dashboard
+$env:VITE_API_URL = "http://127.0.0.1:4017"
+npm.cmd run dev -- --host 127.0.0.1 --port 5174
+```
+
+Abrir `http://127.0.0.1:5174/portal/certificados` e clicar em **Iniciar
+atendimento**, no cartão **Peça ao chat**. O termo `multi` exercita múltiplos
+resultados; `nenhum` exercita resultado vazio. O mock mantém o pedido sintético
+em memória e retorna conflito ao repetir a mesma solicitação.
+
 ## Fora do escopo
 
 Evolution API, WhatsApp, n8n, contratação de serviços de IA, modelo local,
