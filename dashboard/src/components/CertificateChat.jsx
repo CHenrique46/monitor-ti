@@ -23,11 +23,20 @@ function normalizeMessage(value) {
 }
 
 function isGreeting(value) {
-  return /^(oi|olá|ola|bom dia|boa tarde|boa noite|olá luca|ola luca)[!,.\s]*$/i.test(value)
+  const normalized = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[!?.,;:]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return /^(?:oi|ola|bom dia|boa tarde|boa noite)(?: luca)?(?: tudo bem)?$/.test(normalized)
 }
 
 function isComputerProblem(value) {
   return /\b(?:computador|pc|notebook|windows|impressora|outlook|internet|dns|senha|erro técnico|problema técnico)\b/i.test(value)
+}
+
+function hasIdentifiableCatalogQuery(value) {
+  const normalized = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  if (!normalized) return false
+  if (/\d{6,}/.test(normalized.replace(/\D/g, ''))) return true
+  const generic = new Set(['certificado', 'certificados', 'empresa', 'documento', 'cnpj', 'cpf', 'de', 'da', 'do', 'para', 'por', 'favor', 'quero', 'preciso'])
+  return normalized.split(' ').some((part) => !generic.has(part) && /[a-z]{3,}/.test(part))
 }
 
 function extractCatalogQuery(value) {
@@ -245,7 +254,7 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
       const guidance = await converse(value)
       if (guidance.reply) addMessage('luca', guidance.reply)
       const query = normalizeMessage(guidance.query)
-      if (query && phase !== 'confirming') await searchCatalog(query)
+      if (guidance.intent === 'certificate_search' && query && hasIdentifiableCatalogQuery(query) && phase !== 'confirming') await searchCatalog(query)
       else setPhase(phase === 'confirming' ? 'confirming' : 'waiting')
     } catch (error) {
       if (error.name !== 'AbortError') {

@@ -62,6 +62,22 @@ contra o Granite instalado e valida resposta conversacional, busca sintetica,
 mudanca de assunto, duplicidade, agradecimento, encaminhamento ao TI e
 isolamento entre sessoes.
 
+O roteiro `node scripts/test-luca-browser.js` usa Chrome via CDP e valida a
+mensagem exata `Oi, Luca, tudo bem?` no navegador. A regressao exige uma
+chamada real ao Granite, zero chamadas de busca/criacao do chat e nenhum cartao;
+depois confirma que uma conversa casual preserva um cartao pendente. O mock
+separa contadores do chat das consultas iniciais da pesquisa tradicional.
+
+### Correcao da saudacao
+
+O caso reproduzido tinha duas causas: a saudacao com o nome do Luca nao era
+reconhecida pelo extrator guiado, e o mock retornava Alfa para qualquer texto
+desconhecido. Durante a correcao, o cabeçalho `X-Luca-Chat` tambem exigiu
+permissao no preflight CORS da previa; sem isso a consulta de um certificado
+falhava no navegador. A previa agora normaliza saudacoes, exige uma intencao de
+busca e empresa/documento identificavel, retorna vazio para consulta
+desconhecida e comprova a chamada do Granite por `graniteCalls`.
+
 ## Previa local sintetica
 
 Iniciar o mock e o dashboard em terminais separados:

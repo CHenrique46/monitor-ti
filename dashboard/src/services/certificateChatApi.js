@@ -9,7 +9,7 @@ async function readResponse(response, fallback) {
 export async function searchCertificateCatalog(query, signal) {
   const params = new URLSearchParams({ page: '1', pageSize: '5', q: query.trim() })
   return readResponse(
-    await fetch(`${API_URL}/api/portal/certificados?${params.toString()}`, { credentials: 'include', signal }),
+    await fetch(`${API_URL}/api/portal/certificados?${params.toString()}`, { credentials: 'include', signal, headers: { 'X-Luca-Chat': 'true' } }),
     'Não foi possível consultar o catálogo.'
   )
 }
@@ -19,7 +19,7 @@ export async function createCertificateRequest({ certificadoId, motivo = '' }) {
     await fetch(`${API_URL}/api/portal/solicitacoes`, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Luca-Chat': 'true' },
       body: JSON.stringify({ certificadoId, motivo })
     }),
     'Não foi possível enviar a solicitação.'

@@ -9,6 +9,7 @@ const MAX_QUEUE = 4;
 const REQUEST_TIMEOUT_MS = 15000;
 const requests = [];
 const conversations = new Map();
+const previewStats = { conversationCalls: 0, graniteCalls: 0, catalogCalls: 0, chatCatalogCalls: 0, createCalls: 0, chatCreateCalls: 0 };
 const certificates = [
   { id: 101, nomeExibicao: "Empresa Sintetica Alfa", nomeEmpresa: "Empresa Sintetica Alfa", documento: "12.***.***/****-**", validadeFim: "2027-12-31T00:00:00.000Z", statusValidade: "VALIDO_CONFIRMADO", extensao: ".pfx", anoReferencia: 2027 },
   { id: 102, nomeExibicao: "Empresa Sintetica Beta", nomeEmpresa: "Empresa Sintetica Beta", documento: "98.***.***/****-**", validadeFim: "2026-08-31T00:00:00.000Z", statusValidade: "VALIDADE_ESTIMADA", extensao: ".pfx", anoReferencia: 2026 }
@@ -32,7 +33,7 @@ function send(res, status, body) {
     "Access-Control-Allow-Origin": "http://127.0.0.1:5174",
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
+    "Access-Control-Allow-Headers": "Content-Type, X-Luca-Chat"
   });
   res.end(JSON.stringify(body));
 }
@@ -70,16 +71,30 @@ function parseConversationResponse(value) {
     change_subject: "A mudanca de assunto nao confirma nem cancela a solicitacao.",
     other: "Posso ajudar com solicitacoes de certificados."
   };
-  if (!intents.has(parsed.intent)) throw new Error("invalid_model_response");
+  const intent = typeof parsed.intent === "string" ? parsed.intent.split("|")[0].trim() : "";
+  if (!intents.has(intent)) throw new Error("invalid_model_response");
   return {
-    intent: parsed.intent,
-    reply: typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : fallbackReplies[parsed.intent],
-    query: parsed.intent === "certificate_search" && typeof parsed.query === "string" ? parsed.query.trim().slice(0, 160) : ""
+    intent,
+    reply: typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : fallbackReplies[intent],
+    query: intent === "certificate_search" && typeof parsed.query === "string" ? parsed.query.trim().slice(0, 160) : ""
   };
 }
 
 function isComputerConcern(value) {
   return /\b(?:computador|pc|notebook|windows|impressora|outlook|internet|dns|senha|erro tecnico|problema tecnico)\b/i.test(value);
+}
+
+function isCasualConversation(value) {
+  const normalized = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[!?.,;:]+/g, " ").replace(/\s+/g, " ").trim();
+  return /^(?:oi|ola|bom dia|boa tarde|boa noite)(?: luca)?(?: tudo bem)?$/.test(normalized) || /^(?:obrigado|obrigada|valeu|agradeco)$/.test(normalized) || /^(?:quem e voce|como voce se chama)$/.test(normalized);
+}
+
+function hasIdentifiableCatalogQuery(value) {
+  const normalized = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!normalized) return false;
+  if (/\d{6,}/.test(normalized.replace(/\D/g, ""))) return true;
+  const meaningful = normalized.split(" ").filter((part) => !["certificado", "certificados", "empresa", "documento", "cnpj", "cpf", "de", "da", "do", "para", "por", "favor", "quero", "preciso"].includes(part));
+  return meaningful.some((part) => /[a-z]{3,}/.test(part));
 }
 
 function createGenerationQueue(maxQueue = MAX_QUEUE) {
@@ -103,6 +118,7 @@ function createGenerationQueue(maxQueue = MAX_QUEUE) {
 function createConversationService({ fetchImpl = fetch, ollamaUrl = OLLAMA_URL, model = OLLAMA_MODEL, timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
   const queue = createGenerationQueue();
   async function generate(history, phase) {
+    previewStats.graniteCalls += 1;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -121,13 +137,14 @@ function createConversationService({ fetchImpl = fetch, ollamaUrl = OLLAMA_URL, 
       });
       if (!response.ok) throw Object.assign(new Error("ollama_unavailable"), { status: 503 });
       const body = await response.json();
-      return parseConversationResponse(body.message?.content);
+      return { ...parseConversationResponse(body.message?.content), source: "granite", model };
     } finally {
       clearTimeout(timer);
     }
   }
   return {
     converse(sessionId, message, phase) {
+      previewStats.conversationCalls += 1;
       const previous = conversations.get(sessionId) || [];
       const history = previous.slice(-MAX_HISTORY);
       if (isComputerConcern(message)) {
@@ -136,7 +153,11 @@ function createConversationService({ fetchImpl = fetch, ollamaUrl = OLLAMA_URL, 
         return Promise.resolve(result);
       }
       return queue.run(async () => {
-        const result = await generate([...history, { role: "user", content: message }], phase);
+        let result = await generate([...history, { role: "user", content: message }], phase);
+        if (isCasualConversation(message)) {
+          result = { ...result, intent: "greeting", query: "" };
+        }
+        if (result.intent !== "certificate_search" || !hasIdentifiableCatalogQuery(result.query)) result.query = "";
         const next = [...history, { role: "user", content: message }, { role: "assistant", content: result.reply }].slice(-MAX_HISTORY);
         conversations.set(sessionId, next);
         return result;
@@ -150,7 +171,8 @@ function searchCatalog(query) {
   if (value.includes("nenhum")) return [];
   if (value.includes("multi")) return certificates;
   if (value.includes("beta")) return [certificates[1]];
-  return [certificates[0]];
+  if (value.includes("alfa")) return [certificates[0]];
+  return [];
 }
 
 function createPreviewServer({ conversationService = createConversationService() } = {}) {
@@ -174,13 +196,18 @@ function createPreviewServer({ conversationService = createConversationService()
         return send(res, error.status || 503, { erro: "O Luca esta indisponivel nesta previa." });
       }
     }
+    if (url.pathname === "/api/preview/stats" && req.method === "GET") return send(res, 200, previewStats);
     if (url.pathname === "/api/portal/certificados" && req.method === "GET") {
+      previewStats.catalogCalls += 1;
+      if (req.headers["x-luca-chat"] === "true") previewStats.chatCatalogCalls += 1;
       const items = searchCatalog(url.searchParams);
       return send(res, 200, { items, total: items.length, page: 1, pageSize: 5, totalPages: 1 });
     }
     if (url.pathname === "/api/portal/solicitacoes" && req.method === "GET") return send(res, 200, { items: requests, total: requests.length, page: 1, pageSize: 100, totalPages: 1 });
     if (url.pathname === "/api/portal/solicitacoes" && req.method === "POST") {
       try {
+        previewStats.createCalls += 1;
+        if (req.headers["x-luca-chat"] === "true") previewStats.chatCreateCalls += 1;
         const input = await readJson(req);
         if (requests.some((item) => item.certificado.id === input.certificadoId && item.estado === "PENDENTE")) return send(res, 409, { erro: "Ja existe uma solicitacao pendente deste certificado para esta estacao." });
         const certificado = certificates.find((item) => item.id === input.certificadoId);

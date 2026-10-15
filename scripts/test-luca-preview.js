@@ -24,6 +24,20 @@ async function main() {
   const sessionA = "session-a-luca";
   const sessionB = "session-b-luca";
   try {
+    const beforeCasual = await request(port, "/api/preview/stats");
+    const casualMessages = ["Oi, Luca, tudo bem?", "Obrigado", "Quem é você?"];
+    for (const message of casualMessages) {
+      const casual = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: `${sessionA}-${message.length}`, message, phase: "waiting" } });
+      assert.equal(casual.status, 200);
+      assert.equal(casual.body.source, "granite");
+      assert.equal(casual.body.query, "");
+    }
+    const afterCasual = await request(port, "/api/preview/stats");
+    assert.equal(afterCasual.body.catalogCalls, beforeCasual.body.catalogCalls);
+    assert.equal(afterCasual.body.chatCatalogCalls, beforeCasual.body.chatCatalogCalls);
+    assert.equal(afterCasual.body.createCalls, beforeCasual.body.createCalls);
+    assert.equal(afterCasual.body.chatCreateCalls, beforeCasual.body.chatCreateCalls);
+
     const greeting = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: sessionA, message: "Oi, tudo bem?", phase: "waiting" } });
     assert.equal(greeting.status, 200);
     assert.ok(greeting.body.reply);
@@ -42,6 +56,8 @@ async function main() {
     assert.equal(catalog.status, 200);
     assert.equal(catalog.body.items.length, 1);
     const certificateId = catalog.body.items[0].id;
+    const unknownCatalog = await request(port, "/api/portal/certificados?q=texto%20sem%20empresa");
+    assert.equal(unknownCatalog.body.items.length, 0);
 
     const changeSubject = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: sessionA, message: "Na verdade, preciso de outra coisa", phase: "confirming" } });
     assert.equal(changeSubject.status, 200);
