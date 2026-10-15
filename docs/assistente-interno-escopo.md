@@ -1,62 +1,89 @@
-# Assistente interno HenriTech
+# Luca no portal de certificados
 
-## Entrega atual
+## Objetivo
 
-O portal de certificados agora oferece **Peça para o Luca**, um atendimento
-guiado, sem IA generativa. A conversa:
+O portal oferece **Peca para o Luca**, uma camada curta de conversa para dar
+personalidade ao mascote e conduzir solicitacoes de certificados. A IA nao e
+suporte tecnico e nao diagnostica computadores.
 
-1. consulta o catálogo autorizado por empresa ou documento;
-2. apresenta empresa, documento mascarado, validade e situação;
-3. pede escolha quando há mais de um resultado;
-4. solicita confirmação explícita;
-5. cria a solicitação pelo serviço de portal existente;
-6. informa o envio somente após confirmação do backend.
+Na previa isolada, o Granite 3.3 2B roda somente no backend do mock. O portal
+de producao permanece guiado e sem integracao de IA.
 
-A pesquisa tradicional continua disponível. Sessão, identificação da estação,
-permissões, aprovação administrativa, liberação e prevenção de duplicidade
-permanecem no backend existente.
+## Papel da IA
 
-O adaptador em `dashboard/src/services/certificateChatApi.js` é a fronteira
-substituível do atendimento. O componente recebe `assistantProvider` e usa o
-adaptador guiado por padrão; um provedor de IA futuro deverá manter essa
-fronteira e nunca receber credenciais no navegador.
+- Cumprimentar e responder brevemente a saudacoes e agradecimentos.
+- Apresentar-se como Luca, assistente do Escritorio Vava.
+- Perguntar qual empresa ou certificado a pessoa procura.
+- Entender frases simples e pedir esclarecimento quando necessario.
+- Se mencionarem problema de computador, orientar a procurar Henrique do TI,
+  sem diagnostico ou comandos.
 
-## Resultado do teste de IA local
+## Fluxo controlado pelo HenriTech
 
-O teste isolado do `qwen2.5:1.5b` foi realizado na NOTE-81, mas não atingiu
-qualidade e margem de memória suficientes para integrar a IA ao Luca. O
-relatório está em `docs/ia-local-luca-teste.md`. O modelo foi descarregado e a
-prévia continua guiada e sintética.
+1. Busca, resultados, validade e situacao vem do catalogo autorizado.
+2. Escolha e confirmacao usam os cartoes e botoes existentes.
+3. Criacao do pedido usa o servico atual, com prevencao de duplicidade.
+4. "Solicitacao enviada" aparece somente apos confirmacao do backend.
+5. A IA nao escolhe certificados, aprova pedidos, libera arquivos ou altera
+   estados por conta propria.
+6. Mudancas de assunto nao confirmam nem cancelam um pedido implicitamente.
 
-## Próximas etapas
+A pesquisa tradicional, avatar, permissoes e sessao continuam preservados.
 
-- Dúvidas gerais de TI: reavaliar capacidade e modelo antes de implementar.
-- Obsidian: autorizar explicitamente uma pasta Markdown, separar procedimentos
-  de conteúdo exclusivo do TI e citar a nota usada como fonte.
+## Implementacao da previa
 
-Nenhuma dessas capacidades lê ou indexa conteúdo nesta entrega.
+O adaptador em `dashboard/src/services/certificateChatApi.js` e a fronteira do
+atendimento. A variante `certificateChatAiApi.js` so e ativada na previa com
+`VITE_LUCA_AI_PREVIEW=true`; ela chama o endpoint conversacional do mock, nunca
+o Ollama diretamente pelo navegador.
 
-## Prévia local sintética
+O mock usa `granite3.3:2b`, com historico curto isolado por `sessionId`, uma
+geracao por vez, fila limitada e timeout. Falha ou indisponibilidade retorna
+as mensagens guiadas existentes. O modelo nao recebe catalogo, validade,
+estado de pedido, credenciais ou dados reais.
 
-Para abrir a tela com dados sintéticos, iniciar o mock e o dashboard em
-terminais separados. O mock escuta somente localhost e não usa PostgreSQL,
-SMB ou o serviço de produção:
+## Testes planejados
+
+A previa deve ser avaliada com:
+
+- saudacao;
+- pedido de certificado;
+- esclarecimento;
+- escolha;
+- confirmacao e envio;
+- agradecimento;
+- cancelamento;
+- mudanca de assunto durante confirmacao;
+- tentativa de duplicidade;
+- isolamento entre sessoes.
+
+O roteiro automatizado `node scripts/test-luca-preview.js` executa esse fluxo
+contra o Granite instalado e valida resposta conversacional, busca sintetica,
+mudanca de assunto, duplicidade, agradecimento, encaminhamento ao TI e
+isolamento entre sessoes.
+
+## Previa local sintetica
+
+Iniciar o mock e o dashboard em terminais separados:
 
 ```powershell
 node scripts/preview-certificate-chat.js
 cd dashboard
 $env:VITE_API_URL = "http://127.0.0.1:4017"
+$env:VITE_LUCA_AI_PREVIEW = "true"
 npm.cmd run dev -- --host 127.0.0.1 --port 5174
 ```
 
-Abrir `http://127.0.0.1:5174/portal/certificados` e clicar no botão flutuante
-**Peça para o Luca**, no canto inferior direito. O termo `multi` exercita múltiplos
-resultados; `nenhum` exercita resultado vazio. O mock mantém o pedido sintético
-em memória e retorna conflito ao repetir a mesma solicitação.
+Abrir `http://127.0.0.1:5174/portal/certificados` e clicar em **Peca para o
+Luca**. O termo `multi` exercita multiplos resultados; `nenhum` exercita
+resultado vazio. O mock mantem conversa e pedidos sinteticos em memoria e
+retorna conflito ao repetir a mesma solicitacao.
+
+Para validar sem IA, remova `VITE_LUCA_AI_PREVIEW`; o widget usa o fluxo guiado
+original.
 
 ## Fora do escopo
 
-Evolution API, WhatsApp, n8n, contratação de serviços de IA, integração de
-modelo local,
-indexação automática do Obsidian, aprovação/liberação pelo chat e implantação
-em produção.
+Suporte tecnico, diagnostico, comandos, Evolution API, WhatsApp, n8n,
+contratacao de servicos de IA, indexacao automatica do Obsidian,
+aprovacao/liberacao pelo chat e implantacao em producao.

@@ -32,3 +32,16 @@ export async function listCertificateRequests() {
     'Não foi possível verificar suas solicitações.'
   )
 }
+
+export async function converse({ sessionId, message, phase }, signal) {
+  return readResponse(
+    await fetch(`${API_URL}/api/portal/luca/conversa`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({ sessionId, message, phase })
+    }),
+    'Não foi possível conversar com o Luca.'
+  )
+}

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import * as guidedCertificateProvider from '../services/certificateChatApi'
+import * as aiCertificateProvider from '../services/certificateChatAiApi'
 import { formatCertificateValidity } from '../formatCertificateValidity'
 
 const OPENING_MESSAGE = 'Oi! Eu sou o Luca! 😊 Posso ajudar você a encontrar e solicitar um certificado. Qual empresa você procura?'
+const previewAiEnabled = import.meta.env.VITE_LUCA_AI_PREVIEW === 'true'
 
 function chatDocument(certificate) {
   return certificate.documento || 'Documento não identificado'
@@ -22,6 +24,10 @@ function normalizeMessage(value) {
 
 function isGreeting(value) {
   return /^(oi|olá|ola|bom dia|boa tarde|boa noite|olá luca|ola luca)[!,.\s]*$/i.test(value)
+}
+
+function isComputerProblem(value) {
+  return /\b(?:computador|pc|notebook|windows|impressora|outlook|internet|dns|senha|erro técnico|problema técnico)\b/i.test(value)
 }
 
 function extractCatalogQuery(value) {
@@ -55,7 +61,7 @@ function CertificateCard({ certificate, actionLabel, onAction, disabled }) {
   </div>
 }
 
-export default function CertificateChat({ onRequestConfirmed, assistantProvider = guidedCertificateProvider }) {
+export default function CertificateChat({ onRequestConfirmed, assistantProvider = previewAiEnabled ? aiCertificateProvider : guidedCertificateProvider }) {
   const [open, setOpen] = useState(false)
   const [minimized, setMinimized] = useState(false)
   const [input, setInput] = useState('')
@@ -64,6 +70,8 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
   const [phase, setPhase] = useState('waiting')
   const [busy, setBusy] = useState(false)
   const searchController = useRef(null)
+  const conversationController = useRef(null)
+  const sessionIdRef = useRef(null)
   const inputRef = useRef(null)
   const historyRef = useRef(null)
 
@@ -73,11 +81,13 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
 
   function resetConversation() {
     searchController.current?.abort()
+    conversationController.current?.abort()
     setInput('')
     setMessages([newMessage('luca', OPENING_MESSAGE)])
     setSelected(null)
     setPhase('waiting')
     setBusy(false)
+    sessionIdRef.current = `luca-${Date.now()}-${Math.random().toString(36).slice(2)}`
   }
 
   function openChat() {
@@ -129,6 +139,29 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
     }
   }
 
+  function fallbackConversation(value, currentPhase) {
+    if (isGreeting(value)) return { reply: 'Olá! Eu sou o Luca, assistente do Escritório Vavá. Qual empresa ou certificado você procura?', intent: 'greeting' }
+    if (/\b(?:obrigad[oa]|valeu|agradeço|agradeco)\b/i.test(value)) return { reply: 'Por nada! Se precisar de um certificado, é só me dizer a empresa.', intent: 'thanks' }
+    if (isComputerProblem(value)) return { reply: 'Posso ajudar com solicitações de certificados. Para problemas no computador, procure o Henrique do TI.', intent: 'pc_support' }
+    if (currentPhase === 'confirming') return { reply: 'Posso continuar com o certificado exibido ou você pode usar “Corrigir”. A mudança de assunto não altera a solicitação.', intent: 'change_subject' }
+    return { reply: 'Entendi. Qual empresa ou certificado você procura?', intent: 'clarify', query: extractCatalogQuery(value) }
+  }
+
+  async function converse(value) {
+    if (!assistantProvider.converse) return fallbackConversation(value, phase)
+    conversationController.current?.abort()
+    const controller = new AbortController()
+    conversationController.current = controller
+    try {
+      return await assistantProvider.converse({ sessionId: sessionIdRef.current, message: value, phase }, controller.signal)
+    } catch (error) {
+      if (error.name === 'AbortError') throw error
+      return fallbackConversation(value, phase)
+    } finally {
+      if (conversationController.current === controller) conversationController.current = null
+    }
+  }
+
   async function verifyAfterUncertainResult(certificateId) {
     try {
       const requests = await assistantProvider.listCertificateRequests()
@@ -138,12 +171,12 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
     }
   }
 
-  async function confirmCertificate(certificate = selected) {
+  async function confirmCertificate(certificate = selected, addUserMessage = true) {
     if (!certificate || busy) return
     setSelected(certificate)
     setBusy(true)
     setPhase('submitting')
-    addMessage('usuario', 'Sim, é esse certificado.')
+    if (addUserMessage) addMessage('usuario', 'Sim, é esse certificado.')
     addMessage('luca', 'Vou confirmar a solicitação com o TI...')
     try {
       await assistantProvider.createCertificateRequest({ certificadoId: certificate.id })
@@ -193,35 +226,35 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
     addMessage('usuario', value)
     const lowered = value.toLowerCase()
     if (/\b(?:cancelar|começar novamente|comecar novamente|recomeçar|recomecar)\b/.test(lowered)) {
-      addMessage('usuario', value)
       addMessage('luca', 'Tudo bem. Vamos começar novamente. Qual empresa ou documento você procura?')
       setSelected(null)
       setPhase('waiting')
       return
     }
-    if (isGreeting(value)) {
-      addMessage('usuario', value)
-      addMessage('luca', 'Olá! Qual empresa ou documento você procura?')
-      setPhase('waiting')
-      return
-    }
     if (phase === 'confirming' && selected && /^(sim|s|é esse|e esse|confirmo|pode solicitar)/i.test(value)) {
-      await confirmCertificate(selected)
+      await confirmCertificate(selected, false)
       return
     }
     if (phase === 'confirming' && /\b(?:não|nao|corrigir|outra empresa)\b/i.test(value)) {
-      addMessage('usuario', value)
       cancelSelection(false)
       return
     }
-    addMessage('usuario', value)
-    const query = extractCatalogQuery(value)
-    if (!query) {
-      addMessage('luca', 'Qual empresa ou documento você procura?')
-      setPhase('waiting')
-      return
+    setBusy(true)
+    setPhase('thinking')
+    try {
+      const guidance = await converse(value)
+      if (guidance.reply) addMessage('luca', guidance.reply)
+      const query = normalizeMessage(guidance.query)
+      if (query && phase !== 'confirming') await searchCatalog(query)
+      else setPhase(phase === 'confirming' ? 'confirming' : 'waiting')
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        addMessage('luca', 'Não consegui responder agora. Qual empresa ou certificado você procura?')
+        setPhase('waiting')
+      }
+    } finally {
+      setBusy(false)
     }
-    await searchCatalog(query)
   }
 
   function handleInputKeyDown(event) {
