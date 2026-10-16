@@ -171,7 +171,7 @@ export default function CertificateChat({ onRequestConfirmed, onOpenTraditionalS
       return await assistantProvider.converse({ sessionId: sessionIdRef.current, message: value, phase }, controller.signal)
     } catch (error) {
       if (error.name === 'AbortError') throw error
-      return { reply: 'Não consegui responder agora. Você pode continuar pela pesquisa tradicional ou informar a empresa e o documento.', intent: 'conversation', query: '', source: 'fallback' }
+      return { reply: 'Não consegui responder agora. Abra a pesquisa tradicional para continuar.', intent: 'conversation', query: '', source: 'fallback', action: 'open-search' }
     } finally {
       if (conversationController.current === controller) conversationController.current = null
     }
@@ -272,7 +272,7 @@ export default function CertificateChat({ onRequestConfirmed, onOpenTraditionalS
     try {
       const guidance = await converse(value)
       if (turnId !== turnRef.current) return
-      if (guidance.reply) addMessage('luca', guidance.reply)
+      if (guidance.reply) addMessage('luca', guidance.reply, guidance.action ? { action: guidance.action } : undefined)
       const query = normalizeMessage(guidance.query)
       if (guidance.intent === 'certificate_search' && query && phase !== 'confirming') await searchCatalog(query, turnId)
       else setPhase(phase === 'confirming' ? 'confirming' : 'waiting')

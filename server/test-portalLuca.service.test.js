@@ -7,7 +7,7 @@ function response(content, ok = true) {
 }
 
 function groqResponse(content, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => ({ choices: [{ message: { content } }] }) };
+  return { ok: status >= 200 && status < 300, status, json: async () => ({ choices: [{ finish_reason: "stop", message: { content } }] }) };
 }
 
 test("accepts only Ollama loopback endpoints", () => {
@@ -39,6 +39,15 @@ test("selects Groq explicitly and sends only the private backend credential", as
   assert.equal("tools" in request.body, false);
   assert.equal(logs.some((entry) => entry.includes("synthetic-key-not-for-production")), false);
   assert.equal(logs.some((entry) => entry.includes("Qual empresa")), false);
+});
+
+test("logs Groq HTTP and validation outcomes without response content", async () => {
+  const logs = [];
+  const service = createPortalLucaService({ provider: "groq", groqApiKey: "synthetic-key-not-for-production", fetchImpl: async () => groqResponse('{"reply":"Posso ajudar.","intent":"clarification","query":""}'), log: (entry) => logs.push(entry) });
+  await service.converse({ conversationKey: "computer-log", sessionId: "session-log", message: "Olá", phase: "waiting" });
+  assert.match(logs.join("\n"), /luca_response .*http_status=200/);
+  assert.match(logs.join("\n"), /luca_validation .*validation=ok intent=clarification query_present=false finish=stop/);
+  assert.equal(logs.some((entry) => entry.includes("Posso ajudar")), false);
 });
 
 test("does not start Groq without a backend key", () => {

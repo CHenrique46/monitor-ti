@@ -45,6 +45,8 @@ test('chat oferece pesquisa sem depender da IA e preserva consulta', async () =>
   assert.match(chat, /Abrir pesquisa tradicional/)
   assert.match(chat, /pesquisa tradicional\|pesquisar certificado/)
   assert.match(chat, /CERTIFICATE_PORTAL_READ_ONLY/)
+  assert.match(chat, /Abra a pesquisa tradicional para continuar\./)
+  assert.match(chat, /guidance\.action \? \{ action: guidance\.action \}/)
 })
 
 test('chat sempre conclui a busca e oferece retry sem aceitar concorrência', async () => {

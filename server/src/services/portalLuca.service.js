@@ -141,19 +141,24 @@ function createPortalLucaService({
       const headers = { "Content-Type": "application/json" };
       if (provider === "groq") headers.Authorization = `Bearer ${String(groqApiKey).trim()}`;
       const response = await fetchImpl(endpoint, { method: "POST", headers, signal: controller.signal, body: JSON.stringify(request) });
+      log(`luca_response provider=${provider} model=${activeModel} http_status=${response.status}`);
       if (response.status === 429) throw makeError("LUCA_RATE_LIMITED", "O Luca atingiu o limite temporário de consultas.", 429);
       if (!response.ok) throw makeError(provider === "groq" ? "LUCA_GROQ_UNAVAILABLE" : "LUCA_OLLAMA_UNAVAILABLE", "O Luca está indisponível.");
       const body = await response.json();
       const choice = provider === "groq" ? body.choices?.[0] : null;
-      if (provider === "groq" && choice?.finish_reason === "length") throw makeError("LUCA_RESPONSE_TRUNCATED", "A resposta do Luca foi interrompida.");
+      if (provider === "groq" && choice?.finish_reason === "length") {
+        log(`luca_validation provider=${provider} model=${activeModel} validation=truncated finish=length`);
+        throw makeError("LUCA_RESPONSE_TRUNCATED", "A resposta do Luca foi interrompida.");
+      }
       const content = provider === "groq" ? choice?.message?.content : body.message?.content;
       const result = normalizeResponse(content);
+      log(`luca_validation provider=${provider} model=${activeModel} validation=ok intent=${result.intent} query_present=${Boolean(result.query)} finish=${choice?.finish_reason || "complete"}`);
       const usage = provider === "groq" ? body.usage || {} : {};
       log(`luca_request_ok provider=${provider} model=${activeModel} duration_ms=${Date.now() - startedAt} tokens_prompt=${Number(usage.prompt_tokens || 0)} tokens_completion=${Number(usage.completion_tokens || 0)} tokens_total=${Number(usage.total_tokens || 0)} finish=${choice?.finish_reason || "complete"}`);
       return result;
     } catch (error) {
       const failure = error.name === "AbortError" ? makeError("LUCA_TIMEOUT", "O Luca demorou para responder.") : error.code ? error : makeError(provider === "groq" ? "LUCA_GROQ_UNAVAILABLE" : "LUCA_OLLAMA_UNAVAILABLE", "O Luca está indisponível.");
-      log(`luca_request_error provider=${provider} model=${activeModel} code=${failure.code} duration_ms=${Date.now() - startedAt}`);
+      log(`luca_request_error provider=${provider} model=${activeModel} code=${failure.code} stage=${error.code === "LUCA_RESPONSE_INVALID" ? "parser" : error.code === "LUCA_RESPONSE_TRUNCATED" ? "truncation" : error.name === "AbortError" ? "timeout" : "transport"} duration_ms=${Date.now() - startedAt}`);
       throw failure;
     } finally { clearTimeout(timer); }
   }

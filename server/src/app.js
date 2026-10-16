@@ -46,7 +46,7 @@ const portalService = createPortalService({ db: prisma, browserNotifications: br
 const smbCredentialConnection = createSmbCredentialConnection();
 
 app.use(express.json());
-const portalLucaService = createPortalLucaService({ log: (entry) => logEvent(`[Monitor TI] ${entry}`) });
+const portalLucaService = createPortalLucaService({ log: (entry) => logEvent(`[Luca] ${entry}`) });
 app.use((req, res, next) => {
   if (app.locals.shuttingDown) return res.status(503).json({ status: "shutting_down", erro: "Servidor encerrando." });
   next();
