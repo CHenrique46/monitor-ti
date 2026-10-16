@@ -133,7 +133,7 @@ export default function CertificateChat({ onRequestConfirmed, onOpenTraditionalS
     setPhase('searching')
     try {
       const catalog = await assistantProvider.searchCertificateCatalog(query, controller.signal)
-      if (turnId !== turnRef.current) return
+      if (!catalog || !Array.isArray(catalog.items)) throw new Error('Resposta inválida do catálogo.')
       if (catalog.items.length === 0) {
         addMessage('luca', 'Não encontrei um certificado autorizado com esse nome ou documento. Você pode corrigir a empresa ou tentar outra busca.')
         setPhase('waiting')
@@ -147,13 +147,19 @@ export default function CertificateChat({ onRequestConfirmed, onOpenTraditionalS
         setPhase('choosing')
       }
     } catch (error) {
-      if (error.name !== 'AbortError' && turnId === turnRef.current) {
-        addMessage('luca', `Não consegui consultar o catálogo agora. ${error.message || 'Tente novamente em instantes.'}`)
+      if (error.name !== 'AbortError') {
+        addMessage('luca', `Não consegui consultar o catálogo agora. ${error.message || 'Tente novamente em instantes.'}`, { action: 'retry-search', query })
         setPhase('waiting')
       }
     } finally {
-      if (searchController.current === controller && turnId === turnRef.current) setBusy(false)
+      if (searchController.current === controller) setBusy(false)
     }
+  }
+
+  function retrySearch(query) {
+    if (busy || !query) return
+    const turnId = ++turnRef.current
+    searchCatalog(query, turnId)
   }
 
   async function converse(value) {
@@ -297,7 +303,7 @@ export default function CertificateChat({ onRequestConfirmed, onOpenTraditionalS
       </header>
       {!minimized && <>
         <div className="luca-history" ref={historyRef} aria-live="polite" onClick={registerActivity}>
-            {messages.map((message) => <div className={`luca-message-row luca-message-${message.role}`} key={message.id}><div className="luca-message-bubble">{message.role === 'luca' && <Avatar small />}<div><p>{message.text}</p>{message.action === 'open-search' && <button type="button" className="luca-search-action" onClick={() => onOpenTraditionalSearch?.()}>Abrir pesquisa tradicional</button>}{message.certificate && <CertificateCard certificate={message.certificate} actionLabel={CERTIFICATE_PORTAL_READ_ONLY ? null : 'Sim, é esse'} onAction={() => confirmCertificate(message.certificate)} disabled={busy} />}{message.certificates && <div className="luca-result-list">{message.certificates.map((certificate) => <CertificateCard certificate={certificate} actionLabel={CERTIFICATE_PORTAL_READ_ONLY ? null : 'Escolher este'} onAction={() => chooseCertificate(certificate)} disabled={busy} key={certificate.id} />)}</div>}{message.action === 'confirm' && !CERTIFICATE_PORTAL_READ_ONLY && <div className="luca-message-actions"><button type="button" onClick={cancelSelection} disabled={busy}>Corrigir</button></div>}</div></div></div>)}
+            {messages.map((message) => <div className={`luca-message-row luca-message-${message.role}`} key={message.id}><div className="luca-message-bubble">{message.role === 'luca' && <Avatar small />}<div><p>{message.text}</p>{message.action === 'open-search' && <button type="button" className="luca-search-action" onClick={() => onOpenTraditionalSearch?.()}>Abrir pesquisa tradicional</button>}{message.action === 'retry-search' && <button type="button" className="luca-search-action" onClick={() => retrySearch(message.query)} disabled={busy}>Tentar novamente</button>}{message.certificate && <CertificateCard certificate={message.certificate} actionLabel={CERTIFICATE_PORTAL_READ_ONLY ? null : 'Sim, é esse'} onAction={() => confirmCertificate(message.certificate)} disabled={busy} />}{message.certificates && <div className="luca-result-list">{message.certificates.map((certificate) => <CertificateCard certificate={certificate} actionLabel={CERTIFICATE_PORTAL_READ_ONLY ? null : 'Escolher este'} onAction={() => chooseCertificate(certificate)} disabled={busy} key={certificate.id} />)}</div>}{message.action === 'confirm' && !CERTIFICATE_PORTAL_READ_ONLY && <div className="luca-message-actions"><button type="button" onClick={cancelSelection} disabled={busy}>Corrigir</button></div>}</div></div></div>)}
            {busy && <div className="luca-message-row luca-message-luca"><div className="luca-message-bubble"><Avatar small /><div><p className="luca-typing">Luca está consultando...</p></div></div></div>}
            {idleWarning && <div className="luca-idle-warning" role="alert"><p>Vou encerrar esta conversa em 1 minuto por inatividade.</p><button type="button" onClick={registerActivity}>Continuar conversa</button></div>}
          </div>

@@ -46,3 +46,13 @@ test('chat oferece pesquisa sem depender da IA e preserva consulta', async () =>
   assert.match(chat, /pesquisa tradicional\|pesquisar certificado/)
   assert.match(chat, /CERTIFICATE_PORTAL_READ_ONLY/)
 })
+
+test('chat sempre conclui a busca e oferece retry sem aceitar concorrência', async () => {
+  const chat = await readFile(path.join(dashboardRoot, 'src/components/CertificateChat.jsx'), 'utf8')
+  assert.match(chat, /Array\.isArray\(catalog\.items\)/)
+  assert.match(chat, /action: 'retry-search'/)
+  assert.match(chat, /Tentar novamente/)
+  assert.match(chat, /if \(busy\) return/)
+  const searchSection = chat.slice(chat.indexOf('async function searchCatalog'), chat.indexOf('async function converse'))
+  assert.doesNotMatch(searchSection, /if \(turnId !== turnRef\.current\) return/)
+})
