@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { API_URL } from '../config'
 
-export default function Login({ onAuthenticated, connectionError = false }) {
+export default function Login({ onAuthenticated, connectionError = false, onBackToEntry }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -45,6 +45,7 @@ export default function Login({ onAuthenticated, connectionError = false }) {
           <input id="login-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
           <button className="login-submit" type="submit" disabled={busy}>{busy ? 'Entrando...' : 'Entrar'}</button>
         </form>
+        {onBackToEntry && <button type="button" className="login-back" onClick={onBackToEntry}>Voltar à entrada</button>}
       </section>
     </main>
   )

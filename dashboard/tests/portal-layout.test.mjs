@@ -9,11 +9,20 @@ const component = await readFile(path.join(dashboardRoot, 'src/components/Portal
 const styles = await readFile(path.join(dashboardRoot, 'src/index.css'), 'utf8')
 
 test('portal organiza pesquisa e solicitacoes em duas areas responsivas', () => {
-  assert.match(styles, /\.portal-workspace[^\n]*grid-template-columns: minmax\(0, 3fr\) minmax\(300px, 2fr\)/)
-  assert.match(styles, /\.portal-requests[^\n]*order: -1/)
-  assert.match(component, /className="portal-workspace"/)
-  assert.match(component, /className="portal-search-area"/)
-  assert.match(component, /className="portal-requests"/)
+  assert.match(styles, /\.portal-content-grid[^\n]*grid-template-columns: minmax\(0, 1\.45fr\) minmax\(280px, \.75fr\)/)
+  assert.match(styles, /\.portal-content-grid[^\n]*display: flex; flex-direction: column/)
+  assert.match(component, /className="portal-workspace portal-content-grid"/)
+  assert.match(component, /portal-search-area/)
+  assert.match(component, /portal-latest-request/)
+  assert.match(component, /portal-history/)
+  assert.match(styles, /\.portal-content-grid[^\n]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/)
+  assert.doesNotMatch(component, /Visão geral|Manutenção programada|Inventário/)
+  assert.match(component, /Voltar à entrada/)
+  assert.match(component, /alwaysOpen/)
+  assert.match(styles, /\.luca-window-embedded \{ display: flex; flex-direction: column/)
+  assert.match(styles, /\.luca-window-embedded \.luca-history \{ flex: 1 1 auto; min-height: 0; overflow-y: auto/)
+  assert.match(styles, /\.luca-window-embedded \.luca-composer \{ flex: 0 0 auto/)
+  assert.match(styles, /\.portal-chat-column \{ align-self: start; height: 468px !important/)
 })
 
 test('portal ordena prioridades e limita historico somente na apresentacao', () => {
