@@ -109,3 +109,12 @@ test("normalizes malformed model output without exposing arbitrary intent", () =
   assert.deepEqual(normalizeResponse('{"reply":"x","intent":"approve","query":"secret"}'), { intent: "conversation", reply: "x", query: "" });
   assert.equal(sanitizeMessage("senha: segredo").includes("segredo"), false);
 });
+
+test("rejects incomplete JSON instead of treating it as a conversation", () => {
+  assert.throws(() => normalizeResponse('{"reply":"resposta interrompida"}'), { code: "LUCA_RESPONSE_INVALID" });
+});
+
+test("rejects Groq length truncation as a controlled failure", async () => {
+  const service = createPortalLucaService({ provider: "groq", groqApiKey: "synthetic", fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ finish_reason: "length", message: { content: "{\\\"reply\\\":\\\"interrompido" } }] }) }) });
+  await assert.rejects(() => service.converse({ conversationKey: "computer-truncated", sessionId: "session-truncated", message: "Oi", phase: "waiting" }), { code: "LUCA_RESPONSE_TRUNCATED" });
+});

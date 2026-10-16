@@ -35,7 +35,7 @@ function createPortalController({ service, lucaService = null }) {
       const result = await lucaService.converse({ conversationKey: String(req.portalSession.computerId), sessionId: body.sessionId, message: body.message, phase: body.phase });
       return res.status(200).json(result);
     } catch (error) {
-      const status = { LUCA_INPUT_INVALID: 400, LUCA_QUEUE_FULL: 429, LUCA_RATE_LIMITED: 429, LUCA_TIMEOUT: 503, LUCA_OLLAMA_UNAVAILABLE: 503, LUCA_OLLAMA_URL_INVALID: 503, LUCA_GROQ_UNAVAILABLE: 503, LUCA_GROQ_NOT_CONFIGURED: 503, LUCA_PROVIDER_INVALID: 503 }[error.code] || 503;
+      const status = { LUCA_INPUT_INVALID: 400, LUCA_QUEUE_FULL: 429, LUCA_RATE_LIMITED: 429, LUCA_TIMEOUT: 503, LUCA_RESPONSE_INVALID: 503, LUCA_RESPONSE_TRUNCATED: 503, LUCA_OLLAMA_UNAVAILABLE: 503, LUCA_OLLAMA_URL_INVALID: 503, LUCA_GROQ_UNAVAILABLE: 503, LUCA_GROQ_NOT_CONFIGURED: 503, LUCA_PROVIDER_INVALID: 503 }[error.code] || 503;
       return res.status(status).json({ erro: status === 429 ? error.message : "O Luca esta indisponivel. Use a pesquisa tradicional." });
     }
   }

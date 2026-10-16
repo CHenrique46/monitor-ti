@@ -61,7 +61,7 @@ function normalizeResponse(value) {
     const end = raw.lastIndexOf("}");
     if (start >= 0 && end > start) { try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { parsed = null; } }
   }
-  if (!parsed || typeof parsed !== "object") return { intent: "conversation", reply: raw.slice(0, 500), query: "" };
+  if (!parsed || typeof parsed !== "object" || typeof parsed.reply !== "string" || typeof parsed.intent !== "string" || typeof parsed.query !== "string") throw makeError("LUCA_RESPONSE_INVALID", "A resposta do Luca não pôde ser validada.");
   const intent = parsed.intent === "certificate_search" ? "certificate_search" : parsed.intent === "clarification" ? "clarification" : "conversation";
   return { intent, reply: String(parsed.reply || parsed.message || "").trim().slice(0, 500), query: intent === "certificate_search" ? String(parsed.query || "").trim().slice(0, MAX_QUERY_LENGTH) : "" };
 }
@@ -136,9 +136,12 @@ function createPortalLucaService({
       if (response.status === 429) throw makeError("LUCA_RATE_LIMITED", "O Luca atingiu o limite temporário de consultas.", 429);
       if (!response.ok) throw makeError(provider === "groq" ? "LUCA_GROQ_UNAVAILABLE" : "LUCA_OLLAMA_UNAVAILABLE", "O Luca está indisponível.");
       const body = await response.json();
-      const content = provider === "groq" ? body.choices?.[0]?.message?.content : body.message?.content;
+      const choice = provider === "groq" ? body.choices?.[0] : null;
+      if (provider === "groq" && choice?.finish_reason === "length") throw makeError("LUCA_RESPONSE_TRUNCATED", "A resposta do Luca foi interrompida.");
+      const content = provider === "groq" ? choice?.message?.content : body.message?.content;
       const result = normalizeResponse(content);
-      log(`luca_request_ok provider=${provider} model=${activeModel} duration_ms=${Date.now() - startedAt}`);
+      const usage = provider === "groq" ? body.usage || {} : {};
+      log(`luca_request_ok provider=${provider} model=${activeModel} duration_ms=${Date.now() - startedAt} tokens_prompt=${Number(usage.prompt_tokens || 0)} tokens_completion=${Number(usage.completion_tokens || 0)} tokens_total=${Number(usage.total_tokens || 0)} finish=${choice?.finish_reason || "complete"}`);
       return result;
     } catch (error) {
       const failure = error.name === "AbortError" ? makeError("LUCA_TIMEOUT", "O Luca demorou para responder.") : error.code ? error : makeError(provider === "groq" ? "LUCA_GROQ_UNAVAILABLE" : "LUCA_OLLAMA_UNAVAILABLE", "O Luca está indisponível.");
@@ -158,7 +161,7 @@ function createPortalLucaService({
         const current = conversations.get(key) || { history: [], updatedAt: now() };
         const userMessages = current.history.filter((item) => item.role === "user").map((item) => item.content).concat(sanitized);
         const result = await generate([...current.history.slice(-MAX_HISTORY), { role: "user", content: sanitized }], String(phase).slice(0, 40));
-         if (result.intent === "certificate_search" && (!hasCatalogSignal(result.query, userMessages) || !hasOnlyUserTerms(result.query, userMessages))) { result.intent = "clarification"; result.query = ""; }
+        if (result.intent === "certificate_search" && (!hasCatalogSignal(result.query, userMessages) || !hasOnlyUserTerms(result.query, userMessages))) { result.intent = "clarification"; result.query = ""; }
         if (result.intent !== "certificate_search") result.query = "";
         conversations.set(key, { history: [...current.history, { role: "user", content: sanitized }, { role: "assistant", content: result.reply }].slice(-MAX_HISTORY), updatedAt: now() });
          return { ...result, source: provider, model: activeModel };
