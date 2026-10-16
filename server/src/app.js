@@ -30,6 +30,7 @@ const avisosService = require("./services/avisos.service");
 const maintenanceScheduler = require("./services/maintenanceScheduler.service");
 const { createExcelSyncWorker } = require("./inventory/excelSyncWorker");
 const { createPortalService } = require("./services/portal.service");
+const { createPortalLucaService } = require("./services/portalLuca.service");
 const { browserNotificationHub } = require("./services/browserNotificationHub");
 const { createBrowserNotificationRouters } = require("./routes/browserNotification.routes");
 const certificateCatalogSyncService = require("./services/certificateCatalogSync.service");
@@ -45,6 +46,7 @@ const portalService = createPortalService({ db: prisma, browserNotifications: br
 const smbCredentialConnection = createSmbCredentialConnection();
 
 app.use(express.json());
+const portalLucaService = createPortalLucaService({ log: (entry) => logEvent(`[Monitor TI] ${entry}`) });
 app.use((req, res, next) => {
   if (app.locals.shuttingDown) return res.status(503).json({ status: "shutting_down", erro: "Servidor encerrando." });
   next();
@@ -60,7 +62,7 @@ app.use("/api/alertas", humanSession, alertasRoutes);
 app.use("/api/computadores", humanSession, alertasRoutes);
 app.use("/api/agent", createAgentRouter({ authService }));
 app.use("/api/avisos", humanSession, avisosRoutes);
-const portalRoutes = createPortalRouter({ service: portalService, humanSession, requireAdmin });
+const portalRoutes = createPortalRouter({ service: portalService, humanSession, requireAdmin, lucaService: portalLucaService });
 const browserNotificationRoutes = createBrowserNotificationRouters({ hub: browserNotificationHub, authService, portalService });
 app.use("/api/portal", portalRoutes.portal);
 app.use("/api/portal/browser-notifications", browserNotificationRoutes.portal);
