@@ -40,8 +40,8 @@ function CertificateCard({ certificate, actionLabel, onAction, disabled }) {
   </div>
 }
 
-export default function CertificateChat({ onRequestConfirmed, assistantProvider = previewAiEnabled ? aiCertificateProvider : guidedCertificateProvider }) {
-  const [open, setOpen] = useState(false)
+export default function CertificateChat({ onRequestConfirmed, embedded = false, alwaysOpen = false, assistantProvider = previewAiEnabled ? aiCertificateProvider : guidedCertificateProvider }) {
+  const [open, setOpen] = useState(alwaysOpen)
   const [minimized, setMinimized] = useState(false)
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
@@ -51,6 +51,7 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
   const searchController = useRef(null)
   const conversationController = useRef(null)
   const sessionIdRef = useRef(null)
+  const turnRef = useRef(0)
   const inputRef = useRef(null)
   const historyRef = useRef(null)
 
@@ -59,6 +60,7 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
   }
 
   function resetConversation() {
+    turnRef.current += 1
     searchController.current?.abort()
     conversationController.current?.abort()
     setInput('')
@@ -75,6 +77,10 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
     setMinimized(false)
   }
 
+  useEffect(() => {
+    if (alwaysOpen && !sessionIdRef.current) resetConversation()
+  }, [alwaysOpen])
+
   function closeChat() {
     if (!busy) setOpen(false)
   }
@@ -88,7 +94,7 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
     if (history) history.scrollTop = history.scrollHeight
   }, [messages, busy])
 
-  async function searchCatalog(query) {
+  async function searchCatalog(query, turnId) {
     searchController.current?.abort()
     const controller = new AbortController()
     searchController.current = controller
@@ -96,6 +102,7 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
     setPhase('searching')
     try {
       const catalog = await assistantProvider.searchCertificateCatalog(query, controller.signal)
+      if (turnId !== turnRef.current) return
       if (catalog.items.length === 0) {
         addMessage('luca', 'Não encontrei um certificado autorizado com esse nome ou documento. Você pode corrigir a empresa ou tentar outra busca.')
         setPhase('waiting')
@@ -114,7 +121,7 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
         setPhase('waiting')
       }
     } finally {
-      if (searchController.current === controller) setBusy(false)
+      if (searchController.current === controller && turnId === turnRef.current) setBusy(false)
     }
   }
 
@@ -193,6 +200,7 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
     if (busy) return
     const value = normalizeMessage(input)
     if (!value) return
+    const turnId = ++turnRef.current
     setInput('')
     addMessage('usuario', value)
     const lowered = value.toLowerCase()
@@ -214,17 +222,18 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
     setPhase('thinking')
     try {
       const guidance = await converse(value)
+      if (turnId !== turnRef.current) return
       if (guidance.reply) addMessage('luca', guidance.reply)
       const query = normalizeMessage(guidance.query)
-      if (guidance.intent === 'certificate_search' && query && phase !== 'confirming') await searchCatalog(query)
+      if (guidance.intent === 'certificate_search' && query && phase !== 'confirming') await searchCatalog(query, turnId)
       else setPhase(phase === 'confirming' ? 'confirming' : 'waiting')
     } catch (error) {
-      if (error.name !== 'AbortError') {
+      if (error.name !== 'AbortError' && turnId === turnRef.current) {
         addMessage('luca', 'Não consegui responder agora. Qual empresa ou certificado você procura?')
         setPhase('waiting')
       }
     } finally {
-      setBusy(false)
+      if (turnId === turnRef.current) setBusy(false)
     }
   }
 
@@ -236,12 +245,12 @@ export default function CertificateChat({ onRequestConfirmed, assistantProvider 
   }
 
   return <>
-    {!open && <button type="button" className="luca-launcher" onClick={openChat} aria-label="Abrir conversa com Luca"><Avatar small /><span>Peça para o Luca</span></button>}
-    {open && <section className={`luca-window ${minimized ? 'is-minimized' : ''}`} role="dialog" aria-label="Conversa com Luca" aria-modal="false">
+    {!open && !alwaysOpen && <button type="button" className="luca-launcher" onClick={openChat} aria-label="Abrir conversa com Luca"><Avatar small /><span>Peça para o Luca</span></button>}
+    {open && <section className={`luca-window ${embedded ? 'luca-window-embedded' : ''} ${minimized ? 'is-minimized' : ''}`} role="dialog" aria-label="Conversa com Luca" aria-modal="false">
       <header className="luca-header">
         <Avatar small />
         <div><strong>Luca</strong><span>Certificados · atendimento guiado</span></div>
-        <div className="luca-header-actions"><button type="button" onClick={() => setMinimized((value) => !value)} aria-label={minimized ? 'Restaurar conversa' : 'Minimizar conversa'}>{minimized ? '□' : '−'}</button><button type="button" onClick={closeChat} aria-label="Fechar conversa">×</button></div>
+        {!embedded && <div className="luca-header-actions"><button type="button" onClick={() => setMinimized((value) => !value)} aria-label={minimized ? 'Restaurar conversa' : 'Minimizar conversa'}>{minimized ? '□' : '−'}</button><button type="button" onClick={closeChat} aria-label="Fechar conversa">×</button></div>}
       </header>
       {!minimized && <>
         <div className="luca-history" ref={historyRef} aria-live="polite">

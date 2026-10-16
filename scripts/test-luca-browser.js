@@ -41,6 +41,17 @@ async function evaluate(browser, expression) {
   return result.result.value;
 }
 
+async function waitForComposer(browser) {
+  return evaluate(browser, `new Promise((resolve, reject) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const input = document.querySelector('.luca-composer textarea');
+      if (input && !input.disabled) { clearInterval(timer); resolve(true); }
+      else if (Date.now() - started > 30000) { clearInterval(timer); reject(new Error('chat composer remained busy')); }
+    }, 100);
+  })`);
+}
+
 async function main() {
   const pages = await getJson("http://127.0.0.1:9222/json/list");
   const page = pages.find((item) => item.type === "page" && (item.url.includes(":5174") || item.url === "about:blank"));
@@ -49,10 +60,22 @@ async function main() {
   await new Promise((resolve) => browser.socket.once("open", resolve));
   try {
     await browser.command("Page.enable");
+    await browser.command("Page.navigate", { url: "http://127.0.0.1:5174/" });
+    await evaluate(browser, "new Promise(resolve => setTimeout(resolve, 1500))");
+    const entry = await evaluate(browser, "({ title: document.querySelector('h1')?.innerText, options: [...document.querySelectorAll('.entry-option strong')].map((item) => item.innerText) })");
+    assert.equal(entry.title, "Como você deseja entrar?");
+    assert.deepEqual(entry.options, ["Painel administrativo", "Solicitar certificado"]);
+    await evaluate(browser, "document.querySelector('.entry-option-primary').click(); true");
+    await evaluate(browser, "new Promise(resolve => setTimeout(resolve, 800))");
+    assert.equal(await evaluate(browser, "location.pathname"), "/admin");
     await browser.command("Page.navigate", { url: "http://127.0.0.1:5174/portal/certificados" });
     await evaluate(browser, "new Promise(resolve => setTimeout(resolve, 1500))");
+    const portalShell = await evaluate(browser, "({ hasAdminNav: ['Visão geral', 'Avisos', 'Manutenção programada', 'Inventário'].some((label) => document.body.innerText.includes(label)), hasEntryLink: Boolean(document.querySelector('.portal-entry-link')), hasHeaderActions: Boolean(document.querySelector('.luca-window-embedded .luca-header-actions')) })");
+    assert.equal(portalShell.hasAdminNav, false);
+    assert.equal(portalShell.hasEntryLink, true);
+    assert.equal(portalShell.hasHeaderActions, false);
     const before = await evaluate(browser, "fetch('http://127.0.0.1:4017/api/preview/stats').then(response => response.json())");
-    await evaluate(browser, "document.querySelector('.luca-launcher').click(); true");
+    await evaluate(browser, "document.querySelector('.luca-launcher')?.click(); true");
     await evaluate(browser, "new Promise(resolve => setTimeout(resolve, 100))");
     const result = await evaluate(browser, `(() => {
       const input = document.querySelector('.luca-composer textarea');
@@ -64,6 +87,7 @@ async function main() {
     })()`);
     assert.equal(result, true);
     await evaluate(browser, "new Promise(resolve => setTimeout(resolve, 5000))");
+    await waitForComposer(browser);
     const after = await evaluate(browser, "(async () => ({ text: document.querySelector('.luca-history').innerText, cards: document.querySelectorAll('.luca-certificate-card').length, stats: await fetch('http://127.0.0.1:4017/api/preview/stats').then(response => response.json()) }))()");
     assert.ok(after.text.includes("Oi, Luca, tudo bem?"));
     assert.equal(after.cards, 0);
@@ -80,6 +104,7 @@ async function main() {
       return true;
     })()`);
     await evaluate(browser, "new Promise(resolve => setTimeout(resolve, 6000))");
+    await waitForComposer(browser);
     const pending = await evaluate(browser, "(async () => ({ history: document.querySelector('.luca-history').innerText, cards: document.querySelectorAll('.luca-certificate-card').length, stats: await fetch('http://127.0.0.1:4017/api/preview/stats').then(response => response.json()) }))()");
     assert.equal(pending.cards, 1);
     assert.equal(pending.stats.chatCatalogCalls, before.chatCatalogCalls + 1);
@@ -97,7 +122,7 @@ async function main() {
     assert.equal(casualPending.cards, 1);
     assert.equal(casualPending.stats.chatCatalogCalls, pending.stats.chatCatalogCalls);
     assert.equal(casualPending.stats.chatCreateCalls, pending.stats.chatCreateCalls);
-    console.log(JSON.stringify({ message: "Oi, Luca, tudo bem?", history: after.text, before, after, pending, casualPending }, null, 2));
+    console.log(JSON.stringify({ entry, portalShell, message: "Oi, Luca, tudo bem?", history: after.text, before, after, pending, casualPending }, null, 2));
   } finally {
     browser.socket.close();
   }

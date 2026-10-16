@@ -9,11 +9,14 @@ const component = await readFile(path.join(dashboardRoot, 'src/components/Portal
 const styles = await readFile(path.join(dashboardRoot, 'src/index.css'), 'utf8')
 
 test('portal organiza pesquisa e solicitacoes em duas areas responsivas', () => {
-  assert.match(styles, /\.portal-workspace[^\n]*grid-template-columns: minmax\(0, 3fr\) minmax\(300px, 2fr\)/)
-  assert.match(styles, /\.portal-requests[^\n]*order: -1/)
-  assert.match(component, /className="portal-workspace"/)
-  assert.match(component, /className="portal-search-area"/)
-  assert.match(component, /className="portal-requests"/)
+  assert.match(styles, /\.portal-content-grid[^\n]*grid-template-columns: minmax\(0, 1\.45fr\) minmax\(280px, \.75fr\)/)
+  assert.match(styles, /\.portal-content-grid[^\n]*display: flex; flex-direction: column/)
+  assert.match(component, /className="portal-workspace portal-content-grid"/)
+  assert.match(component, /portal-search-area/)
+  assert.match(component, /portal-requests/)
+  assert.doesNotMatch(component, /Visão geral|Manutenção programada|Inventário/)
+  assert.match(component, /Voltar à entrada/)
+  assert.match(component, /alwaysOpen/)
 })
 
 test('portal ordena prioridades e limita historico somente na apresentacao', () => {
