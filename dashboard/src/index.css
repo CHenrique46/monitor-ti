@@ -2790,6 +2790,11 @@ h2 { color: var(--text-primary); font-size: 1.18rem; }
 .luca-window-embedded .luca-card-action, .luca-window-embedded .luca-message-actions button { background: #0891b2; border-color: #0891b2; color: #fff; }
 .luca-window-embedded .luca-message-actions button:last-child { background: transparent; border-color: #475569; color: #cbd5e1; }
 .luca-window-embedded .luca-composer { background: #172235; border-top-color: #334155; }
+.luca-idle-warning { align-items: center; background: rgba(245, 158, 11, .12); border: 1px solid rgba(245, 158, 11, .45); border-radius: 9px; color: #fcd34d; display: flex; gap: 12px; justify-content: space-between; margin: 12px 0 0; padding: 10px 12px; }
+.luca-idle-warning p { font-size: .8rem; }
+.luca-idle-warning button { background: transparent; border: 1px solid #f59e0b; border-radius: 6px; color: #fcd34d; cursor: pointer; font: inherit; font-size: .76rem; font-weight: 700; padding: 7px 9px; white-space: nowrap; }
+.luca-idle-warning button:hover, .luca-idle-warning button:focus-visible { background: rgba(245, 158, 11, .16); outline: none; }
+@media (max-width: 520px) { .luca-idle-warning { align-items: stretch; flex-direction: column; } .luca-idle-warning button { width: 100%; } }
 @media (max-width: 760px) { .portal-hero img { height: 175px; width: 175px; } }
 @media (max-width: 520px) { .portal-hero img { height: 150px; width: 150px; } }
 

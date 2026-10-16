@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as guidedCertificateProvider from '../services/certificateChatApi'
 import * as aiCertificateProvider from '../services/certificateChatAiApi'
 import { formatCertificateValidity } from '../formatCertificateValidity'
+import { createChatInactivityController } from './chatInactivity'
 
 const OPENING_MESSAGE = 'Oi! Eu sou o Luca! 😊 Posso ajudar você a encontrar e solicitar um certificado. Qual empresa você procura?'
 const previewAiEnabled = import.meta.env.VITE_LUCA_AI_PREVIEW === 'true'
@@ -48,10 +49,13 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
   const [selected, setSelected] = useState(null)
   const [phase, setPhase] = useState('waiting')
   const [busy, setBusy] = useState(false)
+  const [idleWarning, setIdleWarning] = useState(false)
   const searchController = useRef(null)
   const conversationController = useRef(null)
   const sessionIdRef = useRef(null)
   const turnRef = useRef(0)
+  const busyRef = useRef(false)
+  const inactivityRef = useRef(null)
   const inputRef = useRef(null)
   const historyRef = useRef(null)
 
@@ -68,7 +72,13 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
     setSelected(null)
     setPhase('waiting')
     setBusy(false)
+    setIdleWarning(false)
     sessionIdRef.current = `luca-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    inactivityRef.current?.activity()
+  }
+
+  function registerActivity() {
+    inactivityRef.current?.activity()
   }
 
   function openChat() {
@@ -80,6 +90,26 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
   useEffect(() => {
     if (alwaysOpen && !sessionIdRef.current) resetConversation()
   }, [alwaysOpen])
+
+  useEffect(() => {
+    const controller = createChatInactivityController({
+      isBusy: () => busyRef.current,
+      onWarning: () => setIdleWarning(true),
+      onTimeout: resetConversation
+    })
+    inactivityRef.current = controller
+    controller.start()
+    return () => {
+      controller.dispose()
+      inactivityRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const wasBusy = busyRef.current
+    busyRef.current = busy
+    if (wasBusy && !busy) registerActivity()
+  }, [busy])
 
   function closeChat() {
     if (!busy) setOpen(false)
@@ -116,7 +146,7 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
         setPhase('choosing')
       }
     } catch (error) {
-      if (error.name !== 'AbortError') {
+      if (error.name !== 'AbortError' && turnId === turnRef.current) {
         addMessage('luca', `Não consegui consultar o catálogo agora. ${error.message || 'Tente novamente em instantes.'}`)
         setPhase('waiting')
       }
@@ -149,8 +179,9 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
     }
   }
 
-  async function confirmCertificate(certificate = selected, addUserMessage = true) {
+  async function confirmCertificate(certificate = selected, addUserMessage = true, turnId = turnRef.current) {
     if (!certificate || busy) return
+    registerActivity()
     setSelected(certificate)
     setBusy(true)
     setPhase('submitting')
@@ -158,11 +189,13 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
     addMessage('luca', 'Vou confirmar a solicitação com o TI...')
     try {
       await assistantProvider.createCertificateRequest({ certificadoId: certificate.id })
+      if (turnId !== turnRef.current) return
       addMessage('luca', 'Solicitação enviada para o TI!')
       setPhase('sent')
       onRequestConfirmed?.()
     } catch (requestError) {
       const state = await verifyAfterUncertainResult(certificate.id)
+      if (turnId !== turnRef.current) return
       if (requestError.status === 409 && state.pending) {
         addMessage('luca', 'Já existe uma solicitação pendente deste certificado para esta estação. Não reenviamos o pedido.')
         setPhase('uncertain')
@@ -175,12 +208,13 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
         setPhase('uncertain')
       }
     } finally {
-      setBusy(false)
+      if (turnId === turnRef.current) setBusy(false)
     }
   }
 
   function cancelSelection(addUserMessage = true) {
     if (busy) return
+    registerActivity()
     if (addUserMessage) addMessage('usuario', 'Não, quero corrigir.')
     addMessage('luca', 'Tudo bem. Qual empresa ou documento devo procurar?')
     setSelected(null)
@@ -189,6 +223,7 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
 
   function chooseCertificate(certificate) {
     if (busy) return
+    registerActivity()
     setSelected(certificate)
     addMessage('usuario', `Vou verificar ${certificate.nomeEmpresa || certificate.nomeExibicao}.`)
     addMessage('luca', 'Encontrei este certificado. É esse que você precisa?', { certificate, action: 'confirm' })
@@ -197,6 +232,7 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
 
   async function sendMessage(event) {
     event?.preventDefault()
+    registerActivity()
     if (busy) return
     const value = normalizeMessage(input)
     if (!value) return
@@ -211,7 +247,7 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
       return
     }
     if (phase === 'confirming' && selected && /^(sim|s|é esse|e esse|confirmo|pode solicitar)/i.test(value)) {
-      await confirmCertificate(selected, false)
+      await confirmCertificate(selected, false, turnId)
       return
     }
     if (phase === 'confirming' && /\b(?:não|nao|corrigir|outra empresa)\b/i.test(value)) {
@@ -253,11 +289,12 @@ export default function CertificateChat({ onRequestConfirmed, embedded = false, 
         {!embedded && <div className="luca-header-actions"><button type="button" onClick={() => setMinimized((value) => !value)} aria-label={minimized ? 'Restaurar conversa' : 'Minimizar conversa'}>{minimized ? '□' : '−'}</button><button type="button" onClick={closeChat} aria-label="Fechar conversa">×</button></div>}
       </header>
       {!minimized && <>
-        <div className="luca-history" ref={historyRef} aria-live="polite">
+        <div className="luca-history" ref={historyRef} aria-live="polite" onClick={registerActivity}>
           {messages.map((message) => <div className={`luca-message-row luca-message-${message.role}`} key={message.id}><div className="luca-message-bubble">{message.role === 'luca' && <Avatar small />}<div><p>{message.text}</p>{message.certificate && <CertificateCard certificate={message.certificate} actionLabel="Sim, é esse" onAction={() => confirmCertificate(message.certificate)} disabled={busy} />}{message.certificates && <div className="luca-result-list">{message.certificates.map((certificate) => <CertificateCard certificate={certificate} actionLabel="Escolher este" onAction={() => chooseCertificate(certificate)} disabled={busy} key={certificate.id} />)}</div>}{message.action === 'confirm' && <div className="luca-message-actions"><button type="button" onClick={cancelSelection} disabled={busy}>Corrigir</button></div>}</div></div></div>)}
-          {busy && <div className="luca-message-row luca-message-luca"><div className="luca-message-bubble"><Avatar small /><div><p className="luca-typing">Luca está consultando...</p></div></div></div>}
-        </div>
-        <form className="luca-composer" onSubmit={sendMessage}><textarea ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleInputKeyDown} placeholder="Digite sua mensagem..." rows="1" disabled={busy} aria-label="Digite sua mensagem" /><button type="submit" disabled={busy || !input.trim()} aria-label="Enviar mensagem">Enviar</button></form>
+           {busy && <div className="luca-message-row luca-message-luca"><div className="luca-message-bubble"><Avatar small /><div><p className="luca-typing">Luca está consultando...</p></div></div></div>}
+           {idleWarning && <div className="luca-idle-warning" role="alert"><p>Vou encerrar esta conversa em 1 minuto por inatividade.</p><button type="button" onClick={registerActivity}>Continuar conversa</button></div>}
+         </div>
+         <form className="luca-composer" onSubmit={sendMessage}><textarea ref={inputRef} value={input} onChange={(event) => { registerActivity(); setInput(event.target.value) }} onKeyDown={handleInputKeyDown} placeholder="Digite sua mensagem..." rows="1" disabled={busy} aria-label="Digite sua mensagem" /><button type="submit" disabled={busy || !input.trim()} aria-label="Enviar mensagem">Enviar</button></form>
       </>}
     </section>}
   </>
