@@ -187,7 +187,7 @@ function createPreviewServer({ conversationService = createConversationService()
     if (url.pathname === "/api/portal/session" && ["GET", "POST"].includes(req.method)) {
       return send(res, 200, { hostname: "PC-SINTETICO", usuarioWindows: "usuario.teste", expiresAt: new Date(Date.now() + 900000).toISOString(), identificacao: "Sessao sintetica isolada para previa." });
     }
-    if (url.pathname === "/api/auth/me" && req.method === "GET") return send(res, 200, { username: "usuario.teste", role: "VIEWER" });
+    if (url.pathname === "/api/auth/me" && req.method === "GET") return send(res, 401, { erro: "Sessao administrativa ausente na previa." });
     if (url.pathname === "/api/portal/browser-notifications/status" && req.method === "GET") return send(res, 200, { enabled: false });
     if (url.pathname === "/api/portal/luca/conversa" && req.method === "POST") {
       try {

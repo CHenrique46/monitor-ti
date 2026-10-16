@@ -41,13 +41,30 @@ function sortRequests(items) {
   return [...items].sort((left, right) => requestPriority(left) - requestPriority(right) || new Date(right.solicitadoEm).getTime() - new Date(left.solicitadoEm).getTime())
 }
 
-function PortalSidebar() {
+function latestRequest(items) {
+  return [...items].sort((left, right) => {
+    const rightDate = new Date(right.solicitadoEm || right.criadoEm || 0).getTime()
+    const leftDate = new Date(left.solicitadoEm || left.criadoEm || 0).getTime()
+    return rightDate - leftDate || Number(right.id || 0) - Number(left.id || 0)
+  })[0] || null
+}
+
+function PortalSidebar({ session, latestRequest, requestsLoading, requestsError, hasHistory }) {
   return <aside className="portal-sidebar">
     <a className="portal-brand" href="/" aria-label="Voltar à entrada do HenriTech">
       <span className="portal-brand-mark">HT</span>
       <span><strong>HenriTech</strong><small>Control</small></span>
     </a>
-    <div className="portal-sidebar-copy"><span className="portal-kicker">Portal de certificados</span><p>Atendimento seguro para sua estação.</p></div>
+    <div className="portal-sidebar-copy"><span className="portal-kicker">Portal de certificados</span><p>Atendimento seguro para {session?.hostname || 'sua estação'}.</p></div>
+    <section className="portal-latest-request" aria-labelledby="portal-latest-request-title">
+      <span className="portal-kicker">Acompanhamento</span>
+      <h2 id="portal-latest-request-title">Minha última solicitação</h2>
+      {requestsLoading && <p>Carregando...</p>}
+      {!requestsLoading && requestsError && <p>Não foi possível carregar.</p>}
+      {!requestsLoading && !requestsError && !latestRequest && <p>Você ainda não fez solicitações.</p>}
+      {!requestsLoading && !requestsError && latestRequest && <div className="portal-latest-request-card"><strong>{latestRequest.certificado?.nomeExibicao || 'Certificado'}</strong><span>{requestStateLabel(latestRequest)}</span></div>}
+      {!requestsLoading && !requestsError && hasHistory && <a href="#portal-history">Ver histórico completo</a>}
+    </section>
     <a className="portal-entry-link" href="/">Voltar à entrada</a>
   </aside>
 }
@@ -155,9 +172,11 @@ export default function PortalCertificados() {
   const orderedRequests = requests ? sortRequests(requests.items) : []
   const visibleRequests = showOlderRequests ? orderedRequests : orderedRequests.filter((request, index) => requestPriority(request) < 2 || index < INITIAL_REQUESTS_VISIBLE)
 
+  const lastRequest = latestRequest(requests?.items || [])
+
   if (loading) return <main className="portal-shell"><PortalSidebar /><div className="portal-main"><p>Identificando esta estação...</p></div></main>
   return <main className="portal-shell">
-    <PortalSidebar />
+    <PortalSidebar session={session} latestRequest={lastRequest} requestsLoading={requestsLoading} requestsError={requestsError} hasHistory={orderedRequests.length > 0} />
     <div className="portal-main">
       <header className="portal-topbar"><div><span className="portal-kicker">Escritório Vavá · ambiente seguro</span><h1>Portal de certificados</h1></div>{session && <div className="portal-session"><span className="portal-status-dot" />{session.hostname}{session.usuarioWindows ? ` · ${session.usuarioWindows}` : ''}</div>}</header>
       {session && <div className="portal-session-tools"><span>{session.identificacao}</span><BrowserNotificationControls basePath="/api/portal/browser-notifications" label="Notificações desta estação" /></div>}
@@ -166,9 +185,10 @@ export default function PortalCertificados() {
       {!error && <>
         <section className="portal-hero"><div className="portal-hero-copy"><span className="portal-kicker">Seu atendimento começa aqui</span><h2>Oi! Eu sou o Luca.<br /><strong>Qual certificado você precisa hoje?</strong></h2><p>Encontre um certificado autorizado ou acompanhe uma solicitação existente.</p></div><img src="/lucaacenando.png" alt="Luca, mascote do HenriTech" /></section>
         <div className="portal-workspace portal-content-grid">
-          <section className="portal-primary-column" aria-label="Atendimento e catálogo">
+          <section className="portal-chat-column" aria-label="Atendimento do Luca">
             <CertificateChat embedded alwaysOpen onRequestConfirmed={refreshRequestsAfterChat} />
-            <section className="portal-panel portal-search-area" aria-labelledby="portal-search-title">
+          </section>
+          <section className="portal-panel portal-search-area" aria-labelledby="portal-search-title">
               <div className="portal-panel-heading"><div><span className="portal-kicker">Pesquisa tradicional</span><h2 id="portal-search-title">Pesquisar certificados</h2></div><span className="portal-panel-note">Catálogo autorizado</span></div>
               <form className="portal-search" onSubmit={searchCatalog}>
                 <label htmlFor="portal-search">Empresa ou CNPJ/CPF</label><input id="portal-search" value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} placeholder="Digite parte do nome ou documento" autoComplete="off" />
@@ -183,20 +203,17 @@ export default function PortalCertificados() {
               {!catalogLoading && !catalogError && catalog?.items.length > 0 && <div className="portal-certificate-list">{catalog.items.map((certificate) => <article className={`portal-certificate ${selected?.id === certificate.id ? 'is-selected' : ''}`} key={certificate.id}><div><strong>{certificate.nomeExibicao}</strong><span>{certificate.documento || 'Documento não identificado'}</span><small>{certificate.extensao?.replace('.', '').toUpperCase() || 'CERT'} · {certificate.anoReferencia || 'Ano não informado'} · {displayFolder(certificate.pastaLogica)}</small><small className={`certificate-status validity-${formatCertificateValidity(certificate).tone}`}>{formatCertificateValidity(certificate).label}</small>{formatCertificateValidity(certificate).detail && <small>{formatCertificateValidity(certificate).detail}</small>}</div><button type="button" onClick={() => setSelected(certificate)} disabled={submitting}>{selected?.id === certificate.id ? 'Selecionado' : 'Selecionar'}</button></article>)}</div>}
               {!catalogLoading && catalog?.totalPages > 1 && <div className="certificate-pagination"><button type="button" onClick={() => setCatalogPage((current) => Math.max(1, current - 1))} disabled={catalogPage <= 1}>Anterior</button><span>Página {catalogPage} de {catalog.totalPages}</span><button type="button" onClick={() => setCatalogPage((current) => Math.min(catalog.totalPages, current + 1))} disabled={catalogPage >= catalog.totalPages}>Próxima</button></div>}
               {selected && <form onSubmit={submit} className="portal-form"><h2>Solicitar: {selected.nomeExibicao}</h2><p className="muted">{selected.documento || 'Documento não identificado'} · {selected.extensao?.replace('.', '').toUpperCase()} · {selected.anoReferencia || 'Ano não informado'}</p><label htmlFor="portal-reason">Motivo (opcional)</label><textarea id="portal-reason" maxLength="500" value={motivo} onChange={(event) => setMotivo(event.target.value)} rows="3" disabled={submitting} /><button type="submit" className="btn-update" disabled={submitting}>{submitting ? 'Solicitando...' : 'Solicitar'}</button></form>}
-            </section>
-          </section>
-          <aside className="portal-side-column">
-            <section className="portal-panel portal-requests" id="portal-requests" aria-live="polite" aria-labelledby="portal-requests-title">
-              <div className="portal-panel-heading"><div><span className="portal-kicker">Acompanhamento</span><h2 id="portal-requests-title">Minhas solicitações</h2></div>{requests?.total ? <span className="portal-count">{requests.total}</span> : null}</div>
-              {requestsLoading && <p className="notice">Carregando solicitações...</p>}
-              {!requestsLoading && requestsError && <><p className="notice error">{requestsError}</p><button type="button" className="btn-cancel portal-retry" onClick={() => loadRequests(requestsPage)}>Tentar novamente</button></>}
-              {!requestsLoading && !requestsError && requests?.items.length === 0 && <p className="muted">Nenhuma solicitação feita por esta estação.</p>}
-              {!requestsLoading && !requestsError && requests?.items.length > 0 && <div className="portal-request-list">{visibleRequests.map((request) => <article className={`portal-request request-card request-card-${requestStateLabel(request).toLowerCase()}`} key={request.id}><div className="portal-request-heading"><strong>{request.certificado?.nomeExibicao || 'Certificado'}</strong><span className="request-state">{requestStateLabel(request)}</span></div>{request.motivo && <small>Motivo: {request.motivo}</small>}{request.motivoNegativa && <small>Motivo da negativa: {request.motivoNegativa}</small>}{releaseMessage(request) && <small>{releaseMessage(request)}</small>}{request.liberacao?.expiresAt && <small>Disponível até: {new Date(request.liberacao.expiresAt).toLocaleString()}</small>}</article>)}</div>}
-              {!requestsLoading && !requestsError && requests?.items.length > visibleRequests.length && <button type="button" className="portal-request-toggle" onClick={() => setShowOlderRequests((visible) => !visible)}>{showOlderRequests ? 'Recolher solicitações anteriores' : 'Ver solicitações anteriores'}</button>}
-              {!requestsLoading && !requestsError && requests?.totalPages > 1 && <div className="certificate-pagination"><button type="button" onClick={() => setRequestsPage((current) => Math.max(1, current - 1))} disabled={requestsPage <= 1}>Anterior</button><span>Página {requestsPage} de {requests.totalPages}</span><button type="button" onClick={() => setRequestsPage((current) => Math.min(requests.totalPages, current + 1))} disabled={requestsPage >= requests.totalPages}>Próxima</button></div>}
-            </section>
-          </aside>
-        </div>
+           </section>
+         </div>
+        <section className="portal-panel portal-history" id="portal-history" aria-live="polite" aria-labelledby="portal-history-title">
+          <div className="portal-panel-heading"><div><span className="portal-kicker">Histórico</span><h2 id="portal-history-title">Minhas solicitações</h2></div>{requests?.total ? <span className="portal-count">{requests.total}</span> : null}</div>
+          {requestsLoading && <p className="notice">Carregando solicitações...</p>}
+          {!requestsLoading && requestsError && <><p className="notice error">{requestsError}</p><button type="button" className="btn-cancel portal-retry" onClick={() => loadRequests(requestsPage)}>Tentar novamente</button></>}
+          {!requestsLoading && !requestsError && requests?.items.length === 0 && <p className="muted">Você ainda não fez solicitações.</p>}
+          {!requestsLoading && !requestsError && requests?.items.length > 0 && <div className="portal-request-list">{visibleRequests.map((request) => <article className={`portal-request request-card request-card-${requestStateLabel(request).toLowerCase()}`} key={request.id}><div className="portal-request-heading"><strong>{request.certificado?.nomeExibicao || 'Certificado'}</strong><span className="request-state">{requestStateLabel(request)}</span></div>{request.motivo && <small>Motivo: {request.motivo}</small>}{request.motivoNegativa && <small>Motivo da negativa: {request.motivoNegativa}</small>}{releaseMessage(request) && <small>{releaseMessage(request)}</small>}{request.liberacao?.expiresAt && <small>Disponível até: {new Date(request.liberacao.expiresAt).toLocaleString()}</small>}</article>)}</div>}
+          {!requestsLoading && !requestsError && requests?.items.length > visibleRequests.length && <button type="button" className="portal-request-toggle" onClick={() => setShowOlderRequests((visible) => !visible)}>{showOlderRequests ? 'Recolher solicitações anteriores' : 'Ver solicitações anteriores'}</button>}
+          {!requestsLoading && !requestsError && requests?.totalPages > 1 && <div className="certificate-pagination"><button type="button" onClick={() => setRequestsPage((current) => Math.max(1, current - 1))} disabled={requestsPage <= 1}>Anterior</button><span>Página {requestsPage} de {requests.totalPages}</span><button type="button" onClick={() => setRequestsPage((current) => Math.min(requests.totalPages, current + 1))} disabled={requestsPage >= requests.totalPages}>Próxima</button></div>}
+        </section>
       </>}
     </div>
   </main>

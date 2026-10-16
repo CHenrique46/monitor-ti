@@ -2742,6 +2742,14 @@ h2 { color: var(--text-primary); font-size: 1.18rem; }
 .portal-sidebar-copy p { color: #94a3b8; font-size: .85rem; margin-top: 10px; }
 .portal-entry-link { border-top: 1px solid #1e293b; color: #94a3b8; font-size: .8rem; margin: auto 12px 0; padding-top: 16px; text-decoration: none; }
 .portal-entry-link:hover, .portal-entry-link:focus-visible { color: #38bdf8; }
+.portal-latest-request { border-top: 1px solid #1e293b; margin: 34px 12px 0; padding-top: 18px; }
+.portal-latest-request h2 { color: #e2e8f0; font-size: .98rem; line-height: 1.25; margin: 7px 0 12px; }
+.portal-latest-request p, .portal-latest-request a { color: #94a3b8; font-size: .78rem; line-height: 1.45; }
+.portal-latest-request a { display: inline-block; margin-top: 14px; color: #7dd3fc; text-decoration: none; }
+.portal-latest-request a:hover, .portal-latest-request a:focus-visible { color: #e0f2fe; }
+.portal-latest-request-card { border-left: 3px solid #38bdf8; display: grid; gap: 7px; padding-left: 10px; }
+.portal-latest-request-card strong { color: #e2e8f0; font-size: .82rem; line-height: 1.35; }
+.portal-latest-request-card span { color: #7dd3fc; font-size: .75rem; }
 .portal-main { background: #0f172a; }
 .portal-topbar h1, .portal-panel-heading h2, .portal-search-area .certificate-results-heading h2, .portal-panel .portal-form h2 { color: #e2e8f0; }
 .portal-topbar .portal-kicker, .portal-session-tools, .portal-search label, .portal-panel .muted, .portal-search-area .portal-certificate span, .portal-search-area .portal-certificate small, .portal-requests .portal-request small { color: #94a3b8; }
@@ -2768,6 +2776,9 @@ h2 { color: var(--text-primary); font-size: 1.18rem; }
 .portal-requests .portal-request { background: #0f172a; border-color: #334155; }
 .portal-requests .request-card-pendente { background: rgba(245, 158, 11, .1); }
 .portal-requests .request-card-liberada { background: rgba(34, 197, 94, .1); }
+.portal-content-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.portal-chat-column { min-width: 0; }
+.portal-history { margin-top: 24px; }
 .luca-window-embedded .luca-header { background: #172235; border-bottom-color: #334155; color: #e2e8f0; }
 .luca-window-embedded .luca-header span, .luca-window-embedded .luca-typing { color: #94a3b8 !important; }
 .luca-window-embedded .luca-header-actions button:hover, .luca-window-embedded .luca-header-actions button:focus-visible { background: #24344d; }

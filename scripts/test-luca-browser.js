@@ -60,6 +60,9 @@ async function main() {
   await new Promise((resolve) => browser.socket.once("open", resolve));
   try {
     await browser.command("Page.enable");
+    await browser.command("Network.enable");
+    await browser.command("Network.clearBrowserCookies");
+    await browser.command("Storage.clearDataForOrigin", { origin: "http://127.0.0.1:5174", storageTypes: "all" });
     await browser.command("Page.navigate", { url: "http://127.0.0.1:5174/" });
     await evaluate(browser, "new Promise(resolve => setTimeout(resolve, 1500))");
     const entry = await evaluate(browser, "({ title: document.querySelector('h1')?.innerText, options: [...document.querySelectorAll('.entry-option strong')].map((item) => item.innerText) })");
@@ -67,7 +70,9 @@ async function main() {
     assert.deepEqual(entry.options, ["Painel administrativo", "Solicitar certificado"]);
     await evaluate(browser, "document.querySelector('.entry-option-primary').click(); true");
     await evaluate(browser, "new Promise(resolve => setTimeout(resolve, 800))");
-    assert.equal(await evaluate(browser, "location.pathname"), "/admin");
+    assert.equal(await evaluate(browser, "location.pathname"), "/");
+    assert.equal(await evaluate(browser, "Boolean(document.querySelector('#login-username'))"), true);
+    assert.equal(await evaluate(browser, "Boolean(document.querySelector('#login-password'))"), true);
     await browser.command("Page.navigate", { url: "http://127.0.0.1:5174/portal/certificados" });
     await evaluate(browser, "new Promise(resolve => setTimeout(resolve, 1500))");
     const portalShell = await evaluate(browser, "({ hasAdminNav: ['Visão geral', 'Avisos', 'Manutenção programada', 'Inventário'].some((label) => document.body.innerText.includes(label)), hasEntryLink: Boolean(document.querySelector('.portal-entry-link')), hasHeaderActions: Boolean(document.querySelector('.luca-window-embedded .luca-header-actions')) })");
