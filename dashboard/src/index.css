@@ -2815,6 +2815,37 @@ h2 { color: var(--text-primary); font-size: 1.18rem; }
 .login-back { background: transparent; border: 0; color: #7dd3fc; cursor: pointer; font: inherit; margin-top: 18px; padding: 0; }
 .login-back:hover { color: #e0f2fe; }
 @media (max-width: 620px) { .entry-card { padding: 28px 22px; } .entry-brand { margin-bottom: 30px; } .entry-options { grid-template-columns: 1fr; } }
+
+/* Keep the embedded chat usable within the first viewport. */
+.portal-main { padding-bottom: 32px; padding-top: 20px; }
+.portal-topbar h1 { font-size: clamp(1.55rem, 2.2vw, 2rem); margin-top: 4px; }
+.portal-session-tools { margin-top: 6px; padding-bottom: 9px; }
+.portal-hero { margin: 14px 0 16px; min-height: 112px; padding: 16px 28px 10px 24px; }
+.portal-hero h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); margin: 6px 0 7px; }
+.portal-hero p { font-size: .86rem; }
+.portal-hero img { height: 120px; width: 120px; }
+.portal-content-grid { align-items: stretch; min-height: 0; }
+.portal-chat-column { align-self: start; height: 468px !important; min-height: 360px !important; }
+.luca-window-embedded { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.luca-window-embedded .luca-header { flex: 0 0 58px; min-height: 58px; padding: 9px 14px; }
+.luca-window-embedded .luca-history { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.luca-window-embedded .luca-history > * { flex: 0 0 auto; }
+.luca-window-embedded .luca-composer { flex: 0 0 auto; }
+@media (max-width: 760px) {
+  .portal-main { padding-bottom: 28px; padding-top: 16px; }
+  .portal-topbar h1 { font-size: 1.65rem; }
+  .portal-session-tools { margin-top: 4px; padding-bottom: 8px; }
+  .portal-hero { margin: 12px 0 14px; min-height: 128px; padding: 15px 18px 8px; }
+  .portal-hero h2 { font-size: 1.3rem; }
+  .portal-hero img { height: 125px; width: 125px; }
+  .portal-chat-column { height: min(560px, calc(100dvh - 215px)); min-height: 320px; }
+}
+@media (min-width: 1600px) { .portal-chat-column { height: 610px !important; } }
+@media (max-width: 520px) {
+  .portal-hero { min-height: 134px; }
+  .portal-hero img { height: 115px; width: 115px; }
+  .portal-chat-column { height: min(520px, calc(100dvh - 205px)); min-height: 320px; }
+}
 .login-brand > div { min-width: 0; }
 .site-brand { min-width: 0; }
 .brand-copy { max-width: 100%; min-width: 0; }

@@ -19,6 +19,10 @@ test('portal organiza pesquisa e solicitacoes em duas areas responsivas', () => 
   assert.doesNotMatch(component, /Visão geral|Manutenção programada|Inventário/)
   assert.match(component, /Voltar à entrada/)
   assert.match(component, /alwaysOpen/)
+  assert.match(styles, /\.luca-window-embedded \{ display: flex; flex-direction: column/)
+  assert.match(styles, /\.luca-window-embedded \.luca-history \{ flex: 1 1 auto; min-height: 0; overflow-y: auto/)
+  assert.match(styles, /\.luca-window-embedded \.luca-composer \{ flex: 0 0 auto/)
+  assert.match(styles, /\.portal-chat-column \{ align-self: start; height: 468px !important/)
 })
 
 test('portal ordena prioridades e limita historico somente na apresentacao', () => {
