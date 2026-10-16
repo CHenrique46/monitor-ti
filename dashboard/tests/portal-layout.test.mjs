@@ -8,12 +8,13 @@ const dashboardRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 const component = await readFile(path.join(dashboardRoot, 'src/components/PortalCertificados.jsx'), 'utf8')
 const styles = await readFile(path.join(dashboardRoot, 'src/index.css'), 'utf8')
 
-test('portal organiza pesquisa e solicitacoes em duas areas responsivas', () => {
-  assert.match(styles, /\.portal-workspace[^\n]*grid-template-columns: minmax\(0, 3fr\) minmax\(300px, 2fr\)/)
-  assert.match(styles, /\.portal-requests[^\n]*order: -1/)
-  assert.match(component, /className="portal-workspace"/)
-  assert.match(component, /className="portal-search-area"/)
-  assert.match(component, /className="portal-requests"/)
+test('portal deixa o chat principal e abre pesquisa tradicional sob demanda', () => {
+  assert.match(styles, /\.portal-content-grid\.is-search-open[^\n]*grid-template-columns/)
+  assert.match(styles, /\.portal-content-grid\.is-search-closed[^\n]*display: block/)
+  assert.match(component, /portal-workspace portal-content-grid/)
+  assert.match(component, /portal-search-area/)
+  assert.match(component, /traditionalSearchOpen/)
+  assert.match(component, /Voltar ao chat/)
 })
 
 test('portal ordena prioridades e limita historico somente na apresentacao', () => {
@@ -33,4 +34,12 @@ test('portal preserva mensagem publica sanitizada e nao oferece clipboard', () =
   assert.equal(component.includes('nomeArquivoLiberado'), false)
   assert.equal(component.includes('compartilhamento'), false)
   assert.equal(component.includes('\\\\192.168.40.250'), false)
+})
+
+test('chat oferece pesquisa sem depender da IA e preserva consulta', async () => {
+  const chat = await readFile(path.join(dashboardRoot, 'src/components/CertificateChat.jsx'), 'utf8')
+  assert.match(chat, /Oi! Eu sou o Luca 😊 Me diga qual certificado você procura\./)
+  assert.match(chat, /Abrir pesquisa tradicional/)
+  assert.match(chat, /pesquisa tradicional\|pesquisar certificado/)
+  assert.match(chat, /CERTIFICATE_PORTAL_READ_ONLY/)
 })

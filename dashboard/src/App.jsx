@@ -12,6 +12,7 @@ import { AuthContext } from './auth/AuthContext'
 import PortalCertificados from './components/PortalCertificados'
 import SolicitacoesCertificado from './components/SolicitacoesCertificado'
 import { PendingRequestsProvider } from './components/PendingRequestsProvider'
+import EntryScreen from './components/EntryScreen'
 
 export default function App() {
   const navigate = useNavigate()
@@ -19,6 +20,7 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [connectionError, setConnectionError] = useState(false)
+  const [adminLoginRequested, setAdminLoginRequested] = useState(false)
 
   const loadSession = async () => {
     try {
@@ -53,14 +55,16 @@ export default function App() {
   }
 
   if (location.pathname.startsWith('/portal')) return <Routes><Route path="/portal/certificados" element={<PortalCertificados />} /></Routes>
+  if (location.pathname === '/' && !adminLoginRequested) return <EntryScreen authenticated={Boolean(user)} onAdminPanel={() => navigate('/admin')} onAdminLogin={() => setAdminLoginRequested(true)} />
   if (loading) return <main className="login-shell"><p className="login-loading">Verificando sessão...</p></main>
-  if (!user) return <Login connectionError={connectionError} onAuthenticated={(authenticatedUser) => { setConnectionError(false); setUser(authenticatedUser); navigate('/') }} />
+  if (!user) return <Login connectionError={connectionError} onAuthenticated={(authenticatedUser) => { setConnectionError(false); setUser(authenticatedUser); setAdminLoginRequested(false); navigate('/') }} />
 
   return (
     <AuthContext.Provider value={{ user, logout, refreshSession: loadSession }}>
       <PendingRequestsProvider>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/admin" element={<Dashboard />} />
+          <Route path="/" element={<EntryScreen authenticated onAdminPanel={() => navigate('/admin')} onAdminLogin={() => navigate('/admin')} />} />
           <Route path="/avisos" element={<Avisos />} />
           <Route path="/manutencao-programada" element={<MaintenanceSchedules />} />
           <Route path="/inventario" element={<Inventory />} />
