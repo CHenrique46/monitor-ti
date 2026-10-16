@@ -53,7 +53,9 @@ consultas.
 O parser aceita JSON estruturado e tambem texto simples ou JSON parcial, sempre
 descartando query quando nao ha uma intencao de busca valida. Para reduzir
 alucinacao operacional, uma query so e aceita quando seus termos identificaveis
-aparecem na mensagem atual do usuario.
+aparecem na mensagem atual ou em mensagens recentes do usuario. Se a mensagem
+atual trouxer novos termos identificaveis, eles tem prioridade; isso impede que
+uma empresa antiga seja reutilizada depois de uma correcao.
 
 ## Testes planejados
 
@@ -94,7 +96,9 @@ desconhecida e comprova a chamada do Granite por `graniteCalls`.
 ### Revisao de capacidade
 
 As frases ineditas testadas mostraram que o Granite conduz bem conversas
-curtas, pedidos incompletos e pedidos impossiveis sem criar solicitacoes. Ele
+curtas, referencias contextuais como "dela", pedidos incompletos e pedidos
+impossiveis sem criar solicitacoes. Em uma rodada, uma correcao de empresa nao
+produziu query; a protecao rejeitou a empresa antiga e nao fez busca. Ele
 continua inconsistente ao responder perguntas sobre procedimentos internos:
 mesmo com instrucao geral para admitir desconhecimento, pode inventar uma
 orientacao. Essa limitacao fica registrada e nao foi escondida com novas regras

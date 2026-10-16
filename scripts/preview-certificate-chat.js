@@ -7,6 +7,7 @@ const OLLAMA_MODEL = "granite3.3:2b";
 const MAX_HISTORY = 8;
 const MAX_QUEUE = 4;
 const REQUEST_TIMEOUT_MS = 15000;
+const GENERIC_QUERY_WORDS = new Set(["a", "o", "as", "os", "um", "uma", "de", "da", "do", "das", "dos", "para", "por", "favor", "quero", "preciso", "necessito", "certificado", "certificados", "empresa", "documento", "cnpj", "cpf", "se", "chama", "correta", "correto", "corrigindo", "na", "verdade", "e", "é", "qual", "que", "dela", "dele", "esse", "essa", "isso"]);
 const requests = [];
 const conversations = new Map();
 const previewStats = { conversationCalls: 0, graniteCalls: 0, catalogCalls: 0, chatCatalogCalls: 0, createCalls: 0, chatCreateCalls: 0 };
@@ -20,11 +21,11 @@ const SYSTEM_PROMPT = [
   "Converse naturalmente e conduza a pessoa, quando fizer sentido, ate a busca de um certificado.",
   "Cumprimente, responda agradecimentos, apresente-se, responda perguntas simples e peca esclarecimento quando faltar informacao.",
   "Se mencionarem problema de computador, diga para procurar Henrique do TI. Nao diagnostique, nao sugira comandos e nao explique suporte tecnico.",
-  "Para procedimentos, politicas ou informacoes exclusivas do Escritorio Vava, admita que nao sabe e encaminhe ao responsavel; nunca complete com exemplos inventados.",
+  "Para procedimentos, politicas ou informacoes exclusivas do Escritorio Vava, admita que nao sabe e encaminhe ao Henrique do TI; nunca complete com exemplos inventados.",
   "Nunca invente catalogo, validade, situacao, politica ou procedimento. Nunca escolha, confirme, aprove, libere ou altere uma solicitacao.",
   "A escolha e a confirmacao sao feitas por cartoes e botoes fora da IA. Se houver uma selecao aguardando confirmacao, uma mudanca de assunto nao confirma nem cancela essa selecao.",
   "Responda em portugues brasileiro, em no maximo 3 frases curtas, sem markdown.",
-  "Retorne SOMENTE JSON com reply, intent e query. Use intent certificate_search quando houver empresa ou documento identificavel na mensagem atual, mesmo sem tipo, data ou outra especificacao; copie o nome ou documento para query. Se faltar a empresa e o documento, use clarification e query vazia."
+  "Retorne SOMENTE JSON com reply, intent e query. Use intent certificate_search quando houver empresa ou documento identificavel na mensagem atual ou em uma mensagem recente do usuario; copie o nome ou documento para query, inclusive quando o usuario usar uma referencia como dela. Se faltar a empresa e o documento, use clarification e query vazia."
 ].join(" ");
 
 function send(res, status, body) {
@@ -84,13 +85,16 @@ function normalizeSearchText(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function hasIdentifiableCatalogQuery(value, sourceMessage) {
+function hasIdentifiableCatalogQuery(value, sourceMessages) {
   const normalized = normalizeSearchText(value);
-  const source = normalizeSearchText(sourceMessage);
+  const sources = sourceMessages.map(normalizeSearchText);
+  const currentSource = sources[sources.length - 1] || "";
   if (!normalized) return false;
-  if (/\d{6,}/.test(normalized.replace(/\D/g, ""))) return source.replace(/\D/g, "").includes(normalized.replace(/\D/g, ""));
-  const meaningful = normalized.split(" ").filter((part) => !["certificado", "certificados", "empresa", "documento", "cnpj", "cpf", "de", "da", "do", "para", "por", "favor", "quero", "preciso"].includes(part));
-  return meaningful.some((part) => /[a-z]{3,}/.test(part) && source.split(" ").includes(part));
+  if (/\d{6,}/.test(normalized.replace(/\D/g, ""))) return sources.some((source, index) => (index === sources.length - 1 || !currentSource.split(" ").some((part) => !GENERIC_QUERY_WORDS.has(part))) && source.replace(/\D/g, "").includes(normalized.replace(/\D/g, "")));
+  const meaningful = normalized.split(" ").filter((part) => !GENERIC_QUERY_WORDS.has(part));
+  const currentMeaningful = currentSource.split(" ").filter((part) => !GENERIC_QUERY_WORDS.has(part));
+  const candidateSources = currentMeaningful.length > 0 ? [currentSource] : sources;
+  return meaningful.some((part) => /[a-z]{3,}/.test(part) && candidateSources.some((source) => source.split(" ").includes(part)));
 }
 
 function createGenerationQueue(maxQueue = MAX_QUEUE) {
@@ -153,7 +157,12 @@ function createConversationService({ fetchImpl = fetch, ollamaUrl = OLLAMA_URL, 
       const history = previous.slice(-MAX_HISTORY);
       return queue.run(async () => {
         const result = await generate([...history, { role: "user", content: message }], phase);
-        if (result.intent !== "certificate_search" || !hasIdentifiableCatalogQuery(result.query, message)) result.query = "";
+        const userMessages = [...history.filter((item) => item.role === "user").map((item) => item.content), message];
+        if (result.intent === "certificate_search" && !hasIdentifiableCatalogQuery(result.query, userMessages)) {
+          result.intent = "clarification";
+          result.reply = "Para pesquisar, preciso do nome da empresa ou do documento. Qual deles você tem?";
+          result.query = "";
+        } else if (result.intent !== "certificate_search") result.query = "";
         const next = [...history, { role: "user", content: message }, { role: "assistant", content: result.reply }].slice(-MAX_HISTORY);
         conversations.set(sessionId, next);
         return result;

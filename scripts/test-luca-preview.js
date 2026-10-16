@@ -57,7 +57,25 @@ async function main() {
       assert.equal(result.body.source, "granite");
       assert.equal(result.body.query, "");
       assert.ok(result.body.reply);
+      assert.doesNotMatch(result.body.reply, /\b(?:estou procurando|vou procurar|encontrei|enviei|envio)\b/i);
     }
+
+    const contextFirst = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: "dialog-context-luca", message: "A empresa se chama Sintetica Alfa", phase: "waiting" } });
+    const contextSecond = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: "dialog-context-luca", message: "Quero o certificado dela", phase: "waiting" } });
+    assert.equal(contextFirst.status, 200);
+    assert.equal(contextSecond.status, 200);
+    assert.ok(!contextSecond.body.query || contextSecond.body.query.toLowerCase().includes("alfa"));
+
+    const correctionFirst = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: "dialog-correction-luca", message: "Preciso do certificado da Sintetica Alfa", phase: "waiting" } });
+    const correctionSecond = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: "dialog-correction-luca", message: "Corrigindo: a empresa correta é Sintetica Beta", phase: "waiting" } });
+    assert.equal(correctionFirst.status, 200);
+    assert.equal(correctionSecond.status, 200);
+    assert.ok(!correctionSecond.body.query || (correctionSecond.body.query.toLowerCase().includes("beta") && !correctionSecond.body.query.toLowerCase().includes("alfa")));
+
+    const internal = exploratory[4] && await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: "dialog-internal-luca", message: exploratory[4], phase: "waiting" } });
+    const internalText = internal.body.reply.toLowerCase();
+    const internalLimitation = /procedimento|política|politica/.test(internalText) && !/nao sei|não sei|nao possuo|não possuo|sem acesso|não tenho|nao tenho/.test(internalText);
+    console.log(JSON.stringify({ contextualQuery: contextSecond.body.query, correctedQuery: correctionSecond.body.query, correctionQueryMissing: !correctionSecond.body.query, internalLimitation }, null, 2));
 
     const greeting = await request(port, "/api/portal/luca/conversa", { method: "POST", body: { sessionId: sessionA, message: "Oi, tudo bem?", phase: "waiting" } });
     assert.equal(greeting.status, 200);
