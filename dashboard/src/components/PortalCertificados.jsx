@@ -49,7 +49,7 @@ function latestRequest(items) {
   })[0] || null
 }
 
-function PortalSidebar({ session, latestRequest, requestsLoading, requestsError, hasHistory }) {
+function PortalSidebar({ session, latestRequest, requestsLoading, requestsError, hasHistory, onShowHistory }) {
   return <aside className="portal-sidebar">
     <a className="portal-brand" href="/" aria-label="Voltar à entrada do HenriTech">
       <span className="portal-brand-mark">HT</span>
@@ -63,7 +63,7 @@ function PortalSidebar({ session, latestRequest, requestsLoading, requestsError,
       {!requestsLoading && requestsError && <p>Não foi possível carregar.</p>}
       {!requestsLoading && !requestsError && !latestRequest && <p>Você ainda não fez solicitações.</p>}
       {!requestsLoading && !requestsError && latestRequest && <div className="portal-latest-request-card"><strong>{latestRequest.certificado?.nomeExibicao || 'Certificado'}</strong><span>{requestStateLabel(latestRequest)}</span></div>}
-      {!requestsLoading && !requestsError && hasHistory && <a href="#portal-history">Ver histórico completo</a>}
+      {!requestsLoading && !requestsError && hasHistory && <button type="button" className="portal-history-link" onClick={onShowHistory}>Ver histórico completo</button>}
     </section>
     <a className="portal-entry-link" href="/">Voltar à entrada</a>
   </aside>
@@ -91,6 +91,7 @@ export default function PortalCertificados() {
   const [catalogError, setCatalogError] = useState('')
   const [requestsError, setRequestsError] = useState('')
   const [traditionalSearchOpen, setTraditionalSearchOpen] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
 
   async function loadCatalog(targetPage = catalogPage, targetSearch = search, targetYear = year) {
     setCatalogLoading(true)
@@ -178,7 +179,7 @@ export default function PortalCertificados() {
 
   if (loading) return <main className="portal-shell"><PortalSidebar /><div className="portal-main"><p>Identificando esta estação...</p></div></main>
   return <main className="portal-shell">
-    <PortalSidebar session={session} latestRequest={lastRequest} requestsLoading={requestsLoading} requestsError={requestsError} hasHistory={orderedRequests.length > 0} />
+    <PortalSidebar session={session} latestRequest={lastRequest} requestsLoading={requestsLoading} requestsError={requestsError} hasHistory={orderedRequests.length > 0} onShowHistory={() => setShowHistory(true)} />
     <div className="portal-main">
       <header className="portal-topbar"><div><span className="portal-kicker">Escritório Vavá · ambiente seguro</span><h1>Portal de certificados</h1>{CERTIFICATE_PORTAL_READ_ONLY && <p className="notice">Teste — somente consulta. Criação de solicitações desativada.</p>}</div>{session && <div className="portal-session"><span className="portal-status-dot" />{session.hostname}{session.usuarioWindows ? ` · ${session.usuarioWindows}` : ''}</div>}</header>
       {session && <div className="portal-session-tools"><span>{session.identificacao}</span><BrowserNotificationControls basePath="/api/portal/browser-notifications" label="Notificações desta estação" /></div>}
@@ -209,7 +210,7 @@ export default function PortalCertificados() {
                {selected && !CERTIFICATE_PORTAL_READ_ONLY && <form onSubmit={submit} className="portal-form"><h2>Solicitar: {selected.nomeExibicao}</h2><p className="muted">{selected.documento || 'Documento não identificado'} · {selected.extensao?.replace('.', '').toUpperCase()} · {selected.anoReferencia || 'Ano não informado'}</p><label htmlFor="portal-reason">Motivo (opcional)</label><textarea id="portal-reason" maxLength="500" value={motivo} onChange={(event) => setMotivo(event.target.value)} rows="3" disabled={submitting} /><button type="submit" className="btn-update" disabled={submitting}>{submitting ? 'Solicitando...' : 'Solicitar'}</button></form>}
             </section>}
          </div>
-        <section className="portal-panel portal-history" id="portal-history" aria-live="polite" aria-labelledby="portal-history-title">
+         {showHistory && <section className="portal-panel portal-history" id="portal-history" aria-live="polite" aria-labelledby="portal-history-title">
           <div className="portal-panel-heading"><div><span className="portal-kicker">Histórico</span><h2 id="portal-history-title">Minhas solicitações</h2></div>{requests?.total ? <span className="portal-count">{requests.total}</span> : null}</div>
           {requestsLoading && <p className="notice">Carregando solicitações...</p>}
           {!requestsLoading && requestsError && <><p className="notice error">{requestsError}</p><button type="button" className="btn-cancel portal-retry" onClick={() => loadRequests(requestsPage)}>Tentar novamente</button></>}
@@ -217,7 +218,7 @@ export default function PortalCertificados() {
           {!requestsLoading && !requestsError && requests?.items.length > 0 && <div className="portal-request-list">{visibleRequests.map((request) => <article className={`portal-request request-card request-card-${requestStateLabel(request).toLowerCase()}`} key={request.id}><div className="portal-request-heading"><strong>{request.certificado?.nomeExibicao || 'Certificado'}</strong><span className="request-state">{requestStateLabel(request)}</span></div>{request.motivo && <small>Motivo: {request.motivo}</small>}{request.motivoNegativa && <small>Motivo da negativa: {request.motivoNegativa}</small>}{releaseMessage(request) && <small>{releaseMessage(request)}</small>}{request.liberacao?.expiresAt && <small>Disponível até: {new Date(request.liberacao.expiresAt).toLocaleString()}</small>}</article>)}</div>}
           {!requestsLoading && !requestsError && requests?.items.length > visibleRequests.length && <button type="button" className="portal-request-toggle" onClick={() => setShowOlderRequests((visible) => !visible)}>{showOlderRequests ? 'Recolher solicitações anteriores' : 'Ver solicitações anteriores'}</button>}
           {!requestsLoading && !requestsError && requests?.totalPages > 1 && <div className="certificate-pagination"><button type="button" onClick={() => setRequestsPage((current) => Math.max(1, current - 1))} disabled={requestsPage <= 1}>Anterior</button><span>Página {requestsPage} de {requests.totalPages}</span><button type="button" onClick={() => setRequestsPage((current) => Math.min(requests.totalPages, current + 1))} disabled={requestsPage >= requests.totalPages}>Próxima</button></div>}
-        </section>
+         </section>}
       </>}
     </div>
   </main>
