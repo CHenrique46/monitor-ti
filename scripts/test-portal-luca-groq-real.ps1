@@ -1,7 +1,16 @@
 [CmdletBinding()]
 param(
-  [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot ".."))
+  [string]$RepositoryRoot = $null
 )
+
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+  $RepositoryRoot = [IO.Path]::GetFullPath((Join-Path $scriptRoot ".."))
+}
+$RepositoryRoot = [IO.Path]::GetFullPath($RepositoryRoot)
+if (-not (Test-Path -LiteralPath (Join-Path $RepositoryRoot "scripts\test-portal-luca-groq-real.js"))) { throw "RepositoryRoot inválido: runner do teste não encontrado." }
 
 $secureKey = Read-Host "GROQ_API_KEY (entrada oculta)" -AsSecureString
 $keyPtr = [IntPtr]::Zero
@@ -24,6 +33,7 @@ try {
   $startInfo.RedirectStandardError = $true
   $startInfo.EnvironmentVariables["LUCA_PROVIDER"] = "groq"
   $startInfo.EnvironmentVariables["LUCA_GROQ_MODEL"] = "openai/gpt-oss-20b"
+  $startInfo.EnvironmentVariables["LUCA_GROQ_FOCUSED_CASES"] = "true"
   $startInfo.EnvironmentVariables["GROQ_API_KEY"] = $plainKey
 
   $process = New-Object System.Diagnostics.Process

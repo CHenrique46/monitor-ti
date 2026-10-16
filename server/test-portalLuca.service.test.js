@@ -31,7 +31,11 @@ test("selects Groq explicitly and sends only the private backend credential", as
   assert.equal(request.url, "https://api.groq.com/openai/v1/chat/completions");
   assert.equal(request.options.headers.Authorization, "Bearer synthetic-key-not-for-production");
   assert.equal(request.body.model, "openai/gpt-oss-20b");
+  assert.equal(request.body.max_tokens, 512);
+  assert.equal(request.body.reasoning_effort, "low");
   assert.deepEqual(request.body.response_format, { type: "json_object" });
+  assert.match(request.body.messages[0].content, /Nome completo ou parcial da empresa basta/);
+  assert.match(request.body.messages[0].content, /certificate_search exige query identificável/);
   assert.equal("tools" in request.body, false);
   assert.equal(logs.some((entry) => entry.includes("synthetic-key-not-for-production")), false);
   assert.equal(logs.some((entry) => entry.includes("Qual empresa")), false);
@@ -66,6 +70,7 @@ test("forces unverifiable catalog queries back to clarification", async () => {
   const result = await service.converse({ conversationKey: "7", sessionId: "session-2", message: "Preciso de um certificado", phase: "waiting" });
   assert.equal(result.intent, "clarification");
   assert.equal(result.query, "");
+  assert.equal(result.reply, "Informe o nome ou documento da empresa para eu iniciar a pesquisa.");
 });
 
 test("accepts partial names, keeps correction context, and resolves pronoun context without inventing names", async () => {
@@ -107,6 +112,8 @@ test("returns timeout as a controlled failure", async () => {
 
 test("normalizes malformed model output without exposing arbitrary intent", () => {
   assert.deepEqual(normalizeResponse('{"reply":"x","intent":"approve","query":"secret"}'), { intent: "conversation", reply: "x", query: "" });
+  assert.deepEqual(normalizeResponse('{"reply":"Informe a empresa.","intent":"certificate_search","query":""}'), { intent: "clarification", reply: "Informe o nome ou documento da empresa para eu iniciar a pesquisa.", query: "" });
+  assert.deepEqual(normalizeResponse('{"reply":"Encontrei","intent":"conversation","query":"Empresa"}'), { intent: "clarification", reply: "Informe o nome ou documento da empresa para eu iniciar a pesquisa.", query: "" });
   assert.equal(sanitizeMessage("senha: segredo").includes("segredo"), false);
 });
 

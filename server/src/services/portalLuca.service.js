@@ -9,18 +9,23 @@ const MAX_QUERY_LENGTH = 160;
 const REQUEST_TIMEOUT_MS = 15000;
 const CONVERSATION_TTL_MS = 15 * 60 * 1000;
 const MAX_CONVERSATIONS = 256;
+const SAFE_SEARCH_CLARIFICATION = "Informe o nome ou documento da empresa para eu iniciar a pesquisa.";
+const SEARCH_CLAIM_PATTERN = /encontrei|localizei|vou (?:pesquisar|consultar)|pesquisa realizada|certificado encontrado/i;
 const GENERIC_WORDS = new Set(["a", "o", "as", "os", "um", "uma", "de", "da", "do", "das", "dos", "para", "por", "favor", "quero", "preciso", "necessito", "certificado", "certificados", "empresa", "documento", "cnpj", "cpf", "qual", "que", "dela", "dele", "esse", "essa", "isso"]);
 
 const SYSTEM_PROMPT = [
-  "Voce e Luca, assistente interno do Escritorio Vava.",
-  "Responda em portugues brasileiro, em no maximo 3 frases curtas, sem markdown.",
-  "Ajude somente a conversar e identificar uma empresa ou documento para pesquisa de certificado.",
-  "Nunca invente catalogo, validade, situacao, politica ou procedimento.",
-  "Nunca escolha, confirme, aprove, libere, altere ou crie uma solicitacao.",
-  "A pesquisa e qualquer confirmacao sao feitas fora da IA por fluxos controlados.",
-  "Para problemas de computador ou politicas internas, encaminhe ao Henrique do TI.",
-  "Retorne SOMENTE JSON com reply, intent e query. intent deve ser conversation, clarification ou certificate_search.",
-  "Use certificate_search somente quando a mensagem do usuario trouxer empresa ou documento identificavel; caso contrario use clarification."
+  "Você é Luca, assistente do portal de certificados digitais.",
+  "Responda em português brasileiro, em no máximo 3 frases curtas, sem markdown.",
+  "O atendimento já está no portal de certificados digitais.",
+  "Nome completo ou parcial da empresa basta para iniciar a pesquisa.",
+  "Documento significa CPF ou CNPJ e é uma alternativa ao nome, não um dado obrigatório.",
+  "Não pergunte tipo de certificado ou documento antes da busca quando houver empresa identificável.",
+  "Uma correção de empresa substitui a anterior; a busca controlada resolve a ambiguidade pelos resultados reais.",
+  "Nunca invente catálogo, validade, situação, política ou procedimento.",
+  "Nunca escolha, confirme, aprove, libere, altere ou crie uma solicitação.",
+  "Para perguntas sem informação disponível, admita claramente que não tem essa informação, sem inventar procedimento.",
+  "Retorne SOMENTE JSON com reply, intent e query. certificate_search exige query identificável; conversation e clarification devem usar query vazia.",
+  "Use certificate_search para pedido de busca ou correção com empresa ou documento identificável; caso contrário use clarification ou conversation conforme o contexto."
 ].join(" ");
 
 function makeError(code, message, status = 503) {
@@ -63,7 +68,10 @@ function normalizeResponse(value) {
   }
   if (!parsed || typeof parsed !== "object" || typeof parsed.reply !== "string" || typeof parsed.intent !== "string" || typeof parsed.query !== "string") throw makeError("LUCA_RESPONSE_INVALID", "A resposta do Luca não pôde ser validada.");
   const intent = parsed.intent === "certificate_search" ? "certificate_search" : parsed.intent === "clarification" ? "clarification" : "conversation";
-  return { intent, reply: String(parsed.reply || parsed.message || "").trim().slice(0, 500), query: intent === "certificate_search" ? String(parsed.query || "").trim().slice(0, MAX_QUERY_LENGTH) : "" };
+  if (intent === "certificate_search" && !String(parsed.query || "").trim()) return { intent: "clarification", reply: SAFE_SEARCH_CLARIFICATION, query: "" };
+  const reply = String(parsed.reply || parsed.message || "").trim().slice(0, 500);
+  if (intent !== "certificate_search" && String(parsed.query || "").trim() && SEARCH_CLAIM_PATTERN.test(reply)) return { intent: "clarification", reply: SAFE_SEARCH_CLARIFICATION, query: "" };
+  return { intent, reply, query: intent === "certificate_search" ? String(parsed.query || "").trim().slice(0, MAX_QUERY_LENGTH) : "" };
 }
 
 function hasCatalogSignal(query, userMessages) {
@@ -128,7 +136,7 @@ function createPortalLucaService({
     try {
       const messages = [{ role: "system", content: `${SYSTEM_PROMPT} Fase: ${phase}.` }, ...history];
       const request = provider === "groq"
-        ? { model: activeModel, messages, temperature: 0, max_tokens: 128, response_format: { type: "json_object" } }
+        ? { model: activeModel, messages, temperature: 0, max_tokens: 512, reasoning_effort: "low", response_format: { type: "json_object" } }
         : { model: activeModel, stream: false, format: { type: "object", properties: { reply: { type: "string" }, intent: { type: "string" }, query: { type: "string" } }, required: ["reply", "intent", "query"] }, messages, options: { num_ctx: 2048, temperature: 0, num_predict: 128 }, keep_alive: "5m" };
       const headers = { "Content-Type": "application/json" };
       if (provider === "groq") headers.Authorization = `Bearer ${String(groqApiKey).trim()}`;
@@ -161,7 +169,7 @@ function createPortalLucaService({
         const current = conversations.get(key) || { history: [], updatedAt: now() };
         const userMessages = current.history.filter((item) => item.role === "user").map((item) => item.content).concat(sanitized);
         const result = await generate([...current.history.slice(-MAX_HISTORY), { role: "user", content: sanitized }], String(phase).slice(0, 40));
-        if (result.intent === "certificate_search" && (!hasCatalogSignal(result.query, userMessages) || !hasOnlyUserTerms(result.query, userMessages))) { result.intent = "clarification"; result.query = ""; }
+        if (result.intent === "certificate_search" && (!hasCatalogSignal(result.query, userMessages) || !hasOnlyUserTerms(result.query, userMessages))) { result.intent = "clarification"; result.query = ""; result.reply = SAFE_SEARCH_CLARIFICATION; }
         if (result.intent !== "certificate_search") result.query = "";
         conversations.set(key, { history: [...current.history, { role: "user", content: sanitized }, { role: "assistant", content: result.reply }].slice(-MAX_HISTORY), updatedAt: now() });
          return { ...result, source: provider, model: activeModel };
